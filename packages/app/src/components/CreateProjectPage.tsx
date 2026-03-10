@@ -44,10 +44,17 @@ export function CreateProjectPage() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [createFolderError, setCreateFolderError] = useState<string | null>(null)
+  const [history, setHistory] = useState<string[]>([])
   const newFolderInputRef = useRef<HTMLInputElement>(null)
+  const listingRef = useRef<DirListing | null>(null)
   const navigate = useNavigate()
 
-  const fetchDir = useCallback(async (dirPath?: string) => {
+  // Keep ref in sync with state
+  useEffect(() => {
+    listingRef.current = listing
+  }, [listing])
+
+  const fetchDir = useCallback(async (dirPath?: string, addToHistory: boolean = true) => {
     setLoading(true)
     setError(null)
     try {
@@ -55,6 +62,10 @@ export function CreateProjectPage() {
       const res = await fetch(`/api/files${params}`)
       if (!res.ok) throw new Error('Failed to list directory')
       const data: DirListing = await res.json()
+      const currentListing = listingRef.current
+      if (addToHistory && currentListing && data.current !== currentListing.current) {
+        setHistory((prev) => [...prev, currentListing.current])
+      }
       setListing(data)
       const dirName = getDirName(data.current)
       if (dirName) setProjectName(dirName)
@@ -100,6 +111,13 @@ export function CreateProjectPage() {
     setCreateFolderError(null)
   }
 
+  const handleGoBack = () => {
+    if (history.length === 0 || !listing) return
+    const previousPath = history[history.length - 1]
+    setHistory((prev) => prev.slice(0, -1))
+    fetchDir(previousPath, false)
+  }
+
   const handleCreate = async () => {
     if (!listing || !projectName.trim()) return
     try {
@@ -130,7 +148,17 @@ export function CreateProjectPage() {
     <div className="min-h-dvh flex flex-col bg-background">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            if (history.length > 0 && listing) {
+              handleGoBack()
+            } else {
+              navigate('/')
+            }
+          }}
+        >
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <h1 className="text-lg font-semibold tracking-tight">New Project</h1>
