@@ -145,7 +145,7 @@ export function CreateProjectPage() {
   const directories = listing?.items.filter((item) => item.isDirectory) ?? []
 
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
+    <div className="h-dvh flex flex-col bg-background overflow-hidden">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
         <Button
@@ -165,105 +165,102 @@ export function CreateProjectPage() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Directory Browser */}
-        <div className="flex-1 flex flex-col lg:border-r min-h-0">
-          {/* Current path + actions */}
-          {listing && (
-            <div className="px-4 py-2.5 border-b bg-secondary/30 shrink-0">
-              <div className="text-xs text-muted-foreground font-mono truncate">{listing.current}</div>
-              <div className="flex gap-2 mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setIsCreatingFolder(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                  New folder
-                </Button>
-              </div>
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Current path + actions */}
+        {listing && (
+          <div className="px-4 py-2.5 border-b bg-secondary/30 shrink-0">
+            <div className="text-xs text-muted-foreground font-mono truncate">{listing.current}</div>
+            <div className="flex gap-2 mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setIsCreatingFolder(true)}
+              >
+                <Plus className="h-3 w-3" />
+                New folder
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Directory list - scrollable */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {loading && (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading...
             </div>
           )}
-
-          {/* Directory list */}
-          <div className="flex-1 overflow-y-auto">
-            {loading && (
-              <div className="flex items-center justify-center py-8 text-muted-foreground text-sm gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading...
-              </div>
-            )}
-            {error && (
-              <div className="px-4 py-3 text-destructive text-sm">{error}</div>
-            )}
-            {listing && (
-              <div className="divide-y">
-                {/* Create folder input */}
-                {isCreatingFolder && (
-                  <div className="px-4 py-3 bg-secondary/20">
-                    <div className="flex gap-2">
-                      <Input
-                        ref={newFolderInputRef}
-                        value={newFolderName}
-                        onChange={(e) => setNewFolderName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleCreateFolder()
-                          if (e.key === 'Escape') cancelCreateFolder()
-                        }}
-                        placeholder="Folder name"
-                        className="h-8 text-sm"
-                      />
-                      <Button size="sm" className="h-8" onClick={handleCreateFolder}>Create</Button>
-                      <Button size="sm" variant="ghost" className="h-8" onClick={cancelCreateFolder}>Cancel</Button>
-                    </div>
-                    {createFolderError && (
-                      <p className="text-destructive text-xs mt-2">{createFolderError}</p>
-                    )}
+          {error && (
+            <div className="px-4 py-3 text-destructive text-sm">{error}</div>
+          )}
+          {listing && (
+            <div className="divide-y">
+              {/* Create folder input */}
+              {isCreatingFolder && (
+                <div className="px-4 py-3 bg-secondary/20">
+                  <div className="flex gap-2">
+                    <Input
+                      ref={newFolderInputRef}
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleCreateFolder()
+                        if (e.key === 'Escape') cancelCreateFolder()
+                      }}
+                      placeholder="Folder name"
+                      className="h-8 text-sm"
+                    />
+                    <Button size="sm" className="h-8" onClick={handleCreateFolder}>Create</Button>
+                    <Button size="sm" variant="ghost" className="h-8" onClick={cancelCreateFolder}>Cancel</Button>
                   </div>
-                )}
+                  {createFolderError && (
+                    <p className="text-destructive text-xs mt-2">{createFolderError}</p>
+                  )}
+                </div>
+              )}
 
-                {/* Go up */}
-                {listing.current !== listing.parent && (
-                  <button
-                    type="button"
-                    onClick={() => fetchDir(listing.parent)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors text-muted-foreground"
-                  >
-                    <FolderUp className="h-4 w-4" />
-                    <span className="text-sm">Go up</span>
-                  </button>
-                )}
+              {/* Go up */}
+              {listing.current !== listing.parent && (
+                <button
+                  type="button"
+                  onClick={() => fetchDir(listing.parent)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors text-muted-foreground"
+                >
+                  <FolderUp className="h-4 w-4" />
+                  <span className="text-sm">Go up</span>
+                </button>
+              )}
 
-                {/* Directories */}
-                {directories.map((item) => (
-                  <button
-                    key={item.path}
-                    type="button"
-                    onClick={() => fetchDir(item.path)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors"
-                  >
-                    <Folder className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm truncate">{item.name}</span>
-                  </button>
-                ))}
+              {/* Directories */}
+              {directories.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => fetchDir(item.path)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors"
+                >
+                  <Folder className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm truncate">{item.name}</span>
+                </button>
+              ))}
 
-                {directories.length === 0 && !isCreatingFolder && (
-                  <div className="px-4 py-8 text-center text-muted-foreground text-sm">
-                    No subdirectories
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+              {directories.length === 0 && !isCreatingFolder && (
+                <div className="px-4 py-8 text-center text-muted-foreground text-sm">
+                  No subdirectories
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Project Details */}
-        <div className="lg:w-96 p-4 lg:p-6 flex flex-col bg-secondary/10 border-t lg:border-t-0 shrink-0">
-          <div className="flex flex-col gap-4">
+        {/* Project Name - fixed at bottom */}
+        <div className="p-4 border-t bg-secondary/10 shrink-0">
+          <div className="flex flex-col gap-3">
             {/* Icon + Name */}
             <div className="flex flex-col gap-2">
-              <Label>Project Name</Label>
+              <Label className="text-sm font-medium">Project Name</Label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -280,7 +277,7 @@ export function CreateProjectPage() {
               </div>
 
               {showIconPicker && (
-                <div className="p-2 rounded-lg border bg-card">
+                <div className="p-2 rounded-lg border bg-card max-h-80 overflow-y-auto">
                   <div className="grid grid-cols-8 gap-1">
                     {PROJECT_ICONS.map((icon, i) => (
                       <button
@@ -301,22 +298,27 @@ export function CreateProjectPage() {
 
             {/* Path preview */}
             {listing && (
-              <div className="flex flex-col gap-1">
-                <Label className="text-muted-foreground">Path</Label>
-                <p className="text-xs text-muted-foreground font-mono break-all">{listing.current}</p>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium">Path:</span>
+                <span className="font-mono truncate">{listing.current}</span>
               </div>
             )}
 
             {/* Actions */}
-            <div className="flex flex-col gap-2 mt-2">
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="ghost"
+                onClick={() => navigate('/')}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
               <Button
                 onClick={handleCreate}
                 disabled={!projectName.trim() || !listing || creating}
+                className="flex-1"
               >
                 {creating ? 'Creating...' : 'Create Project'}
-              </Button>
-              <Button variant="ghost" onClick={() => navigate('/')}>
-                Cancel
               </Button>
             </div>
           </div>
