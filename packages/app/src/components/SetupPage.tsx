@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { authFetch } from '@/lib/auth'
 import type { DetectResult } from '@codeclaws/shared'
 
 const PROVIDERS = [
@@ -17,6 +18,7 @@ const PROVIDERS = [
 
 interface SetupPageProps {
   onComplete: () => void
+  onUnauthorized?: () => void
 }
 
 interface MaskedModel {
@@ -28,7 +30,7 @@ interface MaskedModel {
   baseUrl?: string
 }
 
-export function SetupPage({ onComplete }: SetupPageProps) {
+export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
   // Model list
   const [models, setModels] = useState<MaskedModel[]>([])
   const [defaultModelId, setDefaultModelId] = useState<string>()
@@ -59,12 +61,16 @@ export function SetupPage({ onComplete }: SetupPageProps) {
 
   const loadModels = useCallback(async () => {
     try {
-      const res = await fetch('/api/setup/models')
+      const res = await authFetch('/api/setup/models', {}, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       const data = await res.json()
       setModels(data.models)
       setDefaultModelId(data.defaultModelId)
     } catch {}
-  }, [])
+  }, [onUnauthorized])
 
   useEffect(() => { loadModels() }, [loadModels])
 
@@ -103,7 +109,11 @@ export function SetupPage({ onComplete }: SetupPageProps) {
   async function testModel(id: string) {
     setTestStatus((prev) => ({ ...prev, [id]: { status: 'testing' } }))
     try {
-      const res = await fetch(`/api/setup/models/${id}/test`, { method: 'POST' })
+      const res = await authFetch(`/api/setup/models/${id}/test`, { method: 'POST' }, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       const data = await res.json()
       setTestStatus((prev) => ({
         ...prev,
@@ -120,13 +130,17 @@ export function SetupPage({ onComplete }: SetupPageProps) {
     setImporting(true)
     setError('')
     try {
-      const res = await fetch('/api/setup/use-claude', {
+      const res = await authFetch('/api/setup/use-claude', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           subscriptionType: detect?.auth?.subscriptionType,
         }),
-      })
+      }, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       if (!res.ok) {
         const data = await res.json()
         throw new Error(data.error || 'Failed to import')
@@ -145,7 +159,7 @@ export function SetupPage({ onComplete }: SetupPageProps) {
     setError('')
     setSaving(true)
     try {
-      const res = await fetch('/api/setup/models', {
+      const res = await authFetch('/api/setup/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -154,7 +168,11 @@ export function SetupPage({ onComplete }: SetupPageProps) {
           apiKey,
           baseUrl: baseUrl || undefined,
         }),
-      })
+      }, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       if (!res.ok) {
         const data = await res.json()
         throw new Error(data.error || 'Failed to save')
@@ -170,7 +188,11 @@ export function SetupPage({ onComplete }: SetupPageProps) {
 
   async function handleDelete(id: string) {
     try {
-      await fetch(`/api/setup/models/${id}`, { method: 'DELETE' })
+      const res = await authFetch(`/api/setup/models/${id}`, { method: 'DELETE' }, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       testedRef.current.delete(id)
       setTestStatus((prev) => { const next = { ...prev }; delete next[id]; return next })
       await loadModels()
@@ -179,11 +201,15 @@ export function SetupPage({ onComplete }: SetupPageProps) {
 
   async function handleSetDefault(id: string) {
     try {
-      await fetch('/api/setup/default-model', {
+      const res = await authFetch('/api/setup/default-model', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelId: id }),
-      })
+      }, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       setDefaultModelId(id)
     } catch {}
   }

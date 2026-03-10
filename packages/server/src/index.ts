@@ -1,7 +1,9 @@
 import express from 'express'
-import setupRouter from './api/setup'
-import filesRouter from './api/files'
-import projectsRouter from './api/projects'
+import setupRouter from './api/setup.js'
+import filesRouter from './api/files.js'
+import projectsRouter from './api/projects.js'
+import authRouter from './api/auth.js'
+import { ensureToken, authMiddleware } from './auth/index.js'
 
 const app = express()
 const PORT = 4200
@@ -25,6 +27,13 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() })
 })
 
+// Public auth routes (no token required)
+app.use('/api/auth', authRouter)
+
+// Auth middleware — validates token on all subsequent routes
+app.use(authMiddleware)
+
+// Protected routes (require valid token)
 app.use('/api/setup', setupRouter)
 app.use('/api/files', filesRouter)
 app.use('/api/projects', projectsRouter)
@@ -35,6 +44,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: err.message })
 })
 
-app.listen(PORT, () => {
-  console.log(`[server] listening on http://localhost:${PORT}`)
+// Initialize token and start server
+ensureToken().then(() => {
+  app.listen(PORT, () => {
+    console.log(`[server] listening on http://localhost:${PORT}`)
+  })
 })

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { Plus, Trash2, FolderOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { authFetch } from '@/lib/auth'
 import type { Project } from '@codeclaws/shared'
 
 function formatDate(ts: number): string {
@@ -14,9 +15,10 @@ function formatDate(ts: number): string {
 
 interface ProjectListProps {
   onSelect: (project: Project) => void
+  onUnauthorized?: () => void
 }
 
-export function ProjectList({ onSelect }: ProjectListProps) {
+export function ProjectList({ onSelect, onUnauthorized }: ProjectListProps) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -25,7 +27,11 @@ export function ProjectList({ onSelect }: ProjectListProps) {
   const fetchProjects = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/projects')
+      const res = await authFetch('/api/projects', {}, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       if (!res.ok) throw new Error('Failed to fetch projects')
       const data = await res.json()
       setProjects(data)
@@ -44,7 +50,11 @@ export function ProjectList({ onSelect }: ProjectListProps) {
     e.stopPropagation()
     if (!confirm('Delete this project?')) return
     try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' })
+      const res = await authFetch(`/api/projects/${id}`, { method: 'DELETE' }, onUnauthorized)
+      if (res.status === 401) {
+        onUnauthorized?.()
+        return
+      }
       if (!res.ok) throw new Error('Failed to delete project')
       setProjects((prev) => prev.filter((p) => p.id !== id))
     } catch (err) {
@@ -91,9 +101,8 @@ export function ProjectList({ onSelect }: ProjectListProps) {
     <div className="flex-1 overflow-y-auto p-4 sm:p-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {projects.map((project) => (
-          <button
+          <div
             key={project.id}
-            type="button"
             onClick={() => onSelect(project)}
             className="group text-left p-4 rounded-lg border bg-card hover:bg-accent/50 hover:border-foreground/10 transition-colors cursor-pointer"
           >
@@ -119,7 +128,7 @@ export function ProjectList({ onSelect }: ProjectListProps) {
                 </p>
               </div>
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>

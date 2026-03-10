@@ -6,9 +6,10 @@ import type { Project } from '@codeclaws/shared'
 
 interface HomePageProps {
   onOpenSetup: () => void
+  onUnauthorized?: () => void
 }
 
-export function HomePage({ onOpenSetup }: HomePageProps) {
+export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
   const navigate = useNavigate()
 
   const handleSelectProject = (_project: Project) => {
@@ -32,7 +33,7 @@ export function HomePage({ onOpenSetup }: HomePageProps) {
       </header>
 
       {/* Project list */}
-      <ProjectList onSelect={handleSelectProject} />
+      <ProjectList onSelect={handleSelectProject} onUnauthorized={onUnauthorized} />
     </div>
   )
 }

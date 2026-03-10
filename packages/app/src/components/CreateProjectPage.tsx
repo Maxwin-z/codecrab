@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, FolderUp, Folder, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { authFetch } from '@/lib/auth'
 
 interface FileEntry {
   name: string
@@ -33,7 +34,11 @@ function getDirName(p: string): string {
   return parts[parts.length - 1] || ''
 }
 
-export function CreateProjectPage() {
+interface CreateProjectPageProps {
+  onUnauthorized?: () => void
+}
+
+export function CreateProjectPage({ onUnauthorized }: CreateProjectPageProps) {
   const [listing, setListing] = useState<DirListing | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -59,7 +64,7 @@ export function CreateProjectPage() {
     setError(null)
     try {
       const params = dirPath ? `?path=${encodeURIComponent(dirPath)}` : ''
-      const res = await fetch(`/api/files${params}`)
+      const res = await authFetch(`/api/files${params}`, {}, onUnauthorized)
       if (!res.ok) throw new Error('Failed to list directory')
       const data: DirListing = await res.json()
       const currentListing = listingRef.current
@@ -88,11 +93,11 @@ export function CreateProjectPage() {
     if (!newFolderName.trim() || !listing) return
     setCreateFolderError(null)
     try {
-      const res = await fetch('/api/files/mkdir', {
+      const res = await authFetch('/api/files/mkdir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: listing.current, name: newFolderName.trim() }),
-      })
+      }, onUnauthorized)
       if (!res.ok) {
         const data = await res.json()
         throw new Error(data.error || 'Failed to create folder')
@@ -122,7 +127,7 @@ export function CreateProjectPage() {
     if (!listing || !projectName.trim()) return
     try {
       setCreating(true)
-      const res = await fetch('/api/projects', {
+      const res = await authFetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -130,7 +135,7 @@ export function CreateProjectPage() {
           path: listing.current,
           icon: selectedIcon,
         }),
-      })
+      }, onUnauthorized)
       if (!res.ok) {
         const data = await res.json()
         throw new Error(data.error || 'Failed to create project')
