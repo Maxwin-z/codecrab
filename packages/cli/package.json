@@ -1,0 +1,19 @@
+{
+  "name": "codeclaws",
+  "version": "0.1.0",
+  "description": "AI-powered coding engine with pluggable adapters, MCP extensions, and remote access.",
+  "bin": {
+    "codeclaws": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@codeclaws/server": "workspace:*",
+    "@codeclaws/shared": "workspace:*"
+  },
+  "keywords": ["ai", "coding", "agent", "mcp", "cli"],
+  "license": "MIT"
+}

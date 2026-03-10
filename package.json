@@ -1,0 +1,21 @@
+{
+  "name": "codeclaws",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered coding engine with pluggable adapters, MCP extensions, and remote access.",
+  "packageManager": "pnpm@10.6.5",
+  "scripts": {
+    "dev": "concurrently -n server,app,web -c blue,green,magenta \"pnpm dev:server\" \"pnpm dev:app\" \"pnpm dev:web\"",
+    "dev:server": "pnpm --filter @codeclaws/server dev",
+    "dev:app": "pnpm --filter @codeclaws/app dev",
+    "dev:web": "pnpm --filter @codeclaws/web dev",
+    "dev:relay": "pnpm --filter @codeclaws/relay dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @codeclaws/server start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": ["ai", "coding", "agent", "mcp", "cli"],
+  "license": "MIT"
+}

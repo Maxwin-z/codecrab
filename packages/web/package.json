@@ -1,0 +1,11 @@
+{
+  "name": "@codeclaws/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CodeClaws product website — docs, setup guide, plugin marketplace",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
