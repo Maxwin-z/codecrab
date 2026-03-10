@@ -1,7 +1,8 @@
-// Project & session types
-//
-// Project: id, name, path, icon, modelId?, createdAt, updatedAt
-// Session: id, projectId, engineType, status, createdAt
-// SessionStatus: idle | processing | error
-
-export {}
+export interface Project {
+  id: string
+  name: string
+  path: string
+  icon: string
+  createdAt: number
+  updatedAt: number
+}

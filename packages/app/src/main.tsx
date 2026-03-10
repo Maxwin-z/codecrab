@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { LoadingScreen } from '@/components/LoadingScreen'
 import { SetupPage } from '@/components/SetupPage'
 import { HomePage } from '@/components/HomePage'
+import { CreateProjectPage } from '@/components/CreateProjectPage'
 import './index.css'
 
 function AppRoutes() {
@@ -32,6 +33,11 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/setup" element={<SetupPage onComplete={() => { setStatus('initialized'); navigate('/') }} />} />
+      <Route path="/projects/new" element={
+        status === 'initialized'
+          ? <CreateProjectPage />
+          : <Navigate to="/setup" replace />
+      } />
       <Route path="/" element={
         status === 'initialized'
           ? <HomePage onOpenSetup={() => navigate('/setup')} />
