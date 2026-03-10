@@ -1,6 +1,9 @@
 // WebSocket module — connection management and message routing with Claude SDK
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'http'
+import fs from 'fs/promises'
+import path from 'path'
+import os from 'os'
 import type {
   ClientMessage,
   ServerMessage,
@@ -25,6 +28,87 @@ import {
 
 // Export for API use
 export { getSessionStatuses as getSessions }
+
+// --- Session persistence ---
+const SESSIONS_DIR = path.join(os.homedir(), '.codeclaws', 'sessions')
+
+async function ensureSessionsDir() {
+  await fs.mkdir(SESSIONS_DIR, { recursive: true })
+}
+
+function sessionFilePath(sessionId: string): string {
+  // Sanitize sessionId to prevent path traversal
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+  return path.join(SESSIONS_DIR, `${safe}.json`)
+}
+
+async function persistSession(session: Session) {
+  try {
+    await ensureSessionsDir()
+    const data = {
+      sessionId: session.sessionId,
+      sdkSessionId: session.sdkSessionId,
+      projectId: session.projectId,
+      cwd: session.cwd,
+      messages: session.messages,
+      status: session.status,
+      lastModified: session.lastModified,
+      summary: session.summary,
+      firstPrompt: session.firstPrompt,
+    }
+    await fs.writeFile(sessionFilePath(session.sessionId), JSON.stringify(data, null, 2), 'utf-8')
+  } catch (err) {
+    console.error(`[sessions] Failed to persist session ${session.sessionId}:`, err)
+  }
+}
+
+async function deletePersistedSession(sessionId: string) {
+  try {
+    await fs.unlink(sessionFilePath(sessionId))
+  } catch {
+    // File may not exist, ignore
+  }
+}
+
+async function loadPersistedSessions() {
+  try {
+    await ensureSessionsDir()
+    const files = await fs.readdir(SESSIONS_DIR)
+    let loaded = 0
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      try {
+        const content = await fs.readFile(path.join(SESSIONS_DIR, file), 'utf-8')
+        const data = JSON.parse(content)
+        if (data.sessionId && !sessions.has(data.sessionId)) {
+          const session: Session = {
+            sessionId: data.sessionId,
+            sdkSessionId: data.sdkSessionId,
+            projectId: data.projectId,
+            cwd: data.cwd,
+            messages: data.messages || [],
+            status: 'idle', // Always start as idle on reload
+            lastModified: data.lastModified || Date.now(),
+            summary: data.summary,
+            firstPrompt: data.firstPrompt,
+          }
+          sessions.set(session.sessionId, session)
+          loaded++
+        }
+      } catch (err) {
+        console.error(`[sessions] Failed to load session file ${file}:`, err)
+      }
+    }
+    if (loaded > 0) {
+      console.log(`[sessions] Loaded ${loaded} persisted sessions from disk`)
+    }
+  } catch (err) {
+    console.error('[sessions] Failed to load persisted sessions:', err)
+  }
+}
+
+// Load persisted sessions on module init
+loadPersistedSessions()
 
 interface Client {
   ws: WebSocket
@@ -73,6 +157,7 @@ function getOrCreateSession(client: Client): Session {
   }
   sessions.set(sessionId, session)
   client.sessionId = sessionId
+  persistSession(session)
   return session
 }
 
@@ -89,6 +174,7 @@ function resumeSession(client: Client, sessionId: string): Session | null {
   client.sessionId = sessionId
   session.status = 'idle'
   session.lastModified = Date.now()
+  persistSession(session)
   return session
 }
 
@@ -97,6 +183,9 @@ export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[]
   const result: SessionInfo[] = []
 
   for (const session of sessions.values()) {
+    // Skip empty sessions (no messages = nothing to resume)
+    if (session.messages.length === 0) continue
+
     // Filter by project if specified
     if (projectId && session.projectId !== projectId) continue
 
@@ -124,7 +213,11 @@ export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[]
 
 // Delete a session
 export function deleteSession(sessionId: string): boolean {
-  return sessions.delete(sessionId)
+  const deleted = sessions.delete(sessionId)
+  if (deleted) {
+    deletePersistedSession(sessionId)
+  }
+  return deleted
 }
 
 // Broadcast message to all clients in a project
@@ -293,6 +386,8 @@ function getOrCreateSessionForClient(client: Client, clientState: import('../eng
     session.cwd = projectState.cwd
   }
 
+  persistSession(session)
+
   // Notify client of new session
   sendToClient(client, {
     type: 'system',
@@ -349,6 +444,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         session.firstPrompt = msg.prompt.slice(0, 100)
       }
 
+      persistSession(session)
+
       // Add to project state if in project
       if (client.projectId) {
         const projectState = getOrCreateProjectState(client.projectId)
@@ -403,6 +500,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             if (session) {
               // Store the SDK session ID separately from local session ID
               session.sdkSessionId = sdkSessionId
+              persistSession(session)
               if (client.projectId) {
                 const projectState = getOrCreateProjectState(client.projectId)
                 projectState.sessionId = sdkSessionId
@@ -483,6 +581,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             })
           }
 
+          persistSession(session)
+
           // Send final assistant message
           broadcastToProject(client.projectId, {
             type: 'assistant_text',
@@ -512,12 +612,9 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           abortQuery(clientState)
         }
 
-        // Clear session
+        // Persist old session state before clearing (keeps history on disk)
         if (session) {
-          session.messages = []
-          session.summary = undefined
-          session.firstPrompt = undefined
-          session.lastModified = Date.now()
+          persistSession(session)
         }
 
         // Clear project state
@@ -533,6 +630,9 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         clientState.accumulatingThinking = ''
         clientState.currentToolCalls = []
 
+        // Detach client from old session
+        client.sessionId = undefined
+
         sendToClient(client, { type: 'cleared' })
 
         // Create new session
@@ -547,6 +647,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         }
         sessions.set(newSessionId, newSession)
         client.sessionId = newSessionId
+        persistSession(newSession)
 
         sendToClient(client, {
           type: 'system',
