@@ -10,6 +10,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@codeclaws/shared": "workspace:*",
     "express": "^5.2.1"
   },
