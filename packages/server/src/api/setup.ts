@@ -214,4 +214,77 @@ router.post('/use-claude', async (req, res) => {
   res.status(201).json({ id })
 })
 
+// POST /api/setup/models/:id/test — test if a model's API key is valid
+router.post('/models/:id/test', async (req, res) => {
+  const settings = await readModels()
+  const model = settings.models.find((m: ModelConfig) => m.id === req.params.id)
+  if (!model) {
+    res.status(404).json({ ok: false, error: 'Model not found' })
+    return
+  }
+
+  // CLI-managed auth — nothing to test via HTTP
+  if (model.configDir) {
+    res.json({ ok: true, skipped: true })
+    return
+  }
+
+  if (!model.apiKey) {
+    res.json({ ok: false, error: 'No API key configured' })
+    return
+  }
+
+  try {
+    let testUrl: string
+    const headers: Record<string, string> = {}
+
+    switch (model.provider) {
+      case 'anthropic':
+        testUrl = `${model.baseUrl || 'https://api.anthropic.com'}/v1/models`
+        headers['x-api-key'] = model.apiKey
+        headers['anthropic-version'] = '2023-06-01'
+        break
+      case 'openai':
+        testUrl = `${model.baseUrl || 'https://api.openai.com'}/v1/models`
+        headers['Authorization'] = `Bearer ${model.apiKey}`
+        break
+      case 'google':
+        testUrl = `${model.baseUrl || 'https://generativelanguage.googleapis.com'}/v1beta/models?key=${model.apiKey}`
+        break
+      case 'custom':
+        if (!model.baseUrl) {
+          res.json({ ok: false, error: 'No base URL configured' })
+          return
+        }
+        testUrl = `${model.baseUrl.replace(/\/+$/, '')}/v1/models`
+        headers['Authorization'] = `Bearer ${model.apiKey}`
+        break
+      default:
+        res.json({ ok: false, error: `Unknown provider: ${model.provider}` })
+        return
+    }
+
+    const response = await fetch(testUrl, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    })
+
+    if (response.ok) {
+      res.json({ ok: true })
+    } else {
+      const text = await response.text()
+      let message = `HTTP ${response.status}`
+      try {
+        const json = JSON.parse(text)
+        message = json.error?.message || json.error?.type || json.error || message
+      } catch {}
+      res.json({ ok: false, error: message })
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Connection failed'
+    res.json({ ok: false, error: message })
+  }
+})
+
 export default router

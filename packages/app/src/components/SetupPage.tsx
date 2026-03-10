@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Plus, Star, Trash2, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Plus, Star, Trash2, Loader2, CircleCheck, CircleX } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,6 +49,10 @@ export function SetupPage({ onComplete }: SetupPageProps) {
   const [importing, setImporting] = useState(false)
   const [imported, setImported] = useState(false)
 
+  // Model connectivity test
+  const [testStatus, setTestStatus] = useState<Record<string, { status: 'testing' | 'ok' | 'error'; error?: string }>>({})
+  const testedRef = useRef<Set<string>>(new Set())
+
   const selectedProvider = PROVIDERS.find((p) => p.value === provider)
 
   // --- Data fetching ---
@@ -85,6 +89,30 @@ export function SetupPage({ onComplete }: SetupPageProps) {
     })()
     return () => { cancelled = true }
   }, [])
+
+  // Auto-test API-key models on load
+  useEffect(() => {
+    for (const m of models) {
+      if (m.apiKey && !m.configDir && !testedRef.current.has(m.id)) {
+        testedRef.current.add(m.id)
+        testModel(m.id)
+      }
+    }
+  }, [models])
+
+  async function testModel(id: string) {
+    setTestStatus((prev) => ({ ...prev, [id]: { status: 'testing' } }))
+    try {
+      const res = await fetch(`/api/setup/models/${id}/test`, { method: 'POST' })
+      const data = await res.json()
+      setTestStatus((prev) => ({
+        ...prev,
+        [id]: data.ok ? { status: 'ok' } : { status: 'error', error: data.error },
+      }))
+    } catch {
+      setTestStatus((prev) => ({ ...prev, [id]: { status: 'error', error: 'Connection failed' } }))
+    }
+  }
 
   // --- Actions ---
 
@@ -143,6 +171,8 @@ export function SetupPage({ onComplete }: SetupPageProps) {
   async function handleDelete(id: string) {
     try {
       await fetch(`/api/setup/models/${id}`, { method: 'DELETE' })
+      testedRef.current.delete(id)
+      setTestStatus((prev) => { const next = { ...prev }; delete next[id]; return next })
       await loadModels()
     } catch {}
   }
@@ -170,7 +200,8 @@ export function SetupPage({ onComplete }: SetupPageProps) {
   // --- Derived state ---
 
   const cliUsable = detect?.cliAvailable && detect?.auth?.loggedIn
-  const showDetectBanner = claudeFound && !imported && (probing || detect?.claudeCodeInstalled)
+  const hasClaudeModel = models.some((m) => m.configDir)
+  const showDetectBanner = claudeFound && !imported && !hasClaudeModel && (probing || detect?.claudeCodeInstalled)
 
   return (
     <div className="min-h-dvh flex items-center justify-center bg-background p-4">
@@ -250,6 +281,23 @@ export function SetupPage({ onComplete }: SetupPageProps) {
                     <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded capitalize shrink-0">
                       {m.provider}
                     </span>
+                    {/* Connectivity status */}
+                    {testStatus[m.id]?.status === 'testing' && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+                    )}
+                    {testStatus[m.id]?.status === 'ok' && (
+                      <CircleCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" title="API key verified" />
+                    )}
+                    {testStatus[m.id]?.status === 'error' && (
+                      <button
+                        type="button"
+                        onClick={() => { testedRef.current.delete(m.id); testModel(m.id) }}
+                        className="shrink-0"
+                        title={testStatus[m.id].error || 'Connection failed — click to retry'}
+                      >
+                        <CircleX className="h-3.5 w-3.5 text-destructive" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleDelete(m.id)}
