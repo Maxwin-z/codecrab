@@ -1,4 +1,4 @@
-// WebSocket module — connection management and message routing
+// WebSocket module — connection management and message routing with Claude SDK
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'http'
 import type {
@@ -8,6 +8,23 @@ import type {
   SessionInfo,
 } from '@codeclaws/shared'
 import { getToken } from '../auth/index.js'
+import {
+  executeQuery,
+  createClientState,
+  getClientState,
+  removeClientState,
+  getOrCreateProjectState,
+  storeAssistantMessage,
+  handlePermissionResponse,
+  abortQuery,
+  getSessionStatuses,
+  getCachedModels,
+  loadModelsFromConfig,
+  generateSessionId,
+} from '../engine/claude.js'
+
+// Export for API use
+export { getSessionStatuses as getSessions }
 
 interface Client {
   ws: WebSocket
@@ -18,6 +35,7 @@ interface Client {
 
 interface Session {
   sessionId: string
+  sdkSessionId?: string  // Claude SDK session ID (for resume)
   projectId?: string
   cwd?: string
   messages: ChatMessage[]
@@ -35,7 +53,7 @@ function genId(): string {
   return `msg-${Date.now()}-${++messageIdCounter}`
 }
 
-function generateSessionId(): string {
+function generateSessionIdLocal(): string {
   return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
@@ -45,7 +63,7 @@ function getOrCreateSession(client: Client): Session {
     return sessions.get(client.sessionId)!
   }
 
-  const sessionId = generateSessionId()
+  const sessionId = generateSessionIdLocal()
   const session: Session = {
     sessionId,
     projectId: client.projectId,
@@ -75,7 +93,7 @@ function resumeSession(client: Client, sessionId: string): Session | null {
 }
 
 // Get all sessions for a project or globally
-export function getSessions(projectId?: string, cwd?: string): SessionInfo[] {
+export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[] {
   const result: SessionInfo[] = []
 
   for (const session of sessions.values()) {
@@ -111,6 +129,7 @@ export function deleteSession(sessionId: string): boolean {
 
 // Broadcast message to all clients in a project
 function broadcastToProject(projectId: string | undefined, message: ServerMessage, excludeClientId?: string) {
+  if (!projectId) return
   const data = JSON.stringify(message)
   for (const [clientId, client] of clients) {
     if (excludeClientId && clientId === excludeClientId) continue
@@ -124,6 +143,13 @@ function broadcastToProject(projectId: string | undefined, message: ServerMessag
 function sendToClient(client: Client, message: ServerMessage) {
   if (client.ws.readyState === WebSocket.OPEN) {
     client.ws.send(JSON.stringify(message))
+  }
+}
+
+// Send to specific WebSocket
+function safeSend(ws: WebSocket, data: unknown) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data))
   }
 }
 
@@ -148,31 +174,60 @@ export function setupWebSocket(server: Server) {
 
     console.log(`[ws] client connected: ${clientId}${projectId ? ` (project: ${projectId})` : ''}`)
 
-    // Get or create session
-    const session = getOrCreateSession(client)
+    // Get or create client state for Claude SDK (session is created lazily on first message)
+    let clientState = getClientState(clientId)
+    if (!clientState) {
+      const cwd = process.cwd()
+      clientState = createClientState(clientId, projectId, cwd)
+      if (projectId) {
+        const projectState = getOrCreateProjectState(projectId)
+        clientState.cwd = projectState.cwd
+        clientState.sessionId = projectState.sessionId
+      }
+    }
 
-    // Send init message
+    // Get existing session if client has one
+    let session: Session | undefined = client.sessionId ? sessions.get(client.sessionId) : undefined
+
+    // Send init message (without sessionId until first message)
     sendToClient(client, {
       type: 'system',
       subtype: 'init',
-      sessionId: session.sessionId,
+      sessionId: session?.sessionId,
     })
 
-    // Send message history
-    if (session.messages.length > 0) {
+    // Load models from config if not cached, then send to client
+    let models = getCachedModels()
+    if (!models) {
+      models = loadModelsFromConfig()
+    }
+    if (models && models.length > 0) {
+      sendToClient(client, {
+        type: 'available_models',
+        models,
+      })
+    }
+
+    // Send message history if resuming existing session
+    if (session && session.messages.length > 0) {
       sendToClient(client, {
         type: 'message_history',
         messages: session.messages,
       })
     }
 
-    ws.on('message', (data) => {
+    // If a query is running, tell the client
+    if (clientState.activeQuery) {
+      sendToClient(client, { type: 'query_start' })
+    }
+
+    ws.on('message', async (data) => {
       try {
         const msg: ClientMessage = JSON.parse(data.toString())
-        handleClientMessage(client, msg)
+        await handleClientMessage(ws, client, msg)
       } catch (err) {
         console.error('[ws] failed to parse message:', err)
-        sendToClient(client, { type: 'error', message: 'Invalid message format' })
+        safeSend(ws, { type: 'error', message: 'Invalid message format' })
       }
     })
 
@@ -202,12 +257,82 @@ export function setupWebSocket(server: Server) {
   console.log('[ws] WebSocket server ready')
 }
 
-async function handleClientMessage(client: Client, msg: ClientMessage) {
-  const session = client.sessionId ? sessions.get(client.sessionId) : undefined
+// Helper to get or create session lazily (on first message)
+function getOrCreateSessionForClient(client: Client, clientState: import('../engine/claude.js').ClientState): Session {
+  // Return existing session if available
+  if (client.sessionId && sessions.has(client.sessionId)) {
+    const existingSession = sessions.get(client.sessionId)!
+    // Only set SDK session ID if we have one (from a prior SDK init)
+    clientState.sessionId = existingSession.sdkSessionId
+    return existingSession
+  }
+
+  // Create new session
+  const sessionId = generateSessionIdLocal()
+  const session: Session = {
+    sessionId,
+    projectId: client.projectId,
+    messages: [],
+    status: 'idle',
+    lastModified: Date.now(),
+  }
+  sessions.set(sessionId, session)
+  client.sessionId = sessionId
+  // Don't set clientState.sessionId — let the SDK assign it via init callback
+
+  console.log(`[ws] Created new session ${sessionId} for client ${client.clientId}`)
+
+  // Sync with project state if in a project
+  if (client.projectId) {
+    const projectState = getOrCreateProjectState(client.projectId)
+    // Copy existing messages from project state if any
+    if (projectState.messages.length > 0) {
+      session.messages = [...projectState.messages]
+    }
+    // Sync cwd
+    session.cwd = projectState.cwd
+  }
+
+  // Notify client of new session
+  sendToClient(client, {
+    type: 'system',
+    subtype: 'init',
+    sessionId: session.sessionId,
+  })
+
+  // Send available models when creating new session
+  const models = getCachedModels()
+  if (models && models.length > 0) {
+    sendToClient(client, {
+      type: 'available_models',
+      models,
+    })
+  }
+
+  return session
+}
+
+async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMessage) {
+  let session = client.sessionId ? sessions.get(client.sessionId) : undefined
+  const clientState = getClientState(client.clientId)
+
+  if (!clientState) {
+    safeSend(ws, { type: 'error', message: 'Client state not found' })
+    return
+  }
 
   switch (msg.type) {
     case 'prompt': {
-      if (!session) return
+      // Create session lazily on first user message
+      if (!session) {
+        session = getOrCreateSessionForClient(client, clientState)
+      }
+
+      // Check if already running
+      if (clientState.activeQuery) {
+        safeSend(ws, { type: 'error', message: 'A query is already running' })
+        return
+      }
 
       // Add user message to session
       const userMsg: ChatMessage = {
@@ -224,6 +349,12 @@ async function handleClientMessage(client: Client, msg: ClientMessage) {
         session.firstPrompt = msg.prompt.slice(0, 100)
       }
 
+      // Add to project state if in project
+      if (client.projectId) {
+        const projectState = getOrCreateProjectState(client.projectId)
+        projectState.messages.push(userMsg)
+      }
+
       // Broadcast to other clients in same project
       broadcastToProject(
         client.projectId,
@@ -235,66 +366,177 @@ async function handleClientMessage(client: Client, msg: ClientMessage) {
       session.status = 'processing'
       sendToClient(client, { type: 'query_start' })
 
-      // TODO: Integrate with actual AI engine
-      // For now, simulate a simple echo response
-      setTimeout(() => {
-        if (!session) return
-
-        // Simulate streaming response
-        const response = `I received your message: "${msg.prompt}"`
-        let index = 0
-
-        const streamInterval = setInterval(() => {
-          if (index < response.length) {
-            sendToClient(client, {
+      try {
+        // Execute query with Claude SDK
+        const stream = executeQuery(clientState, msg.prompt, {
+          onTextDelta: (text) => {
+            broadcastToProject(client.projectId, {
               type: 'stream_delta',
               deltaType: 'text',
-              text: response[index],
+              text,
             })
-            index++
-          } else {
-            clearInterval(streamInterval)
-
-            // Send final message
-            const assistantMsg: ChatMessage = {
-              id: genId(),
-              role: 'assistant',
-              content: response,
-              timestamp: Date.now(),
-            }
-            session.messages.push(assistantMsg)
-            session.status = 'idle'
-            session.lastModified = Date.now()
-
-            sendToClient(client, {
-              type: 'assistant_text',
-              text: response,
+          },
+          onThinkingDelta: (thinking) => {
+            broadcastToProject(client.projectId, {
+              type: 'stream_delta',
+              deltaType: 'thinking',
+              text: thinking,
             })
-            sendToClient(client, { type: 'query_end' })
-
-            // Generate summary (first 50 chars of response)
-            if (!session.summary) {
-              session.summary = msg.prompt.slice(0, 50)
+          },
+          onToolUse: (toolName, toolId, input) => {
+            broadcastToProject(client.projectId, {
+              type: 'tool_use',
+              toolName,
+              toolId,
+              input,
+            })
+          },
+          onToolResult: (toolId, content, isError) => {
+            broadcastToProject(client.projectId, {
+              type: 'tool_result',
+              toolId,
+              content,
+              isError,
+            })
+          },
+          onSessionInit: (sdkSessionId) => {
+            if (session) {
+              // Store the SDK session ID separately from local session ID
+              session.sdkSessionId = sdkSessionId
+              if (client.projectId) {
+                const projectState = getOrCreateProjectState(client.projectId)
+                projectState.sessionId = sdkSessionId
+              }
+              broadcastToProject(client.projectId, {
+                type: 'session_resumed',
+                sessionId: session.sessionId,
+              })
             }
+          },
+          onPermissionRequest: (requestId, toolName, input, reason) => {
+            broadcastToProject(client.projectId, {
+              type: 'permission_request',
+              requestId,
+              toolName,
+              input,
+              reason,
+            })
+          },
+          onUsage: (usage) => {
+            // Usage is tracked internally
+          },
+        })
+
+        // Process stream events
+        let finalText = ''
+        for await (const event of stream) {
+          switch (event.type) {
+            case 'text_delta':
+              finalText += (event.data as any).text
+              break
+            case 'thinking_delta':
+              broadcastToProject(client.projectId, {
+                type: 'thinking',
+                thinking: (event.data as any).thinking,
+              })
+              break
+            case 'tool_use':
+              // Already handled in callback
+              break
+            case 'tool_result':
+              // Already handled in callback
+              break
+            case 'result':
+              const resultData = event.data as any
+              broadcastToProject(client.projectId, {
+                type: 'result',
+                subtype: resultData.subtype,
+                costUsd: resultData.costUsd,
+                durationMs: resultData.durationMs,
+                result: resultData.result,
+                isError: resultData.isError,
+              })
+              break
+            case 'ask_user_question':
+              broadcastToProject(client.projectId, {
+                type: 'ask_user_question',
+                toolId: (event.data as any).toolId,
+                questions: (event.data as any).questions,
+              })
+              break
           }
-        }, 20)
-      }, 500)
+        }
+
+        // Store assistant message
+        const assistantMsg = storeAssistantMessage(clientState)
+        if (assistantMsg) {
+          session.messages.push(assistantMsg)
+          session.lastModified = Date.now()
+
+          // Update summary from response
+          const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
+          if (summaryMatch) {
+            session.summary = summaryMatch[1].trim()
+            broadcastToProject(client.projectId, {
+              type: 'query_summary',
+              summary: session.summary,
+            })
+          }
+
+          // Send final assistant message
+          broadcastToProject(client.projectId, {
+            type: 'assistant_text',
+            text: assistantMsg.content,
+          })
+        }
+
+      } catch (err: any) {
+        console.error('[ws] Query error:', err)
+        broadcastToProject(client.projectId, {
+          type: 'error',
+          message: err.message || 'Query failed',
+        })
+        session.status = 'error'
+      } finally {
+        session.status = 'idle'
+        broadcastToProject(client.projectId, { type: 'query_end' })
+      }
 
       break
     }
 
     case 'command': {
       if (msg.command === '/clear') {
+        // Abort any active query
+        if (clientState.activeQuery) {
+          abortQuery(clientState)
+        }
+
+        // Clear session
         if (session) {
           session.messages = []
           session.summary = undefined
           session.firstPrompt = undefined
           session.lastModified = Date.now()
         }
+
+        // Clear project state
+        if (client.projectId) {
+          const projectState = getOrCreateProjectState(client.projectId)
+          projectState.messages = []
+          projectState.sessionId = undefined
+        }
+
+        // Clear client state
+        clientState.sessionId = undefined
+        clientState.accumulatingText = ''
+        clientState.accumulatingThinking = ''
+        clientState.currentToolCalls = []
+
         sendToClient(client, { type: 'cleared' })
 
         // Create new session
-        const newSessionId = generateSessionId()
+        const newSessionId = generateSessionIdLocal()
         const newSession: Session = {
           sessionId: newSessionId,
           projectId: client.projectId,
@@ -311,35 +553,64 @@ async function handleClientMessage(client: Client, msg: ClientMessage) {
           subtype: 'init',
           sessionId: newSessionId,
         })
+
+        // Send available models when creating new session after clear
+        const models = getCachedModels()
+        if (models && models.length > 0) {
+          sendToClient(client, {
+            type: 'available_models',
+            models,
+          })
+        }
       } else {
-        // Handle other commands
-        sendToClient(client, {
-          type: 'error',
-          message: `Unknown command: ${msg.command}`,
+        // Handle other commands as prompts
+        if (clientState.activeQuery) {
+          safeSend(ws, { type: 'error', message: 'A query is already running' })
+          return
+        }
+
+        // Forward to prompt handling
+        await handleClientMessage(ws, client, {
+          type: 'prompt',
+          prompt: msg.command,
         })
       }
       break
     }
 
     case 'set_cwd': {
+      const newCwd = msg.cwd
+      clientState.cwd = newCwd
       if (session) {
-        session.cwd = msg.cwd
+        session.cwd = newCwd
       }
-      sendToClient(client, { type: 'cwd_changed', cwd: msg.cwd })
+      if (client.projectId) {
+        const projectState = getOrCreateProjectState(client.projectId)
+        projectState.cwd = newCwd
+      }
+      broadcastToProject(client.projectId, { type: 'cwd_changed', cwd: newCwd })
       break
     }
 
     case 'abort': {
-      if (session) {
-        session.status = 'idle'
+      if (abortQuery(clientState)) {
+        if (session) {
+          session.status = 'idle'
+        }
+        broadcastToProject(client.projectId, { type: 'aborted' })
       }
-      sendToClient(client, { type: 'aborted' })
       break
     }
 
     case 'resume_session': {
       const resumedSession = resumeSession(client, msg.sessionId)
       if (resumedSession) {
+        // Use SDK session ID for resume, not local session ID
+        clientState.sessionId = resumedSession.sdkSessionId
+        if (client.projectId) {
+          const projectState = getOrCreateProjectState(client.projectId)
+          projectState.sessionId = resumedSession.sdkSessionId
+        }
         sendToClient(client, {
           type: 'session_resumed',
           sessionId: resumedSession.sessionId,
@@ -348,6 +619,14 @@ async function handleClientMessage(client: Client, msg: ClientMessage) {
           type: 'message_history',
           messages: resumedSession.messages,
         })
+        // Send available models when resuming session
+        const models = getCachedModels()
+        if (models && models.length > 0) {
+          sendToClient(client, {
+            type: 'available_models',
+            models,
+          })
+        }
       } else {
         sendToClient(client, {
           type: 'error',
@@ -360,6 +639,7 @@ async function handleClientMessage(client: Client, msg: ClientMessage) {
     case 'respond_question': {
       // Handle question response as a regular prompt
       if (!session) return
+
       const answerText = Object.entries(msg.answers)
         .map(([key, value]) => {
           if (Array.isArray(value)) {
@@ -369,58 +649,50 @@ async function handleClientMessage(client: Client, msg: ClientMessage) {
         })
         .join('\n')
 
-      const userMsg: ChatMessage = {
-        id: genId(),
-        role: 'user',
-        content: answerText,
-        timestamp: Date.now(),
-      }
-      session.messages.push(userMsg)
-      session.lastModified = Date.now()
-
-      // Simulate response
-      session.status = 'processing'
-      sendToClient(client, { type: 'query_start' })
-
-      setTimeout(() => {
-        if (!session) return
-        const response = `Received your response: ${answerText}`
-        const assistantMsg: ChatMessage = {
-          id: genId(),
-          role: 'assistant',
-          content: response,
-          timestamp: Date.now(),
-        }
-        session.messages.push(assistantMsg)
-        session.status = 'idle'
-        session.lastModified = Date.now()
-
-        sendToClient(client, {
-          type: 'assistant_text',
-          text: response,
-        })
-        sendToClient(client, { type: 'query_end' })
-      }, 500)
-
-      break
-    }
-
-    case 'respond_permission': {
-      // Handle permission response
-      sendToClient(client, {
-        type: 'system',
-        subtype: 'permission_response',
+      // Forward as a prompt
+      await handleClientMessage(ws, client, {
+        type: 'prompt',
+        prompt: answerText,
       })
       break
     }
 
+    case 'respond_permission': {
+      const handled = handlePermissionResponse(clientState, msg.requestId, msg.allow)
+      if (!handled) {
+        // Try to find in other clients in the same project
+        if (client.projectId) {
+          for (const [otherClientId, otherClientState] of Array.from(clients.entries())) {
+            if (otherClientId !== client.clientId) {
+              const otherState = getClientState(otherClientId)
+              if (otherState && handlePermissionResponse(otherState, msg.requestId, msg.allow)) {
+                break
+              }
+            }
+          }
+        }
+      }
+      break
+    }
+
     case 'set_model': {
-      sendToClient(client, { type: 'model_changed', model: msg.model })
+      clientState.model = msg.model || undefined
+      if (client.projectId) {
+        const projectState = getOrCreateProjectState(client.projectId)
+        projectState.model = clientState.model
+      }
+      broadcastToProject(client.projectId, { type: 'model_changed', model: msg.model })
       break
     }
 
     case 'set_permission_mode': {
-      sendToClient(client, { type: 'permission_mode_changed', mode: msg.mode })
+      const mode = msg.mode
+      clientState.permissionMode = mode
+      if (client.projectId) {
+        const projectState = getOrCreateProjectState(client.projectId)
+        projectState.permissionMode = mode
+      }
+      broadcastToProject(client.projectId, { type: 'permission_mode_changed', mode })
       break
     }
   }
