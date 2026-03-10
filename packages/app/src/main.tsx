@@ -6,6 +6,8 @@ import { SetupPage } from '@/components/SetupPage'
 import { HomePage } from '@/components/HomePage'
 import { CreateProjectPage } from '@/components/CreateProjectPage'
 import { LoginPage } from '@/components/LoginPage'
+import { ChatPage } from '@/components/ChatPage'
+import { WebSocketProvider } from '@/hooks/WebSocketContext'
 import { checkAuthStatus, authFetch, clearToken } from '@/lib/auth'
 import './index.css'
 
@@ -100,10 +102,19 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
-      <Route path="/setup" element={<SetupPage onComplete={() => { setSetupStatus('initialized'); navigate('/') }} onUnauthorized={handleUnauthorized} />} />
+      <Route path="/setup" element={
+        setupStatus === 'initialized'
+          ? <Navigate to="/" replace />
+          : <SetupPage onComplete={() => { setSetupStatus('initialized'); navigate('/') }} onUnauthorized={handleUnauthorized} />
+      } />
       <Route path="/projects/new" element={
         setupStatus === 'initialized'
           ? <CreateProjectPage onUnauthorized={handleUnauthorized} />
+          : <Navigate to="/setup" replace />
+      } />
+      <Route path="/chat" element={
+        setupStatus === 'initialized'
+          ? <ChatPage onUnauthorized={handleUnauthorized} />
           : <Navigate to="/setup" replace />
       } />
       <Route path="/" element={
@@ -119,7 +130,9 @@ function AppRoutes() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AppRoutes />
+      <WebSocketProvider>
+        <AppRoutes />
+      </WebSocketProvider>
     </BrowserRouter>
   </React.StrictMode>,
 )

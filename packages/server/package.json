@@ -12,10 +12,12 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@codeclaws/shared": "workspace:*",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1",
     "nodemon": "^3.1.14",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

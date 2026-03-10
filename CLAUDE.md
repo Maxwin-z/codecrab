@@ -57,6 +57,32 @@ shared → (no internal deps)
 Client→Server: prompt, command, set_cwd, abort, resume_session, respond_question, respond_permission
 Server→Client: stream_delta, assistant_text, thinking, tool_use, tool_result, result, permission_request
 
+## Authentication
+
+All API requests and WebSocket connections must include the access token:
+
+**REST API:** Include token in `Authorization: Bearer <token>` header
+```typescript
+import { authFetch } from '@/lib/auth'
+const res = await authFetch('/api/projects')
+```
+
+**WebSocket:** Include token in query param
+```typescript
+const ws = new WebSocket(`ws://host/ws?token=${getToken()}`)
+```
+
+**Protected Endpoints:**
+- `/api/*` (except `/api/auth/*` and `/api/setup/detect*`) — requires Bearer token
+- `/ws` — requires `token` query parameter
+
+**Public Endpoints (no token required):**
+- `GET /api/auth/status` — check auth configuration
+- `POST /api/auth/login` — authenticate and get token
+- `GET /api/setup/detect` — check if Claude Code is installed
+- `GET /api/setup/detect/probe` — full probe of CLI availability
+- `GET /api/health` — health check
+
 ## Configuration Files
 
 User config stored in `~/.codeclaws/`:

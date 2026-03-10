@@ -1,8 +1,29 @@
 // Session management API
-//
-// Endpoints:
-//   GET /api/sessions             — List all sessions with status
-//   GET /api/sessions/:id         — Get session detail
-//   DELETE /api/sessions/:id      — Delete session
-//
-// Storage: ~/.codeclaws/sessions/
+import { Router, type Router as RouterType } from 'express'
+import { getSessions, deleteSession } from '../ws/index.js'
+
+const router: RouterType = Router()
+
+// List all sessions with optional filtering
+router.get('/', (req, res) => {
+  const projectId = req.query.projectId as string | undefined
+  const cwd = req.query.cwd as string | undefined
+
+  const sessions = getSessions(projectId, cwd)
+  res.json(sessions)
+})
+
+// Delete a session
+router.delete('/:id', (req, res) => {
+  const sessionId = req.params.id
+  const deleted = deleteSession(sessionId)
+
+  if (!deleted) {
+    res.status(404).json({ error: 'Session not found' })
+    return
+  }
+
+  res.status(204).end()
+})
+
+export default router

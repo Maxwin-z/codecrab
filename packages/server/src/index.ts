@@ -1,11 +1,15 @@
 import express from 'express'
+import { createServer } from 'http'
 import setupRouter from './api/setup.js'
 import filesRouter from './api/files.js'
 import projectsRouter from './api/projects.js'
 import authRouter from './api/auth.js'
+import sessionsRouter from './api/sessions.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
+import { setupWebSocket } from './ws/index.js'
 
 const app = express()
+const server = createServer(app)
 const PORT = 4200
 
 app.use(express.json())
@@ -27,8 +31,18 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() })
 })
 
-// Public auth routes (no token required)
+// Public routes (no token required)
 app.use('/api/auth', authRouter)
+
+// Public setup detection endpoints (needed before initialization)
+app.get('/api/setup/detect', async (_req, res) => {
+  const { detectHandler } = await import('./api/setup-detect.js')
+  detectHandler(_req, res)
+})
+app.get('/api/setup/detect/probe', async (_req, res) => {
+  const { probeHandler } = await import('./api/setup-detect.js')
+  probeHandler(_req, res)
+})
 
 // Auth middleware — validates token on all subsequent routes
 app.use(authMiddleware)
@@ -37,6 +51,7 @@ app.use(authMiddleware)
 app.use('/api/setup', setupRouter)
 app.use('/api/files', filesRouter)
 app.use('/api/projects', projectsRouter)
+app.use('/api/sessions', sessionsRouter)
 
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -44,9 +59,12 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: err.message })
 })
 
-// Initialize token and start server
+// Initialize token, setup WebSocket, and start server
 ensureToken().then(() => {
-  app.listen(PORT, () => {
+  // Setup WebSocket server
+  setupWebSocket(server)
+
+  server.listen(PORT, () => {
     console.log(`[server] listening on http://localhost:${PORT}`)
   })
 })

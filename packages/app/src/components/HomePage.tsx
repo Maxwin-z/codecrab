@@ -12,8 +12,8 @@ interface HomePageProps {
 export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
   const navigate = useNavigate()
 
-  const handleSelectProject = (_project: Project) => {
-    // TODO: navigate to chat page with project context
+  const handleSelectProject = (project: Project) => {
+    navigate(`/chat?project=${encodeURIComponent(project.id)}`)
   }
 
   return (
