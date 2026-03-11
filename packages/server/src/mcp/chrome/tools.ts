@@ -292,4 +292,44 @@ export const chromeTools = [
       }
     },
   ),
+
+  // ── Accessibility Tree ─────────────────────────────────
+
+  tool(
+    'chrome_get_accessibility_tree',
+    'Get the accessibility tree of the current page. Returns a structured, compact representation of all semantically meaningful elements (headings, links, buttons, inputs, landmarks, etc.) with their roles, names, values, and states. More token-efficient than screenshots for understanding page structure and finding interactive elements. Use interactive_only=true to focus on actionable elements.',
+    {
+      tab_index: z.number().optional().describe('Tab index (0-based, default 0)'),
+      interactive_only: z.boolean().optional().describe('If true, only return interactive elements (buttons, links, inputs, etc.) and skip static content. Default false.'),
+      max_depth: z.number().optional().describe('Maximum tree depth to traverse (default 20). Lower values give a higher-level overview.'),
+    },
+    async ({ tab_index, interactive_only, max_depth }) => {
+      try {
+        await ensureChromeRunning()
+        const result = await cdp.getAccessibilityTree(tab_index ?? 0, {
+          interactiveOnly: interactive_only,
+          maxDepth: max_depth,
+        })
+        // Truncate to avoid overwhelming context
+        const maxLen = 50000
+        const tree =
+          result.tree.length > maxLen
+            ? result.tree.slice(0, maxLen) + `\n\n... (truncated, ${result.tree.length} total chars)`
+            : result.tree
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `URL: ${result.url}\nTitle: ${result.title}\nNodes: ${result.nodeCount}\n\n${tree}`,
+            },
+          ],
+        }
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text' as const, text: `Accessibility tree failed: ${err.message}` }],
+          isError: true,
+        }
+      }
+    },
+  ),
 ]

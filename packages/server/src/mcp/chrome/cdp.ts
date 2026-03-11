@@ -416,3 +416,142 @@ export async function waitForSelector(
     `Element "${selector}" not found after ${timeoutMs}ms`,
   )
 }
+
+/**
+ * Get the accessibility tree of the page.
+ * Returns a compact, structured representation of all interactive and
+ * semantically meaningful elements on the page.
+ */
+export async function getAccessibilityTree(
+  tabIndex = 0,
+  options: { interactiveOnly?: boolean; maxDepth?: number } = {},
+): Promise<{ tree: string; url: string; title: string; nodeCount: number }> {
+  return withConnection(tabIndex, async (ws) => {
+    // Enable accessibility domain
+    await sendCommand(ws, 'Accessibility.enable')
+
+    // Get the full AX tree
+    const result = await sendCommand(ws, 'Accessibility.getFullAXTree')
+    const nodes: any[] = result?.nodes || []
+
+    // Get page info
+    const pageInfo = await sendCommand(ws, 'Runtime.evaluate', {
+      expression: 'JSON.stringify({ url: location.href, title: document.title })',
+      returnByValue: true,
+    })
+    const { url, title } = typeof pageInfo?.result?.value === 'string'
+      ? JSON.parse(pageInfo.result.value)
+      : { url: '', title: '' }
+
+    // Build node lookup map
+    const nodeMap = new Map<string, any>()
+    for (const node of nodes) {
+      nodeMap.set(node.nodeId, node)
+    }
+
+    // Roles to skip (noise / purely structural)
+    const skipRoles = new Set([
+      'none', 'generic', 'InlineTextBox', 'LineBreak',
+    ])
+
+    // Roles that are always interesting (interactive elements)
+    const interactiveRoles = new Set([
+      'button', 'link', 'textbox', 'searchbox', 'combobox',
+      'checkbox', 'radio', 'switch', 'slider', 'spinbutton',
+      'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+      'option', 'treeitem',
+    ])
+
+    // Helper to extract AX property value
+    function getProp(node: any, propName: string): string {
+      if (node.name?.value && propName === 'name') return node.name.value
+      if (node.value?.value && propName === 'value') return node.value.value
+      if (node.description?.value && propName === 'description') return node.description.value
+      const prop = node.properties?.find((p: any) => p.name === propName)
+      return prop?.value?.value ?? ''
+    }
+
+    // Format a single node compactly
+    function formatNode(node: any, depth: number): string | null {
+      const role = node.role?.value || ''
+      if (skipRoles.has(role)) return null
+      if (node.ignored) return null
+
+      const name = getProp(node, 'name')
+      const value = getProp(node, 'value')
+      const description = getProp(node, 'description')
+
+      // In interactive-only mode, skip non-interactive elements without meaningful content
+      if (options.interactiveOnly && !interactiveRoles.has(role) && !name) {
+        return null
+      }
+
+      // Skip empty structural nodes
+      if (!name && !value && !description && !interactiveRoles.has(role)) {
+        // Still process if it's a heading or landmark
+        const landmarkRoles = new Set(['heading', 'banner', 'navigation', 'main', 'complementary', 'contentinfo', 'region', 'search', 'form', 'alert', 'dialog', 'alertdialog', 'status', 'img'])
+        if (!landmarkRoles.has(role)) return null
+      }
+
+      const indent = '  '.repeat(depth)
+      let line = `${indent}[${role}]`
+      if (name) line += ` "${name}"`
+      if (value) line += ` value="${value}"`
+      if (description) line += ` desc="${description}"`
+
+      // Add useful properties
+      const focused = getProp(node, 'focused')
+      const checked = getProp(node, 'checked')
+      const disabled = getProp(node, 'disabled')
+      const expanded = getProp(node, 'expanded')
+      const level = getProp(node, 'level')
+
+      if (focused === 'true') line += ' [focused]'
+      if (checked) line += ` [checked=${checked}]`
+      if (disabled === 'true') line += ' [disabled]'
+      if (expanded) line += ` [expanded=${expanded}]`
+      if (level) line += ` [level=${level}]`
+
+      return line
+    }
+
+    // Build tree recursively
+    const lines: string[] = []
+    let nodeCount = 0
+    const maxDepth = options.maxDepth ?? 20
+
+    function walk(nodeId: string, depth: number): void {
+      if (depth > maxDepth) return
+      const node = nodeMap.get(nodeId)
+      if (!node) return
+
+      const line = formatNode(node, depth)
+      if (line) {
+        lines.push(line)
+        nodeCount++
+      }
+
+      // Process children
+      const childIds = node.childIds || []
+      for (const childId of childIds) {
+        walk(childId, line ? depth + 1 : depth)
+      }
+    }
+
+    // Start from root
+    if (nodes.length > 0) {
+      walk(nodes[0].nodeId, 0)
+    }
+
+    // Disable accessibility domain
+    await sendCommand(ws, 'Accessibility.disable')
+
+    return {
+      tree: lines.join('\n'),
+      url,
+      title,
+      nodeCount,
+    }
+  })
+}
+
