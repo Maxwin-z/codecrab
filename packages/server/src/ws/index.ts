@@ -36,6 +36,13 @@ import {
 // Export for API use
 export { getSessionStatuses as getSessions }
 
+// Get full session messages for HTTP API
+export function getSessionMessages(sessionId: string): ChatMessage[] | null {
+  const session = sessions.get(sessionId)
+  if (!session) return null
+  return session.messages
+}
+
 // --- Session persistence ---
 const SESSIONS_DIR = path.join(os.homedir(), '.codeclaws', 'sessions')
 
@@ -241,6 +248,71 @@ function sendToClient(client: Client, message: ServerMessage) {
   if (client.ws.readyState === WebSocket.OPEN) {
     client.ws.send(JSON.stringify(message))
   }
+}
+
+// Maximum preview length for tool call results
+const MAX_TOOL_RESULT_PREVIEW_LENGTH = 100
+
+// Convert ChatMessage to summary for initial history load
+// Assistant and user messages are sent in full; only tool call results are truncated
+function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').ChatMessageSummary {
+  const content = message.content || ''
+  const hasToolCalls = !!(message.toolCalls && message.toolCalls.length > 0)
+  const hasImages = !!(message.images && message.images.length > 0)
+
+  // For assistant/user: always send full content
+  // For system with tool calls: content is usually empty, tool data is sent separately
+  const isTruncated = false // We no longer truncate content text
+
+  // Build lightweight tool call summaries
+  let toolCalls: import('@codeclaws/shared').ChatMessageSummary['toolCalls']
+  if (message.toolCalls && message.toolCalls.length > 0) {
+    toolCalls = message.toolCalls.map((tc) => {
+      const inputStr = typeof tc.input === 'string' ? tc.input : JSON.stringify(tc.input)
+      return {
+        name: tc.name,
+        id: tc.id,
+        inputSummary: inputStr.slice(0, MAX_TOOL_RESULT_PREVIEW_LENGTH),
+        resultPreview: tc.result ? tc.result.slice(0, MAX_TOOL_RESULT_PREVIEW_LENGTH) : undefined,
+        isError: tc.isError,
+      }
+    })
+  }
+
+  return {
+    id: message.id,
+    role: message.role,
+    content,
+    contentPreview: content.slice(0, 100),
+    isTruncated,
+    hasToolCalls,
+    hasImages,
+    timestamp: message.timestamp,
+    toolCalls,
+    costUsd: message.costUsd,
+    durationMs: message.durationMs,
+  }
+}
+
+// Send message history summary (truncated, for initial load)
+function sendMessageHistoryInChunks(
+  client: Client,
+  projectId: string,
+  sessionId: string,
+  messages: ChatMessage[]
+) {
+  if (messages.length === 0) return
+
+  // Convert to summaries
+  const summaries = messages.map(toMessageSummary)
+
+  // Send all summaries as single message (they're small now)
+  sendToClient(client, {
+    type: 'message_history',
+    projectId,
+    sessionId,
+    messages: summaries,
+  })
 }
 
 // Send to specific WebSocket
@@ -572,14 +644,9 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       })
     }
 
-    // Send message history if resuming
+    // Send message history if resuming (chunked to avoid exceeding WebSocket limits)
     if (session && session.messages.length > 0) {
-      sendToClient(client, {
-        type: 'message_history',
-        projectId,
-        sessionId: session.sessionId,
-        messages: session.messages,
-      })
+      sendMessageHistoryInChunks(client, projectId, session.sessionId, session.messages)
     }
 
     // If a query is running on this project, tell the client
@@ -945,12 +1012,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           projectId,
           sessionId: resumedSession.sessionId,
         })
-        sendToClient(client, {
-          type: 'message_history',
-          projectId,
-          sessionId: resumedSession.sessionId,
-          messages: resumedSession.messages,
-        })
+        // Send message history in chunks to avoid exceeding WebSocket limits
+        sendMessageHistoryInChunks(client, projectId, resumedSession.sessionId, resumedSession.messages)
         const models = getCachedModels()
         if (models && models.length > 0) {
           sendToClient(client, {

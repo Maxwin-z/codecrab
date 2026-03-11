@@ -195,7 +195,32 @@ export interface PermissionRequestMessage extends ServerProjectContext {
 
 export interface MessageHistoryMessage extends ServerProjectContext {
   type: 'message_history'
+  messages: ChatMessageSummary[]
+}
+
+export interface MessageHistoryChunkMessage extends ServerProjectContext {
+  type: 'message_history_chunk'
   messages: ChatMessage[]
+  chunkIndex: number
+  totalChunks: number
+  isFirstChunk: boolean
+  isLastChunk: boolean
+}
+
+// Summary version of ChatMessage for history preview
+export interface ChatMessageSummary {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string  // full content for assistant/user, truncated for system
+  contentPreview: string
+  isTruncated: boolean
+  hasToolCalls: boolean
+  hasImages: boolean
+  timestamp: number
+  // Lightweight tool call info for history display
+  toolCalls?: { name: string; id: string; inputSummary: string; resultPreview?: string; isError?: boolean }[]
+  costUsd?: number
+  durationMs?: number
 }
 
 export interface UserMessage extends ServerProjectContext {
@@ -243,6 +268,7 @@ export type ServerMessage =
   | PermissionModeChangedMessage
   | PermissionRequestMessage
   | MessageHistoryMessage
+  | MessageHistoryChunkMessage
   | UserMessage
   | AvailableModelsMessage
   | ProjectStatusesMessage

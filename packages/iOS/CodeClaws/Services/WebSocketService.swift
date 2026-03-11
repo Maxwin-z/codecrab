@@ -223,10 +223,49 @@ class WebSocketService: ObservableObject {
             }
         case "message_history":
             if isCurrentProject {
-                if let historyData = try? JSONSerialization.data(withJSONObject: json["messages"] ?? []),
-                   let history = try? JSONDecoder().decode([ChatMessage].self, from: historyData) {
-                    self.messages = history
+                guard let messagesJson = json["messages"] as? [[String: Any]] else { return }
+
+                var loadedMessages: [ChatMessage] = []
+                for msgDict in messagesJson {
+                    guard let id = msgDict["id"] as? String,
+                          let role = msgDict["role"] as? String,
+                          let content = msgDict["content"] as? String,
+                          let timestamp = msgDict["timestamp"] as? Double else { continue }
+
+                    let costUsd = msgDict["costUsd"] as? Double
+                    let durationMs = msgDict["durationMs"] as? Double
+
+                    // Reconstruct tool calls from summary data
+                    var toolCalls: [ToolCall]? = nil
+                    if let tcArray = msgDict["toolCalls"] as? [[String: Any]] {
+                        toolCalls = tcArray.compactMap { tc in
+                            guard let name = tc["name"] as? String,
+                                  let tcId = tc["id"] as? String else { return nil }
+                            let inputSummary = tc["inputSummary"] as? String ?? ""
+                            let resultPreview = tc["resultPreview"] as? String
+                            let isError = tc["isError"] as? Bool
+                            return ToolCall(
+                                name: name,
+                                id: tcId,
+                                input: .string(inputSummary),
+                                result: resultPreview,
+                                isError: isError
+                            )
+                        }
+                    }
+
+                    let msg = ChatMessage(
+                        id: id,
+                        role: role,
+                        content: content,
+                        toolCalls: toolCalls,
+                        costUsd: costUsd,
+                        durationMs: durationMs,
+                        timestamp: timestamp
+                    )
+                    loadedMessages.append(msg)
                 }
+                self.messages = loadedMessages
             }
         case "user_message":
             if isCurrentProject {

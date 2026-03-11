@@ -10,6 +10,20 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     var costUsd: Double?
     var durationMs: Double?
     let timestamp: Double
+
+    init(id: String, role: String, content: String, images: [ImageAttachment]? = nil, thinking: String? = nil,
+         toolCalls: [ToolCall]? = nil, costUsd: Double? = nil, durationMs: Double? = nil,
+         timestamp: Double) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.images = images
+        self.thinking = thinking
+        self.toolCalls = toolCalls
+        self.costUsd = costUsd
+        self.durationMs = durationMs
+        self.timestamp = timestamp
+    }
 }
 
 struct ToolCall: Codable, Identifiable, Equatable {

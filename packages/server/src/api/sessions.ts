@@ -1,6 +1,6 @@
 // Session management API
 import { Router, type Router as RouterType } from 'express'
-import { getSessionsList, deleteSession } from '../ws/index.js'
+import { getSessionsList, deleteSession, getSessionMessages } from '../ws/index.js'
 
 const router: RouterType = Router()
 
@@ -11,6 +11,19 @@ router.get('/', (req, res) => {
 
   const sessions = getSessionsList(projectId, cwd)
   res.json(sessions)
+})
+
+// Get full session messages (for expanding truncated history)
+router.get('/:id/messages', (req, res) => {
+  const sessionId = req.params.id
+  const messages = getSessionMessages(sessionId)
+
+  if (messages === null) {
+    res.status(404).json({ error: 'Session not found' })
+    return
+  }
+
+  res.json({ sessionId, messages })
 })
 
 // Delete a session

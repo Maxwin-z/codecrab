@@ -376,9 +376,30 @@ export function useWebSocket(): UseWebSocketReturn {
           }
           break
 
-        case 'message_history':
-          pState.messages = msg.messages
+        case 'message_history': {
+          // Convert summaries to ChatMessages, preserving tool call info
+          pState.messages = msg.messages.map((summary: any) => {
+            const base: ChatMessage = {
+              id: summary.id,
+              role: summary.role,
+              content: summary.content,
+              timestamp: summary.timestamp,
+            }
+            if (summary.costUsd != null) base.costUsd = summary.costUsd
+            if (summary.durationMs != null) base.durationMs = summary.durationMs
+            if (summary.toolCalls?.length) {
+              base.toolCalls = summary.toolCalls.map((tc: any) => ({
+                name: tc.name,
+                id: tc.id,
+                input: tc.inputSummary || '',
+                result: tc.resultPreview,
+                isError: tc.isError,
+              }))
+            }
+            return base
+          })
           break
+        }
 
         case 'user_message':
           pState.messages = (() => {
