@@ -77,7 +77,21 @@ struct UserQuestionFormView: View {
                         }
                     }
                     
-                    TextField(q.multiSelect == true ? "Or enter custom option..." : "Or type an answer...", text: Binding(
+                    if q.multiSelect != true {
+                        // Radio option for free-text input in single-select mode
+                        Button(action: {
+                            answers[key] = [] // deselect radio options
+                        }) {
+                            HStack {
+                                Image(systemName: (answers[key] ?? []).isEmpty ? "largecircle.fill.circle" : "circle")
+                                    .foregroundColor((answers[key] ?? []).isEmpty ? .blue : .gray)
+                                Text("Other (type below)").foregroundColor(.primary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    TextField(q.multiSelect == true ? "Or enter custom option..." : "Type an answer...", text: Binding(
                         get: { customTexts[key] ?? "" },
                         set: { customTexts[key] = $0 }
                     ))

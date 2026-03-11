@@ -451,6 +451,22 @@ class WebSocketService: ObservableObject {
     
     func submitQuestionResponse(toolId: String, answers: [String: Any]) {
         guard let projectId = activeProjectId else { return }
+
+        // Add user message locally first (like sendPrompt does)
+        let answerText = answers.sorted(by: { $0.key < $1.key }).map { (_, value) in
+            if let arr = value as? [String] {
+                return arr.joined(separator: ", ")
+            }
+            return "\(value)"
+        }.joined(separator: "\n")
+        let userMsg = ChatMessage(
+            id: UUID().uuidString,
+            role: "user",
+            content: answerText,
+            timestamp: Date().timeIntervalSince1970 * 1000
+        )
+        self.messages.append(userMsg)
+
         sendWebSocketMessage([
             "type": "respond_question",
             "toolId": toolId,
