@@ -2,13 +2,14 @@
 //
 // Wraps @anthropic-ai/claude-agent-sdk to conform to the EngineAdapter interface.
 
-import { query, type SDKMessage, type Query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKMessage, type SDKUserMessage, type Query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
 import { chromeTools } from '../mcp/chrome/index.js'
 import type {
   ChatMessage,
+  ImageAttachment,
   Question,
   ModelInfo,
   PermissionMode,
@@ -298,6 +299,53 @@ function applyModelConfig(config: ModelConfig): void {
   console.log(`  API Key: ${apiKey ? apiKey.slice(0, 10) + '...' : 'not set'}`)
 }
 
+// Build prompt for SDK: plain string or SDKUserMessage with images
+export function buildPrompt(
+  prompt: string,
+  images?: ImageAttachment[],
+  sessionId?: string,
+): string | AsyncIterable<SDKUserMessage> {
+  if (!images || images.length === 0) {
+    return prompt
+  }
+
+  // Build content blocks: images first, then text
+  const contentBlocks: unknown[] = []
+
+  for (const img of images) {
+    contentBlocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        data: img.data,
+        media_type: img.mediaType,
+      },
+    })
+  }
+
+  contentBlocks.push({
+    type: 'text',
+    text: prompt,
+  })
+
+  const userMessage: SDKUserMessage = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: contentBlocks,
+    } as any,
+    parent_tool_use_id: null,
+    session_id: sessionId || '',
+  }
+
+  // Return an async iterable that yields a single message
+  async function* singleMessage(): AsyncIterable<SDKUserMessage> {
+    yield userMessage
+  }
+
+  return singleMessage()
+}
+
 // Execute a query with Claude SDK
 export async function* executeQuery(
   client: ClientState,
@@ -310,7 +358,8 @@ export async function* executeQuery(
     onSessionInit: (sessionId: string) => void
     onPermissionRequest: (requestId: string, toolName: string, input: unknown, reason: string) => void
     onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }) => void
-  }
+  },
+  images?: ImageAttachment[],
 ): AsyncGenerator<{ type: string; data?: unknown }> {
   // Get default model configuration from models.json
   const modelConfig = getDefaultModelConfig()
@@ -490,7 +539,8 @@ export async function* executeQuery(
     console.log(`  ANTHROPIC_BASE_URL: ${queryEnv.ANTHROPIC_BASE_URL || 'default'}`)
 
     console.log(`[ClaudeAdapter] Spawning SDK query for project ${client.projectId}...`)
-    const stream = query({ prompt, options: options as any })
+    const sdkPrompt = buildPrompt(prompt, images, client.sessionId)
+    const stream = query({ prompt: sdkPrompt, options: options as any })
     console.log(`[ClaudeAdapter] SDK query spawned for project ${client.projectId}`)
 
     // Store the Query object for forceful close on abort

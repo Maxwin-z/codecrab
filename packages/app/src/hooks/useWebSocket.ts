@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ChatMessage,
   ClientMessage,
+  ImageAttachment,
   ModelInfo,
   PendingPermission,
   PermissionMode,
@@ -108,7 +109,7 @@ export interface UseWebSocketReturn {
   permissionMode: PermissionMode
   sessionId: string
   projectStatuses: ProjectStatus[]
-  sendPrompt: (prompt: string) => void
+  sendPrompt: (prompt: string, images?: ImageAttachment[]) => void
   sendCommand: (command: string) => void
   abort: () => void
   setWorkingDir: (dir: string) => void
@@ -448,7 +449,7 @@ export function useWebSocket(): UseWebSocketReturn {
     }))
   }, [])
 
-  const sendPrompt = useCallback((prompt: string) => {
+  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[]) => {
     const pid = activeProjectIdRef.current
     if (!pid) return
     const pState = getProjectState(pid)
@@ -457,12 +458,17 @@ export function useWebSocket(): UseWebSocketReturn {
       id: genId(),
       role: 'user',
       content: prompt,
+      images: images?.length ? images : undefined,
       timestamp: Date.now(),
     }
     pState.messages = [...pState.messages, userMsg]
     triggerRender()
 
-    sendWithProject({ type: 'prompt', prompt })
+    sendWithProject({
+      type: 'prompt',
+      prompt,
+      ...(images?.length ? { images } : {}),
+    })
   }, [getProjectState, sendWithProject, triggerRender])
 
   const sendCommand = useCallback((command: string) => {

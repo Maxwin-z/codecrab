@@ -11,6 +11,7 @@ export interface ProjectContext {
 export interface PromptMessage extends ProjectContext {
   type: 'prompt'
   prompt: string
+  images?: ImageAttachment[]
 }
 
 export interface CommandMessage extends ProjectContext {
@@ -245,6 +246,14 @@ export type ServerMessage =
   | AvailableModelsMessage
   | ProjectStatusesMessage
 
+// ============ Image Attachments ============
+
+export interface ImageAttachment {
+  data: string       // base64-encoded image data
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+  name?: string      // original filename
+}
+
 // ============ Shared Types ============
 
 export interface QuestionOption {
@@ -273,6 +282,7 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  images?: ImageAttachment[]
   thinking?: string
   toolCalls?: { name: string; id: string; input: unknown; result?: string; isError?: boolean }[]
   costUsd?: number

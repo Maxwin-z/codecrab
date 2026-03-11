@@ -649,6 +649,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         id: genId(),
         role: 'user',
         content: msg.prompt,
+        images: msg.images?.length ? msg.images : undefined,
         timestamp: Date.now(),
       }
       session.messages.push(userMsg)
@@ -742,7 +743,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           onUsage: (_usage) => {
             // Usage is tracked internally
           },
-        })
+        }, msg.images)
 
         // Process stream events
         let finalText = ''

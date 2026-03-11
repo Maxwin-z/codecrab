@@ -8,6 +8,7 @@ import { SessionSidebar } from './SessionSidebar'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Menu, Loader2 } from 'lucide-react'
 import { authFetch } from '@/lib/auth'
+import type { ImageAttachment } from '@codeclaws/shared'
 
 interface Project {
   id: string
@@ -82,11 +83,11 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     }
   }, [project])
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, images?: ImageAttachment[]) => {
     if (text.startsWith('/')) {
       ws.sendCommand(text)
     } else {
-      ws.sendPrompt(text)
+      ws.sendPrompt(text, images)
     }
   }
 

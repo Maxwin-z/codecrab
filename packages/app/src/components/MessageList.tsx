@@ -57,8 +57,20 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end min-w-0">
-        <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-4 py-2 max-w-[85%] text-sm whitespace-pre-wrap break-all">
-          {message.content}
+        <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-4 py-2 max-w-[85%] text-sm">
+          {message.images && message.images.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {message.images.map((img, i) => (
+                <img
+                  key={i}
+                  src={`data:${img.mediaType};base64,${img.data}`}
+                  alt={img.name || `Image ${i + 1}`}
+                  className="max-h-32 max-w-48 rounded-lg object-cover"
+                />
+              ))}
+            </div>
+          )}
+          <div className="whitespace-pre-wrap break-all">{message.content}</div>
         </div>
       </div>
     )
