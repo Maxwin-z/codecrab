@@ -628,15 +628,18 @@ async function* processMessage(
       const content = (message as any).message?.content
       if (!content) break
 
+      // With includePartialMessages, assistant messages contain the FULL accumulated
+      // content (snapshots), not deltas. stream_event handles real-time streaming.
+      // Here we only:
+      // 1. Update accumulated text/thinking snapshots (for final message storage)
+      // 2. Process tool_use blocks (which need immediate callback handling)
+      let fullText = ''
+      let fullThinking = ''
       for (const block of content) {
         if (block.type === 'text') {
-          client.accumulatingText += block.text
-          callbacks.onTextDelta(block.text)
-          yield { type: 'text_delta', data: { text: block.text } }
+          fullText += block.text
         } else if (block.type === 'thinking') {
-          client.accumulatingThinking += block.thinking
-          callbacks.onThinkingDelta(block.thinking)
-          yield { type: 'thinking_delta', data: { thinking: block.thinking } }
+          fullThinking += block.thinking
         } else if (block.type === 'tool_use') {
           // Handle AskUserQuestion specially
           if (
@@ -653,21 +656,28 @@ async function* processMessage(
             }
           }
 
-          // Store tool call
-          client.currentToolCalls = client.currentToolCalls || []
-          client.currentToolCalls.push({
-            name: block.name,
-            id: block.id,
-            input: block.input,
-          })
+          // Only emit tool_use if we haven't seen this tool call before
+          const alreadyTracked = client.currentToolCalls?.some(tc => tc.id === block.id)
+          if (!alreadyTracked) {
+            // Store tool call
+            client.currentToolCalls = client.currentToolCalls || []
+            client.currentToolCalls.push({
+              name: block.name,
+              id: block.id,
+              input: block.input,
+            })
 
-          callbacks.onToolUse(block.name, block.id, block.input)
-          yield {
-            type: 'tool_use',
-            data: { toolName: block.name, toolId: block.id, input: block.input },
+            callbacks.onToolUse(block.name, block.id, block.input)
+            yield {
+              type: 'tool_use',
+              data: { toolName: block.name, toolId: block.id, input: block.input },
+            }
           }
         }
       }
+      // Update snapshots (replace, not append) for final message storage
+      if (fullText) client.accumulatingText = fullText
+      if (fullThinking) client.accumulatingThinking = fullThinking
       break
     }
 

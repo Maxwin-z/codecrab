@@ -169,6 +169,9 @@ export function useWebSocket(): UseWebSocketReturn {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws?clientId=${clientId}${tokenParam}`)
     wsRef.current = ws
 
+    // Flag to prevent reconnection when closed intentionally (e.g. by React StrictMode cleanup)
+    let closedIntentionally = false
+
     ws.onopen = () => {
       setConnected(true)
       // Re-subscribe to active project on reconnect
@@ -185,8 +188,10 @@ export function useWebSocket(): UseWebSocketReturn {
 
     ws.onclose = () => {
       setConnected(false)
-      // Reconnect after 2s
-      setTimeout(connect, 2000)
+      // Only reconnect if the close was NOT intentional (e.g. server disconnect, not cleanup)
+      if (!closedIntentionally) {
+        setTimeout(connect, 2000)
+      }
     }
 
     ws.onmessage = (event) => {
@@ -425,13 +430,17 @@ export function useWebSocket(): UseWebSocketReturn {
         triggerRender()
       }
     }
+
+    // Return a cleanup function that marks the close as intentional
+    return () => {
+      closedIntentionally = true
+      ws.close()
+    }
   }, [getProjectState, triggerRender])
 
   useEffect(() => {
-    connect()
-    return () => {
-      wsRef.current?.close()
-    }
+    const cleanup = connect()
+    return cleanup
   }, [connect])
 
   // Send helper: stamps projectId + sessionId on outgoing messages

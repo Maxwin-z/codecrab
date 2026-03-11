@@ -122,6 +122,7 @@ interface ProjectSubscription {
 
 interface Client {
   ws: WebSocket
+  connectionId: string
   clientId: string
   // Projects this client is subscribed to (receives broadcasts for)
   subscribedProjects: Map<string, ProjectSubscription>
@@ -221,13 +222,13 @@ export function deleteSession(sessionId: string): boolean {
 }
 
 // Broadcast message to all clients subscribed to a project
-function broadcastToProject(projectId: string | undefined, message: ServerMessage, excludeClientId?: string) {
+function broadcastToProject(projectId: string | undefined, message: ServerMessage, excludeConnectionId?: string) {
   if (!projectId) return
   // Stamp projectId on the message
   const stamped = { ...message, projectId }
   const data = JSON.stringify(stamped)
-  for (const [clientId, client] of clients) {
-    if (excludeClientId && clientId === excludeClientId) continue
+  for (const [connectionId, client] of clients) {
+    if (excludeConnectionId && connectionId === excludeConnectionId) continue
     if (client.subscribedProjects.has(projectId) && client.ws.readyState === WebSocket.OPEN) {
       client.ws.send(data)
     }
@@ -368,6 +369,7 @@ export function setupWebSocket(server: Server) {
   wss.on('connection', async (ws, req) => {
     const url = new URL(req.url || '', `http://${req.headers.host}`)
     const clientId = url.searchParams.get('clientId') || `anon-${Date.now()}`
+    const connectionId = `conn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
     // Check auth token from query param
     const token = url.searchParams.get('token')
@@ -377,10 +379,10 @@ export function setupWebSocket(server: Server) {
       return
     }
 
-    const client: Client = { ws, clientId, subscribedProjects: new Map() }
-    clients.set(clientId, client)
+    const client: Client = { ws, connectionId, clientId, subscribedProjects: new Map() }
+    clients.set(connectionId, client)
 
-    console.log(`[ws] client connected: ${clientId}`)
+    console.log(`[ws] client connected: ${clientId} (${connectionId})`)
 
     // Send global state on connect
     let models = getCachedModels()
@@ -411,8 +413,8 @@ export function setupWebSocket(server: Server) {
     })
 
     ws.on('close', () => {
-      console.log(`[ws] client disconnected: ${clientId}`)
-      clients.delete(clientId)
+      console.log(`[ws] client disconnected: ${clientId} (${connectionId})`)
+      clients.delete(connectionId)
 
       // Update session statuses for all subscribed projects
       for (const [projectId, sub] of client.subscribedProjects) {
@@ -432,12 +434,15 @@ export function setupWebSocket(server: Server) {
         }
       }
 
-      // Clean up client states
-      removeAllClientStates(clientId)
+      // Clean up client states ONLY if this was the last connection for this clientId
+      const hasOtherConnectionsForClientId = Array.from(clients.values()).some((c) => c.clientId === clientId)
+      if (!hasOtherConnectionsForClientId) {
+        removeAllClientStates(clientId)
+      }
     })
 
     ws.on('error', (err) => {
-      console.error(`[ws] client error: ${clientId}`, err)
+      console.error(`[ws] client error: ${clientId} (${connectionId})`, err)
     })
   })
 
@@ -651,7 +656,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       broadcastToProject(
         projectId,
         { type: 'user_message', message: userMsg, projectId, sessionId: session.sessionId },
-        client.clientId
+        client.connectionId
       )
 
       // Start processing
@@ -736,12 +741,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
               finalText += (event.data as any).text
               break
             case 'thinking_delta':
-              broadcastToProject(projectId, {
-                type: 'thinking',
-                thinking: (event.data as any).thinking,
-                projectId,
-                sessionId: session.sessionId,
-              })
+              // Handled by onThinkingDelta callback (stream_delta broadcast)
               break
             case 'tool_use':
               break
@@ -979,7 +979,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       if (!handled) {
         // Try other client states for this project
         for (const otherClient of clients.values()) {
-          if (otherClient.clientId === client.clientId) continue
+          if (otherClient.connectionId === client.connectionId) continue
           const otherState = getClientState(otherClient.clientId, projectId)
           if (otherState && handlePermissionResponse(otherState, msg.requestId, msg.allow)) {
             break
