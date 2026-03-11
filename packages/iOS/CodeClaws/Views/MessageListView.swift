@@ -5,15 +5,15 @@ struct MessageListView: View {
     let streamingText: String
     let streamingThinking: String
     let isRunning: Bool
-    
+
     var body: some View {
         VStack(spacing: 16) {
-            if messages.isEmpty && streamingText.isEmpty && streamingThinking.isEmpty {
+            if messages.isEmpty && streamingText.isEmpty && streamingThinking.isEmpty && !isRunning {
                 VStack(spacing: 16) {
                     Text("CodeClaws")
                         .font(.largeTitle)
                         .fontWeight(.bold)
-                    Text("Send a message to start")
+                    Text("Send a message to start coding with AI")
                         .foregroundColor(.secondary)
                 }
                 .padding(.top, 100)
@@ -21,36 +21,41 @@ struct MessageListView: View {
                 ForEach(messages) { msg in
                     MessageBubbleView(message: msg)
                 }
-                
-                if isRunning {
-                    if !streamingThinking.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Thinking:")
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                            Text(streamingThinking)
-                                .font(.body)
-                        }
-                        .padding()
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Streaming thinking
+                if !streamingThinking.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Thinking:")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        Text(streamingThinking)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    if !streamingText.isEmpty {
-                        Text(streamingText)
-                            .padding()
-                            .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if streamingThinking.isEmpty {
-                        HStack {
-                            Circle()
-                                .fill(Color.orange)
-                                .frame(width: 10, height: 10)
-                            Text("Processing...")
-                                .foregroundColor(.secondary)
-                        }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Streaming text
+                if !streamingText.isEmpty {
+                    Text(streamingText)
+                        .font(.body)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Running indicator
+                if isRunning && streamingText.isEmpty && streamingThinking.isEmpty {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 8, height: 8)
+                        Text("Processing...")
+                            .foregroundColor(.secondary)
+                        Spacer()
                     }
                 }
             }
@@ -61,100 +66,234 @@ struct MessageListView: View {
 struct MessageBubbleView: View {
     let message: ChatMessage
     @State private var expandThinking = false
-    @State private var expandTools = false
-    
+
     var body: some View {
-        VStack(alignment: message.role == "user" ? .trailing : .leading) {
-            if message.role == "user" {
-                if let images = message.images, !images.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack {
-                            ForEach(images.indices, id: \.self) { idx in
-                                if let data = Data(base64Encoded: images[idx].data),
-                                   let uiImage = UIImage(data: data) {
-                                    Image(uiImage: uiImage)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(maxHeight: 128)
-                                        .cornerRadius(8)
-                                }
-                            }
-                        }
-                    }
-                }
-                Text(message.content)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            } else if message.role == "assistant" {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let thinking = message.thinking, !thinking.isEmpty {
-                        DisclosureGroup("Thinking...", isExpanded: $expandThinking) {
-                            Text(thinking)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .accentColor(.orange)
-                    }
-                    if !message.content.isEmpty {
-                        Text(message.content)
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding()
-                .background(Color(UIColor.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-            } else if message.role == "system" {
-                if let tools = message.toolCalls, !tools.isEmpty {
-                    DisclosureGroup("Tools Used (\(tools.count))", isExpanded: $expandTools) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(tools) { tool in
-                                VStack(alignment: .leading) {
-                                    HStack {
-                                        Circle()
-                                            .fill(tool.isError == true ? Color.red : (tool.result != nil ? Color.green : Color.orange))
-                                            .frame(width: 8, height: 8)
-                                        Text(tool.name)
-                                            .fontDesign(.monospaced)
-                                            .foregroundColor(.cyan)
+        if message.role == "user" {
+            // User message - right aligned bubble
+            HStack {
+                Spacer()
+                VStack(alignment: .trailing, spacing: 8) {
+                    if let images = message.images, !images.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack {
+                                ForEach(images.indices, id: \.self) { idx in
+                                    if let data = Data(base64Encoded: images[idx].data),
+                                       let uiImage = UIImage(data: data) {
+                                        Image(uiImage: uiImage)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(maxHeight: 128)
+                                            .cornerRadius(8)
                                     }
-                                    Text(toolInputSummary(name: tool.name, input: tool.input))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(2)
                                 }
-                                .padding(.vertical, 4)
                             }
                         }
                     }
-                    .padding()
-                    .background(Color(UIColor.tertiarySystemBackground))
-                    .cornerRadius(8)
-                } else {
                     Text(message.content)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                    if let cost = message.costUsd, let duration = message.durationMs {
-                        Text(String(format: "($%.4f | %.1fs)", cost, duration / 1000.0))
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    }
+                        .font(.body)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+                .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
+            }
+        } else if message.role == "system" && !(message.toolCalls?.isEmpty ?? true) {
+            // Tool calls - flat list like web
+            VStack(spacing: 4) {
+                ForEach(message.toolCalls!) { tool in
+                    ToolCallView(tool: tool)
                 }
             }
+        } else if message.role == "system" {
+            // System message (cost/duration)
+            if !message.content.isEmpty || message.costUsd != nil {
+                HStack {
+                    Spacer()
+                    if !message.content.isEmpty {
+                        Text(message.content)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if let cost = message.costUsd, let duration = message.durationMs {
+                        Text(String(format: "($%.4f | %.1fs)", cost, duration / 1000.0))
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+            }
+        } else if message.role == "assistant" {
+            // Assistant message - flat, no bubble
+            VStack(alignment: .leading, spacing: 8) {
+                // Thinking - collapsible like web
+                if let thinking = message.thinking, !thinking.isEmpty {
+                    Button(action: { expandThinking.toggle() }) {
+                        HStack(spacing: 4) {
+                            Text(expandThinking ? "−" : "+")
+                                .font(.caption)
+                            Text("Thinking...")
+                                .font(.caption)
+                            Spacer()
+                        }
+                        .foregroundColor(.orange.opacity(0.8))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    if expandThinking {
+                        Text(thinking)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(8)
+                    }
+                }
+
+                // Content - plain text, no bubble
+                if !message.content.isEmpty {
+                    Text(message.content)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
     }
-    
-    private func toolInputSummary(name: String, input: JSONValue) -> String {
-        switch input {
-        case .object(let dict):
-            if name == "Read" || name == "Edit", case .string(let path) = dict["file_path"] { return path }
-            if name == "Bash", case .string(let cmd) = dict["command"] { return String(cmd.prefix(120)) }
-            if name == "Glob" || name == "Grep", case .string(let pat) = dict["pattern"] { return pat }
-            return "..."
-        default: return ""
+}
+
+struct ToolCallView: View {
+    let tool: ToolCall
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: { expanded.toggle() }) {
+                HStack(spacing: 8) {
+                    // Status indicator
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+
+                    // Tool name
+                    Text(tool.name)
+                        .font(.caption)
+                        .fontDesign(.monospaced)
+                        .foregroundColor(.cyan)
+
+                    // Input summary
+                    Text(summarizeInput())
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Spacer()
+
+                    // Expand/collapse
+                    Text(expanded ? "−" : "+")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(UIColor.secondarySystemBackground).opacity(0.5))
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Input
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Input:")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(formatJSON(tool.input))
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                            .foregroundColor(.secondary)
+                    }
+
+                    // Result
+                    if let result = tool.result {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Result:")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(truncate(result, max: 2000))
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .foregroundColor(tool.isError == true ? .red : .secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
+            }
         }
+        .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(UIColor.separator), lineWidth: 0.5)
+        )
+    }
+
+    private var statusColor: Color {
+        if tool.isError == true { return .red }
+        if tool.result != nil { return .green }
+        return .orange
+    }
+
+    private func summarizeInput() -> String {
+        guard case .object(let dict) = tool.input else { return "" }
+
+        switch tool.name {
+        case "Read", "ReadFile":
+            if case .string(let path) = dict["file_path"] ?? dict["path"] { return path }
+        case "Write", "WriteFile", "Edit", "EditFile":
+            if case .string(let path) = dict["file_path"] ?? dict["path"] { return path }
+        case "Bash", "bash":
+            if case .string(let cmd) = dict["command"] { return String(cmd.prefix(60)) }
+        case "Glob", "Grep":
+            if case .string(let pat) = dict["pattern"] { return pat }
+        default:
+            break
+        }
+        return ""
+    }
+
+    private func formatJSON(_ value: JSONValue) -> String {
+        switch value {
+        case .object(let dict):
+            var items: [String] = []
+            for (k, v) in dict {
+                items.append("\(k): \(formatValue(v))")
+            }
+            return items.joined(separator: ", ")
+        case .array(let arr):
+            return arr.map { formatValue($0) }.joined(separator: ", ")
+        default:
+            return formatValue(value)
+        }
+    }
+
+    private func formatValue(_ value: JSONValue) -> String {
+        switch value {
+        case .string(let s): return s
+        case .number(let n): return String(n)
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return "null"
+        default: return "..."
+        }
+    }
+
+    private func truncate(_ str: String, max: Int) -> String {
+        if str.count <= max { return str }
+        return String(str.prefix(max)) + "\n... (truncated)"
     }
 }

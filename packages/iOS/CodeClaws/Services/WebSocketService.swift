@@ -303,8 +303,19 @@ class WebSocketService: ObservableObject {
     }
     
     // Actions
-    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil) {
+    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil) {
         guard let projectId = activeProjectId else { return }
+
+        // Add user message locally first (like web version does)
+        let userMsg = ChatMessage(
+            id: UUID().uuidString,
+            role: "user",
+            content: text,
+            images: images,
+            timestamp: Date().timeIntervalSince1970 * 1000
+        )
+        self.messages.append(userMsg)
+
         var payload: [String: Any] = [
             "type": "prompt",
             "prompt": text,
@@ -313,6 +324,9 @@ class WebSocketService: ObservableObject {
         ]
         if let images = images, !images.isEmpty, let imgData = try? JSONEncoder().encode(images), let imgJson = try? JSONSerialization.jsonObject(with: imgData) {
             payload["images"] = imgJson
+        }
+        if let mcps = enabledMcps {
+            payload["enabledMcps"] = mcps
         }
         sendWebSocketMessage(payload)
     }

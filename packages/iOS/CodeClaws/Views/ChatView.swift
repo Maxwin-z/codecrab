@@ -4,6 +4,8 @@ struct ChatView: View {
     let project: Project
     @EnvironmentObject var wsService: WebSocketService
     @State private var showSidebar = false
+    @State private var availableMcps: [McpInfo] = []
+    @State private var enabledMcps: [String] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -83,7 +85,16 @@ struct ChatView: View {
                 isRunning: wsService.isRunning,
                 isAborting: wsService.isAborting,
                 currentModel: wsService.currentModel.isEmpty ? "Model" : wsService.currentModel,
-                permissionMode: wsService.permissionMode
+                permissionMode: wsService.permissionMode,
+                availableMcps: availableMcps,
+                enabledMcps: enabledMcps,
+                onToggleMcp: { mcpId in
+                    if enabledMcps.contains(mcpId) {
+                        enabledMcps.removeAll { $0 == mcpId }
+                    } else {
+                        enabledMcps.append(mcpId)
+                    }
+                }
             )
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -102,6 +113,7 @@ struct ChatView: View {
         }
         .onAppear {
             wsService.switchProject(projectId: project.id, cwd: project.path)
+            fetchMcps()
         }
     }
     
@@ -111,11 +123,23 @@ struct ChatView: View {
         }
     }
     
-    private func handleSend(text: String, images: [ImageAttachment]?) {
+    private func handleSend(text: String, images: [ImageAttachment]?, mcps: [String]?) {
         if text.hasPrefix("/") {
             wsService.sendCommand(text)
         } else {
-            wsService.sendPrompt(text, images: images)
+            wsService.sendPrompt(text, images: images, enabledMcps: mcps)
+        }
+    }
+
+    private func fetchMcps() {
+        Task {
+            do {
+                let mcps: [McpInfo] = try await APIClient.shared.fetch(path: "/api/mcps")
+                availableMcps = mcps
+                enabledMcps = mcps.map { $0.id }
+            } catch {
+                print("Failed to load MCPs: \(error)")
+            }
         }
     }
 }

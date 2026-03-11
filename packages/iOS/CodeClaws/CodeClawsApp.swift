@@ -26,9 +26,7 @@ struct RootView: View {
         } else if !auth.isAuthenticated {
             LoginView()
         } else {
-            NavigationStack {
-                HomeView()
-            }
+            HomeView()
         }
     }
 }
