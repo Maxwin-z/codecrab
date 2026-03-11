@@ -359,15 +359,6 @@ export function useWebSocket(): UseWebSocketReturn {
         case 'session_resumed':
           if (msg.sessionId) {
             pState.sessionId = msg.sessionId
-            pState.messages = [
-              ...pState.messages,
-              {
-                id: genId(),
-                role: 'system',
-                content: `Resumed session: ${msg.sessionId.slice(-6)}`,
-                timestamp: Date.now(),
-              },
-            ]
           }
           break
 

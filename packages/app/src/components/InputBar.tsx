@@ -8,9 +8,10 @@ interface InputBarProps {
   isRunning: boolean
   isAborting?: boolean
   disabled: boolean
+  currentModel?: string
 }
 
-export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled }: InputBarProps) {
+export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel }: InputBarProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -95,7 +96,7 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled }: I
         </div>
       </div>
       <div className="flex items-center justify-between gap-2 mt-2 text-xs text-muted-foreground">
-        <span>Cmd+Enter to send</span>
+        <span className="font-mono">{currentModel || 'Default'}</span>
         {isRunning && <span className="text-amber-500">Processing...</span>}
       </div>
     </div>

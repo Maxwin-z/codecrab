@@ -212,6 +212,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         isRunning={ws.isRunning}
         isAborting={ws.isAborting}
         disabled={!ws.connected}
+        currentModel={ws.currentModel}
       />
 
       {/* Session History Sidebar */}

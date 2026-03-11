@@ -105,7 +105,7 @@ function readModelsConfig(): { models: ModelConfig[]; defaultModelId?: string } 
 }
 
 // Get default model configuration
-function getDefaultModelConfig(): ModelConfig | null {
+export function getDefaultModelConfig(): ModelConfig | null {
   const config = readModelsConfig()
   if (!config.defaultModelId) return null
   return config.models.find((m) => m.id === config.defaultModelId) || null
@@ -232,6 +232,27 @@ export function loadModelsFromConfig(): ModelInfo[] {
   }))
   cachedModels = models
   return models
+}
+
+// Get simplified model display name for UI
+// Returns: 'Claude' for anthropic, 'Google' for google, 'OpenAI' for openai, or custom name
+export function getModelDisplayName(modelId: string): string {
+  const config = readModelsConfig()
+  const model = config.models.find((m) => m.id === modelId)
+  if (!model) return 'Default'
+
+  switch (model.provider) {
+    case 'anthropic':
+      return 'Claude'
+    case 'google':
+      return 'Google'
+    case 'openai':
+      return 'OpenAI'
+    case 'custom':
+      return model.name || 'Custom'
+    default:
+      return model.name || 'Default'
+  }
 }
 
 // Load API key from config directory

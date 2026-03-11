@@ -29,6 +29,8 @@ import {
   getCachedModels,
   loadModelsFromConfig,
   generateSessionId,
+  getModelDisplayName,
+  getDefaultModelConfig,
 } from '../engine/claude.js'
 
 // Export for API use
@@ -489,11 +491,15 @@ function getOrCreateSessionForProject(
   persistSession(session)
 
   // Notify client of new session
+  const modelDisplay = projectState.model
+    ? getModelDisplayName(projectState.model)
+    : getDefaultModelConfig()?.name || 'Default'
   sendToClient(client, {
     type: 'system',
     subtype: 'init',
     projectId,
     sessionId: session.sessionId,
+    model: modelDisplay,
   })
 
   // Send available models
@@ -546,11 +552,16 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     const session = autoResumeSessionForProject(client, client.clientId, projectId)
 
     // Send init message
+    const projState = getOrCreateProjectState(projectId)
+    const modelDisplay = projState.model
+      ? getModelDisplayName(projState.model)
+      : getDefaultModelConfig()?.name || 'Default'
     sendToClient(client, {
       type: 'system',
       subtype: 'init',
       projectId,
       sessionId: session?.sessionId,
+      model: modelDisplay,
     })
 
     // Send models
@@ -861,11 +872,15 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         sub.sessionId = newSessionId
         persistSession(newSession)
 
+        const modelDisplay = projState.model
+          ? getModelDisplayName(projState.model)
+          : getDefaultModelConfig()?.name || 'Default'
         sendToClient(client, {
           type: 'system',
           subtype: 'init',
           projectId,
           sessionId: newSessionId,
+          model: modelDisplay,
         })
 
         const models = getCachedModels()
@@ -993,7 +1008,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       clientState.model = msg.model || undefined
       const projState = getOrCreateProjectState(projectId)
       projState.model = clientState.model
-      broadcastToProject(projectId, { type: 'model_changed', model: msg.model, projectId })
+      const displayName = clientState.model ? getModelDisplayName(clientState.model) : 'Default'
+      broadcastToProject(projectId, { type: 'model_changed', model: displayName, projectId })
       break
     }
 
