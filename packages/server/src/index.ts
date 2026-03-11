@@ -6,6 +6,7 @@ import projectsRouter from './api/projects.js'
 import authRouter from './api/auth.js'
 import sessionsRouter from './api/sessions.js'
 import { chromeRouter } from './mcp/chrome/index.js'
+import { getAvailableMcps } from './mcp/index.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
 import { setupWebSocket } from './ws/index.js'
 
@@ -54,6 +55,11 @@ app.use('/api/files', filesRouter)
 app.use('/api/projects', projectsRouter)
 app.use('/api/sessions', sessionsRouter)
 app.use('/api/chrome', chromeRouter)
+
+// MCP registry — list available MCP servers
+app.get('/api/mcps', (_req, res) => {
+  res.json(getAvailableMcps())
+})
 
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

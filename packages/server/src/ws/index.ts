@@ -742,7 +742,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           onUsage: (_usage) => {
             // Usage is tracked internally
           },
-        }, msg.images)
+        }, msg.images, msg.enabledMcps)
 
         // Process stream events
         let finalText = ''

@@ -1,6 +1,6 @@
 // InputBar — user text input with image upload and drag & drop support
 import { useState, useRef, useEffect, useCallback } from 'react'
-import type { ImageAttachment, PermissionMode } from '@codeclaws/shared'
+import type { ImageAttachment, McpInfo, PermissionMode } from '@codeclaws/shared'
 
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const MAX_LONG_EDGE = 1568
@@ -12,7 +12,7 @@ interface PreviewImage {
 }
 
 interface InputBarProps {
-  onSend: (text: string, images?: ImageAttachment[]) => void
+  onSend: (text: string, images?: ImageAttachment[], enabledMcps?: string[]) => void
   onAbort: () => void
   isRunning: boolean
   isAborting?: boolean
@@ -20,6 +20,9 @@ interface InputBarProps {
   currentModel?: string
   permissionMode?: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
+  availableMcps?: McpInfo[]
+  enabledMcps?: string[]
+  onToggleMcp?: (mcpId: string) => void
 }
 
 /** Compress and resize an image file, returns base64 ImageAttachment */
@@ -79,11 +82,13 @@ async function processImage(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange }: InputBarProps) {
+export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange, availableMcps, enabledMcps, onToggleMcp }: InputBarProps) {
   const [text, setText] = useState('')
   const [images, setImages] = useState<PreviewImage[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [mcpPopoverOpen, setMcpPopoverOpen] = useState(false)
+  const mcpPopoverRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
@@ -133,12 +138,24 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, cur
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Close MCP popover on click outside
+  useEffect(() => {
+    if (!mcpPopoverOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mcpPopoverRef.current && !mcpPopoverRef.current.contains(e.target as Node)) {
+        setMcpPopoverOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mcpPopoverOpen])
+
   const handleSubmit = () => {
     const trimmed = text.trim()
     if (!trimmed || disabled) return
 
     const attachments = images.length > 0 ? images.map((img) => img.attachment) : undefined
-    onSend(trimmed, attachments)
+    onSend(trimmed, attachments, enabledMcps)
 
     setText('')
     setImages([])
@@ -295,6 +312,61 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, cur
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
+
+            {/* MCP toggle button */}
+            {availableMcps && availableMcps.length > 0 && (
+              <div className="relative" ref={mcpPopoverRef}>
+                <button
+                  onClick={() => setMcpPopoverOpen((v) => !v)}
+                  disabled={disabled || isRunning}
+                  className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                    enabledMcps && enabledMcps.length < availableMcps.length
+                      ? 'text-amber-500 hover:text-amber-600 hover:bg-amber-500/10'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title="Manage MCP servers"
+                >
+                  {/* Puzzle piece icon */}
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.611a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.315 8.685a.98.98 0 0 1 .837-.276c.47.07.802.48.968.925a2.501 2.501 0 1 0 3.214-3.214c-.446-.166-.855-.497-.925-.968a.979.979 0 0 1 .276-.837l1.611-1.611a2.404 2.404 0 0 1 1.704-.706c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z" />
+                  </svg>
+                </button>
+
+                {/* MCP popover */}
+                {mcpPopoverOpen && (
+                  <div className="absolute bottom-full left-0 mb-2 w-72 rounded-xl border bg-popover text-popover-foreground shadow-lg z-50">
+                    <div className="px-3 py-2 border-b">
+                      <p className="text-xs font-medium">MCP Servers</p>
+                      <p className="text-[10px] text-muted-foreground">Toggle servers for this query</p>
+                    </div>
+                    <div className="py-1">
+                      {availableMcps.map((mcp) => {
+                        const isEnabled = !enabledMcps || enabledMcps.includes(mcp.id)
+                        return (
+                          <button
+                            key={mcp.id}
+                            onClick={() => onToggleMcp?.(mcp.id)}
+                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/50 transition-colors text-left"
+                          >
+                            <span className="text-base shrink-0">{mcp.icon || '🔌'}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{mcp.name}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">{mcp.description}</p>
+                            </div>
+                            <div className="shrink-0 flex items-center gap-1.5">
+                              <span className="text-[10px] text-muted-foreground">{mcp.toolCount} tools</span>
+                              <div className={`w-8 h-4.5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                                <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Status indicators */}
             {processing && (

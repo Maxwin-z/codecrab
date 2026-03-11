@@ -1,5 +1,5 @@
 // ChatPage — Main chat interface
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { MessageList } from './MessageList'
@@ -9,7 +9,7 @@ import { SessionSidebar } from './SessionSidebar'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Menu, Loader2 } from 'lucide-react'
 import { authFetch } from '@/lib/auth'
-import type { ImageAttachment } from '@codeclaws/shared'
+import type { ImageAttachment, McpInfo } from '@codeclaws/shared'
 
 interface Project {
   id: string
@@ -30,6 +30,25 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(false)
+  const [availableMcps, setAvailableMcps] = useState<McpInfo[]>([])
+  const [enabledMcps, setEnabledMcps] = useState<string[]>([])
+
+  // Fetch available MCPs on mount
+  useEffect(() => {
+    authFetch('/api/mcps', {}, onUnauthorized)
+      .then((r) => r.json())
+      .then((data: McpInfo[]) => {
+        setAvailableMcps(data)
+        setEnabledMcps(data.map((m) => m.id)) // all enabled by default
+      })
+      .catch((err) => console.error('Failed to load MCPs:', err))
+  }, [onUnauthorized])
+
+  const handleToggleMcp = useCallback((mcpId: string) => {
+    setEnabledMcps((prev) =>
+      prev.includes(mcpId) ? prev.filter((id) => id !== mcpId) : [...prev, mcpId]
+    )
+  }, [])
 
   // Auto-scroll to bottom when messages change or project loads
   useEffect(() => {
@@ -84,11 +103,11 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     }
   }, [project])
 
-  const handleSend = (text: string, images?: ImageAttachment[]) => {
+  const handleSend = (text: string, images?: ImageAttachment[], mcps?: string[]) => {
     if (text.startsWith('/')) {
       ws.sendCommand(text)
     } else {
-      ws.sendPrompt(text, images)
+      ws.sendPrompt(text, images, mcps)
     }
   }
 
@@ -228,6 +247,9 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         currentModel={ws.currentModel}
         permissionMode={ws.permissionMode}
         onPermissionModeChange={ws.setPermissionMode}
+        availableMcps={availableMcps}
+        enabledMcps={enabledMcps}
+        onToggleMcp={handleToggleMcp}
       />
 
       {/* Session History Sidebar */}

@@ -12,6 +12,7 @@ export interface PromptMessage extends ProjectContext {
   type: 'prompt'
   prompt: string
   images?: ImageAttachment[]
+  enabledMcps?: string[]  // MCP IDs to enable for this query (default: all)
 }
 
 export interface CommandMessage extends ProjectContext {
@@ -307,4 +308,12 @@ export interface SessionInfo {
   cwd?: string
   status?: 'idle' | 'processing' | 'error'
   isActive?: boolean
+}
+
+export interface McpInfo {
+  id: string
+  name: string
+  description: string
+  icon?: string           // emoji or icon identifier
+  toolCount: number
 }

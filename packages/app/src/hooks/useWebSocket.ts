@@ -109,7 +109,7 @@ export interface UseWebSocketReturn {
   permissionMode: PermissionMode
   sessionId: string
   projectStatuses: ProjectStatus[]
-  sendPrompt: (prompt: string, images?: ImageAttachment[]) => void
+  sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[]) => void
   sendCommand: (command: string) => void
   abort: () => void
   setWorkingDir: (dir: string) => void
@@ -462,7 +462,7 @@ export function useWebSocket(): UseWebSocketReturn {
     }))
   }, [])
 
-  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[]) => {
+  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[], enabledMcps?: string[]) => {
     const pid = activeProjectIdRef.current
     if (!pid) return
     const pState = getProjectState(pid)
@@ -481,6 +481,7 @@ export function useWebSocket(): UseWebSocketReturn {
       type: 'prompt',
       prompt,
       ...(images?.length ? { images } : {}),
+      ...(enabledMcps ? { enabledMcps } : {}),
     })
   }, [getProjectState, sendWithProject, triggerRender])
 

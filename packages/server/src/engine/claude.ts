@@ -2,11 +2,11 @@
 //
 // Wraps @anthropic-ai/claude-agent-sdk to conform to the EngineAdapter interface.
 
-import { query, type SDKMessage, type SDKUserMessage, type Query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKMessage, type SDKUserMessage, type Query } from '@anthropic-ai/claude-agent-sdk'
 import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
-import { chromeTools } from '../mcp/chrome/index.js'
+import { buildMcpServers } from '../mcp/index.js'
 import type {
   ChatMessage,
   ImageAttachment,
@@ -373,6 +373,7 @@ export async function* executeQuery(
     onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }) => void
   },
   images?: ImageAttachment[],
+  enabledMcps?: string[],
 ): AsyncGenerator<{ type: string; data?: unknown }> {
   // Get default model configuration from models.json
   const modelConfig = getDefaultModelConfig()
@@ -445,33 +446,8 @@ export async function* executeQuery(
     },
   }
 
-  // Set up MCP servers (cron, push, chrome)
-  const chromeMcp = createSdkMcpServer({
-    name: 'chrome',
-    tools: chromeTools,
-  })
-
-  // MCP servers — cron & push temporarily disabled, chrome enabled
-  options.mcpServers = {
-    // cron: {
-    //   type: 'stdio',
-    //   command: 'npx',
-    //   args: ['tsx', path.join(process.cwd(), 'src/mcp/cron/index.ts')],
-    //   env: {
-    //     CLAUDE_CONFIG_DIR: path.join(os.homedir(), '.codeclaws'),
-    //     PATH: process.env.PATH || '',
-    //   },
-    // },
-    // push: {
-    //   type: 'stdio',
-    //   command: 'npx',
-    //   args: ['tsx', path.join(process.cwd(), 'src/mcp/push/index.ts')],
-    //   env: {
-    //     PATH: process.env.PATH || '',
-    //   },
-    // },
-    chrome: chromeMcp,
-  }
+  // Set up MCP servers — filtered by user's enabledMcps selection
+  options.mcpServers = buildMcpServers(enabledMcps)
 
   // Set up canUseTool for permission handling
   let reqCounter = 0
