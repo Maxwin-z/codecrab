@@ -116,6 +116,8 @@ struct ProjectCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
