@@ -143,7 +143,8 @@ class WebSocketService: ObservableObject {
             if isCurrentProject {
                 self.isRunning = false
                 self.isAborting = false
-                if !self.streamingText.isEmpty {
+                // Save message if there's text or thinking content
+                if !self.streamingText.isEmpty || !self.streamingThinking.isEmpty {
                     let cleanText = self.cleanStreamingText(self.streamingText)
                     let msg = ChatMessage(id: UUID().uuidString, role: "assistant", content: cleanText, thinking: self.streamingThinking.isEmpty ? nil : self.streamingThinking, timestamp: Date().timeIntervalSince1970 * 1000)
                     self.messages.append(msg)

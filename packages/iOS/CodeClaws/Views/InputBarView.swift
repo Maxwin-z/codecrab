@@ -12,11 +12,13 @@ struct InputBarView: View {
     let availableMcps: [McpInfo]
     let enabledMcps: [String]
     let onToggleMcp: (String) -> Void
+    @Binding var isInputFocused: Bool
 
     @State private var text: String = ""
     @State private var attachments: [ImageAttachment] = []
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var showMcpPopover = false
+    @FocusState private var isFocused: Bool
 
     private var isSafe: Bool { permissionMode == "default" }
     private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty }
@@ -59,6 +61,23 @@ struct InputBarView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .disabled(isRunning)
+                .focused($isFocused)
+                .onSubmit {
+                    send()
+                }
+                .onChange(of: isRunning) { running in
+                    if !running {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            isFocused = true
+                        }
+                    }
+                }
+                .onChange(of: isFocused) { _, focused in
+                    isInputFocused = focused
+                }
+                .onChange(of: isInputFocused) { _, focused in
+                    isFocused = focused
+                }
 
             // Bottom toolbar
             HStack(spacing: 0) {
@@ -72,7 +91,7 @@ struct InputBarView: View {
                             .frame(width: 34, height: 34)
                     }
                     .disabled(isRunning)
-                    .onChange(of: selectedItem) { newItem in
+                    .onChange(of: selectedItem) { _, newItem in
                         Task {
                             if let data = try? await newItem?.loadTransferable(type: Data.self),
                                let image = UIImage(data: data),

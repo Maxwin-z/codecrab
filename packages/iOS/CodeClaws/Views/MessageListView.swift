@@ -19,7 +19,7 @@ struct MessageListView: View {
                 .padding(.top, 100)
             } else {
                 ForEach(messages) { msg in
-                    MessageBubbleView(message: msg)
+                    MessageBubbleView(message: msg, isRunning: isRunning)
                 }
 
                 // Streaming thinking
@@ -65,6 +65,7 @@ struct MessageListView: View {
 
 struct MessageBubbleView: View {
     let message: ChatMessage
+    let isRunning: Bool
     @State private var expandThinking = false
 
     var body: some View {
@@ -107,22 +108,21 @@ struct MessageBubbleView: View {
                 }
             }
         } else if message.role == "system" {
-            // System message (cost/duration)
+            // System message - show content and cost/duration like web
             if !message.content.isEmpty || message.costUsd != nil {
-                HStack {
-                    Spacer()
+                HStack(spacing: 4) {
                     if !message.content.isEmpty {
                         Text(message.content)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
-                    if let cost = message.costUsd, let duration = message.durationMs {
-                        Text(String(format: "($%.4f | %.1fs)", cost, duration / 1000.0))
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                    if let cost = message.costUsd {
+                        Text("($\(String(format: "%.4f", cost)) | \(String(format: "%.1f", (message.durationMs ?? 0) / 1000))s)")
+                            .foregroundColor(.secondary.opacity(0.7))
                     }
-                    Spacer()
                 }
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 4)
             }
         } else if message.role == "assistant" {
             // Assistant message - flat, no bubble
@@ -161,6 +161,20 @@ struct MessageBubbleView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear {
+                // Auto-expand thinking while streaming, collapse when done
+                if message.thinking != nil && !message.thinking!.isEmpty {
+                    expandThinking = isRunning
+                }
+            }
+            .onChange(of: isRunning) { running in
+                // Collapse thinking when response completes
+                if !running && message.thinking != nil && !message.thinking!.isEmpty {
+                    withAnimation {
+                        expandThinking = false
+                    }
+                }
+            }
         }
     }
 }
