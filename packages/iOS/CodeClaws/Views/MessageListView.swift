@@ -43,7 +43,6 @@ struct MessageListView: View {
                 if !streamingText.isEmpty {
                     Text(streamingText)
                         .font(.body)
-                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
@@ -67,48 +66,66 @@ struct MessageBubbleView: View {
     let message: ChatMessage
     let isRunning: Bool
     @State private var expandThinking = false
+    @State private var selectableText: SelectableTextItem?
 
     var body: some View {
-        if message.role == "user" {
-            // User message - right aligned bubble
-            HStack {
-                Spacer()
-                VStack(alignment: .trailing, spacing: 8) {
-                    if let images = message.images, !images.isEmpty {
-                        ScrollView(.horizontal) {
-                            HStack {
-                                ForEach(images.indices, id: \.self) { idx in
-                                    if let data = Data(base64Encoded: images[idx].data),
-                                       let uiImage = UIImage(data: data) {
-                                        Image(uiImage: uiImage)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(maxHeight: 128)
-                                            .cornerRadius(8)
-                                    }
+        Group {
+            if message.role == "user" {
+                userBubble
+            } else if message.role == "system" && !(message.toolCalls?.isEmpty ?? true) {
+                VStack(spacing: 4) {
+                    ForEach(message.toolCalls!) { tool in
+                        ToolCallView(tool: tool)
+                    }
+                }
+            } else if message.role == "system" {
+                systemBubble
+            } else if message.role == "assistant" {
+                assistantBubble
+            }
+        }
+        .sheet(item: $selectableText) { item in
+            SelectableTextSheet(text: item.content)
+        }
+    }
+
+    private var userBubble: some View {
+        HStack {
+            Spacer()
+            VStack(alignment: .trailing, spacing: 8) {
+                if let images = message.images, !images.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack {
+                            ForEach(images.indices, id: \.self) { idx in
+                                if let data = Data(base64Encoded: images[idx].data),
+                                   let uiImage = UIImage(data: data) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxHeight: 128)
+                                        .cornerRadius(8)
                                 }
                             }
                         }
                     }
-                    Text(message.content)
-                        .font(.body)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
-                .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
+                Text(message.content)
+                    .font(.body)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .onLongPressGesture {
+                        selectableText = SelectableTextItem(content: message.content)
+                    }
             }
-        } else if message.role == "system" && !(message.toolCalls?.isEmpty ?? true) {
-            // Tool calls - flat list like web
-            VStack(spacing: 4) {
-                ForEach(message.toolCalls!) { tool in
-                    ToolCallView(tool: tool)
-                }
-            }
-        } else if message.role == "system" {
-            // System message - show content and cost/duration like web
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
+        }
+    }
+
+    private var systemBubble: some View {
+        Group {
             if !message.content.isEmpty || message.costUsd != nil {
                 HStack(spacing: 4) {
                     if !message.content.isEmpty {
@@ -124,90 +141,141 @@ struct MessageBubbleView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 4)
             }
-        } else if message.role == "assistant" {
-            // Assistant message - flat, no bubble
-            VStack(alignment: .leading, spacing: 8) {
-                // Thinking - collapsible like web
-                if let thinking = message.thinking, !thinking.isEmpty {
-                    Button(action: { expandThinking.toggle() }) {
-                        HStack(spacing: 4) {
-                            Text(expandThinking ? "−" : "+")
-                                .font(.caption)
-                            Text("Thinking...")
-                                .font(.caption)
-                            Spacer()
-                        }
-                        .foregroundColor(.orange.opacity(0.8))
-                    }
-                    .buttonStyle(PlainButtonStyle())
+        }
+    }
 
-                    if expandThinking {
-                        Text(thinking)
+    private var assistantBubble: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Thinking - collapsible
+            if let thinking = message.thinking, !thinking.isEmpty {
+                Button(action: { expandThinking.toggle() }) {
+                    HStack(spacing: 4) {
+                        Text(expandThinking ? "−" : "+")
                             .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(8)
+                        Text("Thinking...")
+                            .font(.caption)
+                        Spacer()
                     }
+                    .foregroundColor(.orange.opacity(0.8))
                 }
+                .buttonStyle(PlainButtonStyle())
 
-                // Content - plain text, no bubble
-                if !message.content.isEmpty {
-                    Text(message.content)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if expandThinking {
+                    Text(thinking)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(8)
+                        .onLongPressGesture {
+                            selectableText = SelectableTextItem(content: thinking)
+                        }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onAppear {
-                // Auto-expand thinking while streaming, collapse when done
-                if message.thinking != nil && !message.thinking!.isEmpty {
-                    expandThinking = isRunning
-                }
-            }
-            .onChange(of: isRunning) { running in
-                // Collapse thinking when response completes
-                if !running && message.thinking != nil && !message.thinking!.isEmpty {
-                    withAnimation {
-                        expandThinking = false
+
+            // Content
+            if !message.content.isEmpty {
+                Text(message.content)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onLongPressGesture {
+                        selectableText = SelectableTextItem(content: message.content)
                     }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            if message.thinking != nil && !message.thinking!.isEmpty {
+                expandThinking = isRunning
+            }
+        }
+        .onChange(of: isRunning) { running in
+            if !running && message.thinking != nil && !message.thinking!.isEmpty {
+                withAnimation {
+                    expandThinking = false
                 }
             }
         }
     }
 }
 
+// MARK: - Selectable Text Sheet
+
+struct SelectableTextItem: Identifiable {
+    let id = UUID()
+    let content: String
+}
+
+struct SelectableTextSheet: View {
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            SelectableTextView(text: text)
+                .padding()
+                .navigationTitle("Select Text")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: {
+                            UIPasteboard.general.string = text
+                        }) {
+                            Label("Copy All", systemImage: "doc.on.doc")
+                        }
+                    }
+                }
+        }
+    }
+}
+
+struct SelectableTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = .systemFont(ofSize: 16)
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.backgroundColor = .clear
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.text = text
+    }
+}
+
+// MARK: - Tool Call View
+
 struct ToolCallView: View {
     let tool: ToolCall
     @State private var expanded = false
+    @State private var selectableText: SelectableTextItem?
 
     var body: some View {
         VStack(spacing: 0) {
             Button(action: { expanded.toggle() }) {
                 HStack(spacing: 8) {
-                    // Status indicator
                     Circle()
                         .fill(statusColor)
                         .frame(width: 6, height: 6)
-
-                    // Tool name
                     Text(tool.name)
                         .font(.caption)
                         .fontDesign(.monospaced)
                         .foregroundColor(.cyan)
-
-                    // Input summary
                     Text(summarizeInput())
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-
                     Spacer()
-
-                    // Expand/collapse
                     Text(expanded ? "−" : "+")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -230,6 +298,9 @@ struct ToolCallView: View {
                             .fontDesign(.monospaced)
                             .foregroundColor(.secondary)
                     }
+                    .onLongPressGesture {
+                        selectableText = SelectableTextItem(content: formatJSON(tool.input))
+                    }
 
                     // Result
                     if let result = tool.result {
@@ -241,6 +312,9 @@ struct ToolCallView: View {
                                 .font(.caption)
                                 .fontDesign(.monospaced)
                                 .foregroundColor(tool.isError == true ? .red : .secondary)
+                        }
+                        .onLongPressGesture {
+                            selectableText = SelectableTextItem(content: result)
                         }
                     }
                 }
@@ -255,6 +329,9 @@ struct ToolCallView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(UIColor.separator), lineWidth: 0.5)
         )
+        .sheet(item: $selectableText) { item in
+            SelectableTextSheet(text: item.content)
+        }
     }
 
     private var statusColor: Color {
