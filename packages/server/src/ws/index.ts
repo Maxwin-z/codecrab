@@ -606,6 +606,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
   switch (msg.type) {
     case 'prompt': {
+      console.log(`[ws] Prompt received for project ${projectId} from client ${client.clientId}`)
+
       // Create session lazily on first user message
       if (!session) {
         session = getOrCreateSessionForProject(client, client.clientId, projectId, clientState)
@@ -613,6 +615,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
       // Check if already running
       if (clientState.activeQuery) {
+        console.log(`[ws] Rejected: client already has active query for project ${projectId}`)
         safeSend(ws, { type: 'error', message: 'A query is already running', projectId })
         return
       }
@@ -620,6 +623,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       // Project-level lock
       const projState = getOrCreateProjectState(projectId)
       if (projState.activeQuery) {
+        console.log(`[ws] Rejected: project ${projectId} already has active query from another session`)
         safeSend(ws, { type: 'error', message: 'Another session is already running in this project. Please wait for it to finish or abort it first.', projectId })
         return
       }
@@ -901,12 +905,16 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     }
 
     case 'abort': {
+      console.log(`[ws] Abort requested for project ${projectId}, hasActiveQuery: ${!!clientState.activeQuery}`)
       if (abortQuery(clientState)) {
         if (session) {
           session.status = 'idle'
         }
         broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
         broadcastProjectStatuses()
+        console.log(`[ws] Abort completed for project ${projectId}`)
+      } else {
+        console.log(`[ws] Abort failed for project ${projectId}: no active query`)
       }
       break
     }

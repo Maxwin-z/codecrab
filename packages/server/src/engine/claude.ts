@@ -2,7 +2,7 @@
 //
 // Wraps @anthropic-ai/claude-agent-sdk to conform to the EngineAdapter interface.
 
-import { query, type SDKMessage, createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKMessage, type Query, createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -40,6 +40,7 @@ interface PendingPermission {
 // Active query state
 interface ActiveQuery {
   abort: AbortController
+  queryObj?: Query  // SDK Query object for forceful close
 }
 
 // Client state for WebSocket connections
@@ -298,9 +299,8 @@ export async function* executeQuery(
     )
   }
 
-  // Apply model configuration (directly set process.env, matching claude-remote-app)
+  // Build per-query env vars (avoid mutating process.env for concurrent query safety)
   const configDir = modelConfig.configDir || path.join(os.homedir(), '.codeclaws')
-  process.env.CLAUDE_CONFIG_DIR = configDir
 
   // Get API key from model config or fallback
   const apiKey = modelConfig.apiKey || loadApiKeyFromConfigDir(configDir) || process.env.ANTHROPIC_API_KEY
@@ -312,9 +312,14 @@ export async function* executeQuery(
     )
   }
 
-  process.env.ANTHROPIC_API_KEY = apiKey
+  // Per-query env: inherit process.env but override with model-specific config
+  const queryEnv: Record<string, string | undefined> = {
+    ...process.env,
+    CLAUDE_CONFIG_DIR: configDir,
+    ANTHROPIC_API_KEY: apiKey,
+  }
   if (modelConfig.baseUrl) {
-    process.env.ANTHROPIC_BASE_URL = modelConfig.baseUrl
+    queryEnv.ANTHROPIC_BASE_URL = modelConfig.baseUrl
   }
 
   const abortController = new AbortController()
@@ -345,6 +350,7 @@ export async function* executeQuery(
   const options: Record<string, unknown> = {
     abortController,
     cwd: client.cwd,
+    env: queryEnv,
     permissionMode: isYolo ? 'bypassPermissions' : 'default',
     allowDangerouslySkipPermissions: isYolo,
     includePartialMessages: true,
@@ -473,19 +479,31 @@ export async function* executeQuery(
   const isResuming = !!options.resume
 
   try {
-    console.log('[ClaudeAdapter] Starting query...')
+    console.log(`[ClaudeAdapter] Starting query for project ${client.projectId || 'unknown'}...`)
     console.log(`  CWD: ${client.cwd}`)
     console.log(`  Session: ${client.sessionId || 'new'}`)
     console.log(`  Using model: ${modelConfig.name} (${modelConfig.provider})`)
     console.log(`  Model ID: ${options.model}`)
     console.log(`  Permission mode: ${client.permissionMode}`)
-    console.log(`  CLAUDE_CONFIG_DIR: ${process.env.CLAUDE_CONFIG_DIR}`)
-    console.log(`  ANTHROPIC_API_KEY: ${process.env.ANTHROPIC_API_KEY?.slice(0, 10)}...`)
-    console.log(`  ANTHROPIC_BASE_URL: ${process.env.ANTHROPIC_BASE_URL || 'default'}`)
+    console.log(`  CLAUDE_CONFIG_DIR: ${queryEnv.CLAUDE_CONFIG_DIR}`)
+    console.log(`  ANTHROPIC_API_KEY: ${(queryEnv.ANTHROPIC_API_KEY || '').slice(0, 10)}...`)
+    console.log(`  ANTHROPIC_BASE_URL: ${queryEnv.ANTHROPIC_BASE_URL || 'default'}`)
 
+    console.log(`[ClaudeAdapter] Spawning SDK query for project ${client.projectId}...`)
     const stream = query({ prompt, options: options as any })
+    console.log(`[ClaudeAdapter] SDK query spawned for project ${client.projectId}`)
 
+    // Store the Query object for forceful close on abort
+    if (client.activeQuery) {
+      client.activeQuery.queryObj = stream
+    }
+
+    let messageCount = 0
     for await (const message of stream) {
+      if (messageCount === 0) {
+        console.log(`[ClaudeAdapter] First message received for project ${client.projectId}: ${message.type}`)
+      }
+      messageCount++
       // Capture sessionId from init
       if (
         message.type === 'system' &&
@@ -555,16 +573,20 @@ export async function* executeQuery(
       // Process message and yield events
       yield* processMessage(message, client, callbacks)
     }
+    console.log(`[ClaudeAdapter] Stream completed for project ${client.projectId}, ${messageCount} messages`)
   } catch (err: any) {
     const isAbort =
       err.name === 'AbortError' ||
       abortController.signal.aborted ||
       (err.message && err.message.includes('aborted'))
     if (!isAbort) {
-      console.error('[ClaudeAdapter] Query error:', err)
+      console.error(`[ClaudeAdapter] Query error for project ${client.projectId}:`, err)
       throw err
+    } else {
+      console.log(`[ClaudeAdapter] Query aborted for project ${client.projectId}`)
     }
   } finally {
+    console.log(`[ClaudeAdapter] Cleaning up query for project ${client.projectId}`)
     // Clear active query
     client.activeQuery = null
     if (client.projectId) {
@@ -788,7 +810,16 @@ export function handlePermissionResponse(
 // Abort active query
 export function abortQuery(client: ClientState): boolean {
   if (client.activeQuery) {
+    // Signal abort via AbortController
     client.activeQuery.abort.abort()
+    // Forcefully close the SDK subprocess if available
+    if (client.activeQuery.queryObj) {
+      try {
+        client.activeQuery.queryObj.close()
+      } catch {
+        // Ignore close errors (process may already be dead)
+      }
+    }
     client.activeQuery = null
 
     if (client.projectId) {
