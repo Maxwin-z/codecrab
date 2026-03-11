@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
+import { UserQuestionForm } from './UserQuestionForm'
 import { SessionSidebar } from './SessionSidebar'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Menu, Loader2 } from 'lucide-react'
@@ -163,6 +164,17 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
           <p className="text-xs text-emerald-700 dark:text-emerald-300 flex-1 min-w-0 truncate">
             {ws.latestSummary}
           </p>
+        </div>
+      )}
+
+      {/* User question form */}
+      {ws.pendingQuestion && (
+        <div className="border-t px-4 py-2 shrink-0">
+          <UserQuestionForm
+            questions={ws.pendingQuestion.questions}
+            onSubmit={ws.submitQuestionResponse}
+            onCancel={ws.dismissQuestion}
+          />
         </div>
       )}
 
