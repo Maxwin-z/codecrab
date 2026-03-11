@@ -150,6 +150,11 @@ export function getActiveProjectIds(): string[] {
   return result
 }
 
+// Composite key for client state: clientId:projectId
+function clientStateKey(clientId: string, projectId?: string): string {
+  return projectId ? `${clientId}:${projectId}` : clientId
+}
+
 // Create new client state
 export function createClientState(
   clientId: string,
@@ -168,18 +173,40 @@ export function createClientState(
     accumulatingThinking: '',
     currentToolCalls: [],
   }
-  clients.set(clientId, client)
+  clients.set(clientStateKey(clientId, projectId), client)
   return client
 }
 
 // Get client state
-export function getClientState(clientId: string): ClientState | undefined {
-  return clients.get(clientId)
+export function getClientState(clientId: string, projectId?: string): ClientState | undefined {
+  return clients.get(clientStateKey(clientId, projectId))
 }
 
 // Remove client state
-export function removeClientState(clientId: string): boolean {
-  return clients.delete(clientId)
+export function removeClientState(clientId: string, projectId?: string): boolean {
+  return clients.delete(clientStateKey(clientId, projectId))
+}
+
+// Remove all client states for a given clientId
+export function removeAllClientStates(clientId: string): void {
+  const prefix = `${clientId}:`
+  for (const key of clients.keys()) {
+    if (key === clientId || key.startsWith(prefix)) {
+      clients.delete(key)
+    }
+  }
+}
+
+// Get all client states for a given clientId
+export function getClientStatesForClient(clientId: string): ClientState[] {
+  const result: ClientState[] = []
+  const prefix = `${clientId}:`
+  for (const [key, state] of clients) {
+    if (key === clientId || key.startsWith(prefix)) {
+      result.push(state)
+    }
+  }
+  return result
 }
 
 // Get session statuses

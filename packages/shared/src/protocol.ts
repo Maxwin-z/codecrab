@@ -2,50 +2,62 @@
 
 // ============ Client → Server Messages ============
 
-export interface PromptMessage {
+// All project-scoped client messages carry optional projectId + sessionId
+export interface ProjectContext {
+  projectId?: string
+  sessionId?: string
+}
+
+export interface PromptMessage extends ProjectContext {
   type: 'prompt'
   prompt: string
 }
 
-export interface CommandMessage {
+export interface CommandMessage extends ProjectContext {
   type: 'command'
   command: string
 }
 
-export interface SetCwdMessage {
+export interface SetCwdMessage extends ProjectContext {
   type: 'set_cwd'
   cwd: string
 }
 
-export interface AbortMessage {
+export interface AbortMessage extends ProjectContext {
   type: 'abort'
 }
 
-export interface ResumeSessionMessage {
+export interface ResumeSessionMessage extends ProjectContext {
   type: 'resume_session'
   sessionId: string
 }
 
-export interface RespondQuestionMessage {
+export interface RespondQuestionMessage extends ProjectContext {
   type: 'respond_question'
   toolId: string
   answers: Record<string, string | string[]>
 }
 
-export interface RespondPermissionMessage {
+export interface RespondPermissionMessage extends ProjectContext {
   type: 'respond_permission'
   requestId: string
   allow: boolean
 }
 
-export interface SetModelMessage {
+export interface SetModelMessage extends ProjectContext {
   type: 'set_model'
   model: string
 }
 
-export interface SetPermissionModeMessage {
+export interface SetPermissionModeMessage extends ProjectContext {
   type: 'set_permission_mode'
   mode: 'bypassPermissions' | 'default'
+}
+
+export interface SwitchProjectMessage {
+  type: 'switch_project'
+  projectId: string
+  projectCwd?: string
 }
 
 export type ClientMessage =
@@ -58,49 +70,55 @@ export type ClientMessage =
   | RespondPermissionMessage
   | SetModelMessage
   | SetPermissionModeMessage
+  | SwitchProjectMessage
 
 // ============ Server → Client Messages ============
 
-export interface SystemMessage {
+// Server messages that are project-scoped carry projectId + sessionId
+export interface ServerProjectContext {
+  projectId?: string
+  sessionId?: string
+}
+
+export interface SystemMessage extends ServerProjectContext {
   type: 'system'
   subtype: 'init' | string
-  sessionId?: string
   model?: string
   tools?: string[]
 }
 
-export interface StreamDeltaMessage {
+export interface StreamDeltaMessage extends ServerProjectContext {
   type: 'stream_delta'
   deltaType: 'text' | 'thinking'
   text: string
 }
 
-export interface AssistantTextMessage {
+export interface AssistantTextMessage extends ServerProjectContext {
   type: 'assistant_text'
   text: string
   parentToolUseId?: string | null
 }
 
-export interface ThinkingMessage {
+export interface ThinkingMessage extends ServerProjectContext {
   type: 'thinking'
   thinking: string
 }
 
-export interface ToolUseMessage {
+export interface ToolUseMessage extends ServerProjectContext {
   type: 'tool_use'
   toolName: string
   toolId: string
   input: unknown
 }
 
-export interface ToolResultMessage {
+export interface ToolResultMessage extends ServerProjectContext {
   type: 'tool_result'
   toolId: string
   content: string
   isError: boolean
 }
 
-export interface ResultMessage {
+export interface ResultMessage extends ServerProjectContext {
   type: 'result'
   subtype: string
   costUsd?: number
@@ -109,65 +127,63 @@ export interface ResultMessage {
   isError?: boolean
 }
 
-export interface QueryStartMessage {
+export interface QueryStartMessage extends ServerProjectContext {
   type: 'query_start'
 }
 
-export interface QueryEndMessage {
+export interface QueryEndMessage extends ServerProjectContext {
   type: 'query_end'
 }
 
-export interface QuerySummaryMessage {
+export interface QuerySummaryMessage extends ServerProjectContext {
   type: 'query_summary'
   summary: string
 }
 
-export interface ClearedMessage {
+export interface ClearedMessage extends ServerProjectContext {
   type: 'cleared'
 }
 
-export interface AbortedMessage {
+export interface AbortedMessage extends ServerProjectContext {
   type: 'aborted'
 }
 
-export interface CwdChangedMessage {
+export interface CwdChangedMessage extends ServerProjectContext {
   type: 'cwd_changed'
   cwd: string
 }
 
-export interface ErrorMessage {
+export interface ErrorMessage extends ServerProjectContext {
   type: 'error'
   message: string
 }
 
-export interface SessionResumedMessage {
+export interface SessionResumedMessage extends ServerProjectContext {
   type: 'session_resumed'
-  sessionId: string
 }
 
-export interface SessionStatusChangedMessage {
+export interface SessionStatusChangedMessage extends ServerProjectContext {
   type: 'session_status_changed'
-  sessionId: string
   status: 'idle' | 'processing' | 'error'
 }
 
-export interface AskUserQuestionMessage {
+export interface AskUserQuestionMessage extends ServerProjectContext {
   type: 'ask_user_question'
   toolId: string
   questions: Question[]
 }
 
-export interface ModelChangedMessage {
+export interface ModelChangedMessage extends ServerProjectContext {
   type: 'model_changed'
   model?: string
 }
 
-export interface PermissionModeChangedMessage {
+export interface PermissionModeChangedMessage extends ServerProjectContext {
   type: 'permission_mode_changed'
   mode: string
 }
 
-export interface PermissionRequestMessage {
+export interface PermissionRequestMessage extends ServerProjectContext {
   type: 'permission_request'
   requestId: string
   toolName: string
@@ -175,12 +191,12 @@ export interface PermissionRequestMessage {
   reason: string
 }
 
-export interface MessageHistoryMessage {
+export interface MessageHistoryMessage extends ServerProjectContext {
   type: 'message_history'
   messages: ChatMessage[]
 }
 
-export interface UserMessage {
+export interface UserMessage extends ServerProjectContext {
   type: 'user_message'
   message: ChatMessage
 }

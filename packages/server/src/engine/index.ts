@@ -15,6 +15,8 @@ export {
   createClientState,
   getClientState,
   removeClientState,
+  removeAllClientStates,
+  getClientStatesForClient,
   getOrCreateProjectState,
   getProjectState,
   storeAssistantMessage,

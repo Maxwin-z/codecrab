@@ -53,7 +53,6 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         .then((data) => {
           if (data.error) throw new Error(data.error)
           setProject(data)
-          // Set projectId — this will close the WS and reconnect with projectId param
           ws.setProjectId(projectId, data.path)
         })
         .catch((err) => {

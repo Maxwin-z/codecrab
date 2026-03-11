@@ -1,4 +1,5 @@
 // WebSocket hook — client-side connection and state management
+// Single WS connection, per-project state cache, project switching is pure frontend state change
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ChatMessage,
@@ -9,7 +10,6 @@ import type {
   ProjectStatus,
   Question,
   ServerMessage,
-  SessionInfo,
 } from '@codeclaws/shared'
 import { getToken, authFetch } from '@/lib/auth'
 
@@ -59,6 +59,39 @@ function emitSessionStatusChanged(event: SessionStatusEvent) {
   for (const cb of sessionStatusListeners) cb(event)
 }
 
+// Per-project cached state
+interface ProjectChatState {
+  messages: ChatMessage[]
+  streamingText: string
+  streamingThinking: string
+  pendingQuestion: { toolId: string; questions: Question[] } | null
+  pendingPermission: PendingPermission | null
+  isRunning: boolean
+  isAborting: boolean
+  sessionId: string
+  cwd: string
+  latestSummary: string | null
+  currentModel: string
+  permissionMode: PermissionMode
+}
+
+function createEmptyProjectState(): ProjectChatState {
+  return {
+    messages: [],
+    streamingText: '',
+    streamingThinking: '',
+    pendingQuestion: null,
+    pendingPermission: null,
+    isRunning: false,
+    isAborting: false,
+    sessionId: '',
+    cwd: '',
+    latestSummary: null,
+    currentModel: '',
+    permissionMode: 'default',
+  }
+}
+
 export interface UseWebSocketReturn {
   connected: boolean
   isRunning: boolean
@@ -88,47 +121,65 @@ export interface UseWebSocketReturn {
   setModel: (model: string) => void
   setPermissionMode: (mode: PermissionMode) => void
   respondToPermission: (requestId: string, allow: boolean) => void
-  fetchSessions: () => Promise<SessionInfo[]>
+  fetchSessions: () => Promise<import('@codeclaws/shared').SessionInfo[]>
 }
 
 export function useWebSocket(): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null)
   const clientIdRef = useRef(getOrCreateClientId())
+
+  // Connection state (global, not per-project)
   const [connected, setConnected] = useState(false)
-  const [isRunning, setIsRunning] = useState(false)
-  const [isAborting, setIsAborting] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [cwd, setCwd] = useState<string>('')
-  const [streamingText, setStreamingText] = useState('')
-  const [streamingThinking, setStreamingThinking] = useState('')
-  const [pendingQuestion, setPendingQuestion] = useState<{ toolId: string; questions: Question[] } | null>(null)
-  const [latestSummary, setLatestSummary] = useState<string | null>(null)
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])
-  const [currentModel, setCurrentModel] = useState<string>('')
-  const [permissionMode, setPermissionModeState] = useState<PermissionMode>('default')
-  const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
-  const [sessionId, setSessionId] = useState<string>('')
   const [projectStatuses, setProjectStatuses] = useState<ProjectStatus[]>([])
 
-  const projectIdRef = useRef<string | null>(null)
-  const pendingCwdRef = useRef<string | null>(null)
+  // Active project ID
+  const activeProjectIdRef = useRef<string | null>(null)
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+
+  // Per-project state cache
+  const projectStatesRef = useRef(new Map<string, ProjectChatState>())
+
+  // Re-render trigger: increment when active project's state changes
+  const [, setStateVersion] = useState(0)
+  const triggerRender = useCallback(() => setStateVersion((v) => v + 1), [])
+
+  // Get or create state for a project
+  const getProjectState = useCallback((projectId: string): ProjectChatState => {
+    let state = projectStatesRef.current.get(projectId)
+    if (!state) {
+      state = createEmptyProjectState()
+      projectStatesRef.current.set(projectId, state)
+    }
+    return state
+  }, [])
+
+  // Get active project state (returns empty state if no active project)
+  const getActiveState = useCallback((): ProjectChatState => {
+    const pid = activeProjectIdRef.current
+    if (!pid) return createEmptyProjectState()
+    return getProjectState(pid)
+  }, [getProjectState])
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const clientId = clientIdRef.current
-    const projectId = projectIdRef.current
     const token = getToken()
-    const projectIdParam = projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?clientId=${clientId}${projectIdParam}${tokenParam}`)
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?clientId=${clientId}${tokenParam}`)
     wsRef.current = ws
 
     ws.onopen = () => {
       setConnected(true)
-      // Send pending cwd if we reconnected after a project switch
-      if (pendingCwdRef.current) {
-        ws.send(JSON.stringify({ type: 'set_cwd', cwd: pendingCwdRef.current }))
-        pendingCwdRef.current = null
+      // Re-subscribe to active project on reconnect
+      const pid = activeProjectIdRef.current
+      if (pid) {
+        const sub = projectStatesRef.current.get(pid)
+        ws.send(JSON.stringify({
+          type: 'switch_project',
+          projectId: pid,
+          projectCwd: sub?.cwd || undefined,
+        }))
       }
     }
 
@@ -141,54 +192,66 @@ export function useWebSocket(): UseWebSocketReturn {
     ws.onmessage = (event) => {
       const msg: ServerMessage = JSON.parse(event.data)
 
+      // Global messages (no projectId routing)
+      switch (msg.type) {
+        case 'available_models':
+          if (msg.models && msg.models.length > 0) setAvailableModels(msg.models)
+          return
+        case 'project_statuses':
+          setProjectStatuses(msg.statuses)
+          return
+      }
+
+      // Project-scoped messages: route to per-project state
+      const msgProjectId = (msg as any).projectId as string | undefined
+      if (!msgProjectId) return // Ignore messages without projectId
+
+      const pState = getProjectState(msgProjectId)
+      const isActiveProject = msgProjectId === activeProjectIdRef.current
+
       switch (msg.type) {
         case 'query_start':
-          setIsRunning(true)
-          emitQueryStateChange(true)
-          setStreamingText('')
-          setStreamingThinking('')
-          setLatestSummary(null)
+          pState.isRunning = true
+          if (isActiveProject) emitQueryStateChange(true)
           break
 
         case 'query_end':
-          setIsRunning(false)
-          setIsAborting(false)
-          emitQueryStateChange(false)
+          pState.isRunning = false
+          pState.isAborting = false
+          if (isActiveProject) emitQueryStateChange(false)
 
-          // Flush any remaining streaming text into a message
-          setStreamingText((prev) => {
-            if (prev) {
-              const cleaned = prev.replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
-              if (cleaned) {
-                setMessages((msgs) => [
-                  ...msgs,
-                  { id: genId(), role: 'assistant', content: cleaned, timestamp: Date.now() },
-                ])
-              }
+          // Flush remaining streaming text into a message
+          if (pState.streamingText) {
+            const cleaned = pState.streamingText.replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+            if (cleaned) {
+              pState.messages = [
+                ...pState.messages,
+                { id: genId(), role: 'assistant', content: cleaned, timestamp: Date.now() },
+              ]
             }
-            return ''
-          })
-          setStreamingThinking('')
+            pState.streamingText = ''
+          }
+          pState.streamingThinking = ''
           break
 
         case 'query_summary':
-          setLatestSummary(msg.summary)
+          pState.latestSummary = msg.summary
           break
 
         case 'stream_delta':
           if (msg.deltaType === 'text') {
-            setStreamingText((prev) => prev + msg.text)
+            pState.streamingText += msg.text
           } else if (msg.deltaType === 'thinking') {
-            setStreamingThinking((prev) => prev + msg.text)
+            pState.streamingThinking += msg.text
           }
           break
 
         case 'assistant_text': {
-          setStreamingText('')
-          setStreamingThinking('')
+          pState.streamingText = ''
+          pState.streamingThinking = ''
           const cleanedText = msg.text.replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
-          setMessages((msgs) => [
-            ...msgs,
+          pState.messages = [
+            ...pState.messages,
             {
               id: genId(),
               role: 'assistant',
@@ -196,12 +259,13 @@ export function useWebSocket(): UseWebSocketReturn {
               parentToolUseId: msg.parentToolUseId ?? undefined,
               timestamp: Date.now(),
             },
-          ])
+          ]
           break
         }
 
         case 'thinking':
-          setMessages((msgs) => {
+          pState.messages = (() => {
+            const msgs = pState.messages
             const last = msgs[msgs.length - 1]
             if (last?.role === 'assistant') {
               return [...msgs.slice(0, -1), { ...last, thinking: (last.thinking || '') + msg.thinking }]
@@ -210,21 +274,19 @@ export function useWebSocket(): UseWebSocketReturn {
               ...msgs,
               { id: genId(), role: 'assistant', content: '', thinking: msg.thinking, timestamp: Date.now() },
             ]
-          })
+          })()
           break
 
         case 'tool_use':
-          setStreamingText((prev) => {
-            if (prev) {
-              setMessages((msgs) => [
-                ...msgs,
-                { id: genId(), role: 'assistant', content: prev, timestamp: Date.now() },
-              ])
-            }
-            return ''
-          })
-          setMessages((msgs) => [
-            ...msgs,
+          if (pState.streamingText) {
+            pState.messages = [
+              ...pState.messages,
+              { id: genId(), role: 'assistant', content: pState.streamingText, timestamp: Date.now() },
+            ]
+            pState.streamingText = ''
+          }
+          pState.messages = [
+            ...pState.messages,
             {
               id: genId(),
               role: 'system',
@@ -232,11 +294,12 @@ export function useWebSocket(): UseWebSocketReturn {
               toolCalls: [{ name: msg.toolName, id: msg.toolId, input: msg.input }],
               timestamp: Date.now(),
             },
-          ])
+          ]
           break
 
         case 'tool_result':
-          setMessages((msgs) => {
+          pState.messages = (() => {
+            const msgs = [...pState.messages]
             for (let i = msgs.length - 1; i >= 0; i--) {
               const m = msgs[i]
               if (m.toolCalls?.some((tc) => tc.id === msg.toolId)) {
@@ -244,122 +307,125 @@ export function useWebSocket(): UseWebSocketReturn {
                 updated.toolCalls = m.toolCalls!.map((tc) =>
                   tc.id === msg.toolId ? { ...tc, result: msg.content, isError: msg.isError } : tc
                 )
-                return [...msgs.slice(0, i), updated, ...msgs.slice(i + 1)]
+                msgs[i] = updated
+                return msgs
               }
             }
             return msgs
-          })
+          })()
           break
 
         case 'result':
           if (msg.isError) {
-            setMessages((msgs) => [
-              ...msgs,
+            pState.messages = [
+              ...pState.messages,
               {
                 id: genId(),
                 role: 'system',
                 content: `Error: ${msg.result}`,
                 timestamp: Date.now(),
               },
-            ])
+            ]
           }
           break
 
         case 'aborted':
-          setIsAborting(false)
+          pState.isAborting = false
           break
 
         case 'cleared':
-          setMessages([])
-          setStreamingText('')
-          setStreamingThinking('')
+          pState.messages = []
+          pState.streamingText = ''
+          pState.streamingThinking = ''
           break
 
         case 'cwd_changed':
-          setCwd(msg.cwd)
+          pState.cwd = msg.cwd
           break
 
         case 'error':
-          setMessages((msgs) => [
-            ...msgs,
+          pState.messages = [
+            ...pState.messages,
             { id: genId(), role: 'system', content: `Error: ${msg.message}`, timestamp: Date.now() },
-          ])
-          setIsRunning(false)
+          ]
+          pState.isRunning = false
           break
 
         case 'session_resumed':
-          setSessionId(msg.sessionId)
-          setMessages((msgs) => [
-            ...msgs,
-            {
-              id: genId(),
-              role: 'system',
-              content: `Resumed session: ${msg.sessionId.slice(-6)}`,
-              timestamp: Date.now(),
-            },
-          ])
+          if (msg.sessionId) {
+            pState.sessionId = msg.sessionId
+            pState.messages = [
+              ...pState.messages,
+              {
+                id: genId(),
+                role: 'system',
+                content: `Resumed session: ${msg.sessionId.slice(-6)}`,
+                timestamp: Date.now(),
+              },
+            ]
+          }
           break
 
         case 'message_history':
-          setMessages(msg.messages)
+          pState.messages = msg.messages
           break
 
         case 'user_message':
-          setMessages((msgs) => {
+          pState.messages = (() => {
+            const msgs = pState.messages
             const isDuplicate = msgs.some(
               (m) =>
                 m.role === 'user' && m.content === msg.message.content && Date.now() - m.timestamp < 5000
             )
             if (isDuplicate) return msgs
             return [...msgs, msg.message]
-          })
+          })()
           break
 
         case 'ask_user_question':
-          setPendingQuestion({
+          pState.pendingQuestion = {
             toolId: msg.toolId,
             questions: msg.questions,
-          })
+          }
           break
 
         case 'session_status_changed':
-          emitSessionStatusChanged({ sessionId: msg.sessionId, status: msg.status })
+          if (msg.sessionId) {
+            emitSessionStatusChanged({ sessionId: msg.sessionId, status: msg.status })
+          }
           break
 
         case 'model_changed':
-          if (msg.model) setCurrentModel(msg.model)
-          break
-
-        case 'available_models':
-          if (msg.models && msg.models.length > 0) setAvailableModels(msg.models)
+          if (msg.model) pState.currentModel = msg.model
           break
 
         case 'permission_mode_changed':
-          setPermissionModeState(msg.mode as PermissionMode)
+          pState.permissionMode = msg.mode as PermissionMode
           break
 
         case 'permission_request':
-          setPendingPermission({
+          pState.pendingPermission = {
             requestId: msg.requestId,
             toolName: msg.toolName,
             input: msg.input,
             reason: msg.reason,
-          })
-          break
-
-        case 'project_statuses':
-          setProjectStatuses(msg.statuses)
+          }
           break
 
         case 'system':
           if (msg.subtype === 'init') {
-            if (msg.model) setCurrentModel(msg.model)
-            if (msg.sessionId) setSessionId(msg.sessionId)
+            if (msg.model) pState.currentModel = msg.model
+            if (msg.sessionId) pState.sessionId = msg.sessionId
           }
           break
       }
+
+      // Trigger re-render if this message is for the active project
+      if (isActiveProject) {
+        triggerRender()
+      }
     }
-  }, [])
+  }, [getProjectState, triggerRender])
 
   useEffect(() => {
     connect()
@@ -368,88 +434,114 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, [connect])
 
+  // Send helper: stamps projectId + sessionId on outgoing messages
+  const sendWithProject = useCallback((msg: Record<string, unknown>) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    const pid = activeProjectIdRef.current
+    if (!pid) return
+    const pState = projectStatesRef.current.get(pid)
+    ws.send(JSON.stringify({
+      ...msg,
+      projectId: pid,
+      sessionId: pState?.sessionId || undefined,
+    }))
+  }, [])
+
   const sendPrompt = useCallback((prompt: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    const pid = activeProjectIdRef.current
+    if (!pid) return
+    const pState = getProjectState(pid)
+
     const userMsg: ChatMessage = {
       id: genId(),
       role: 'user',
       content: prompt,
       timestamp: Date.now(),
     }
-    setMessages((msgs) => [...msgs, userMsg])
-    const msg: ClientMessage = { type: 'prompt', prompt }
-    wsRef.current.send(JSON.stringify(msg))
-  }, [])
+    pState.messages = [...pState.messages, userMsg]
+    triggerRender()
+
+    sendWithProject({ type: 'prompt', prompt })
+  }, [getProjectState, sendWithProject, triggerRender])
 
   const sendCommand = useCallback((command: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
     if (!command.match(/^\/(clear|switch\s)/)) {
-      const userMsg: ChatMessage = {
-        id: genId(),
-        role: 'user',
-        content: command,
-        timestamp: Date.now(),
+      const pid = activeProjectIdRef.current
+      if (pid) {
+        const pState = getProjectState(pid)
+        const userMsg: ChatMessage = {
+          id: genId(),
+          role: 'user',
+          content: command,
+          timestamp: Date.now(),
+        }
+        pState.messages = [...pState.messages, userMsg]
+        triggerRender()
       }
-      setMessages((msgs) => [...msgs, userMsg])
     }
-    const msg: ClientMessage = { type: 'command', command }
-    wsRef.current.send(JSON.stringify(msg))
-  }, [])
+    sendWithProject({ type: 'command', command })
+  }, [getProjectState, sendWithProject, triggerRender])
 
   const abort = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    setIsAborting(true)
-    const msg: ClientMessage = { type: 'abort' }
-    wsRef.current.send(JSON.stringify(msg))
-  }, [])
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.isAborting = true
+      triggerRender()
+    }
+    sendWithProject({ type: 'abort' })
+  }, [getProjectState, sendWithProject, triggerRender])
 
   const setWorkingDir = useCallback((dir: string) => {
-    const msg: ClientMessage = { type: 'set_cwd', cwd: dir }
-    wsRef.current?.send(JSON.stringify(msg))
-  }, [])
+    sendWithProject({ type: 'set_cwd', cwd: dir })
+  }, [sendWithProject])
 
   const setProjectId = useCallback((projectId: string | null, projectCwd?: string) => {
-    const prevProjectId = projectIdRef.current
+    const prevProjectId = activeProjectIdRef.current
     if (projectId === prevProjectId) return
 
-    projectIdRef.current = projectId
-    pendingCwdRef.current = projectCwd || null
+    activeProjectIdRef.current = projectId
+    setActiveProjectId(projectId)
 
-    // Reset all state when switching projects
-    setStreamingText('')
-    setStreamingThinking('')
-    setPendingQuestion(null)
-    setPendingPermission(null)
-    setMessages([])
-    setIsRunning(false)
-    setIsAborting(false)
-    setSessionId('')
-    setLatestSummary(null)
-
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.close()
+    // Send switch_project to server (if we have a project and are connected)
+    if (projectId && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'switch_project',
+        projectId,
+        projectCwd: projectCwd || undefined,
+      }))
     }
-  }, [])
+
+    // If we have a project, ensure we have a state entry for it
+    if (projectId) {
+      const pState = getProjectState(projectId)
+      if (projectCwd && !pState.cwd) {
+        pState.cwd = projectCwd
+      }
+    }
+
+    triggerRender()
+  }, [getProjectState, triggerRender])
 
   const clearMessages = useCallback(() => {
-    const msg: ClientMessage = { type: 'command', command: '/clear' }
-    wsRef.current?.send(JSON.stringify(msg))
-  }, [])
+    sendWithProject({ type: 'command', command: '/clear' })
+  }, [sendWithProject])
 
   const resumeSession = useCallback((sessionId: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    setMessages([])
-    setStreamingText('')
-    setStreamingThinking('')
-    const msg: ClientMessage = { type: 'resume_session', sessionId }
-    wsRef.current.send(JSON.stringify(msg))
-  }, [])
+    const pid = activeProjectIdRef.current
+    if (!pid) return
+    const pState = getProjectState(pid)
+    pState.messages = []
+    pState.streamingText = ''
+    pState.streamingThinking = ''
+    triggerRender()
+    sendWithProject({ type: 'resume_session', sessionId })
+  }, [getProjectState, sendWithProject, triggerRender])
 
   const newChat = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    const msg: ClientMessage = { type: 'command', command: '/clear' }
-    wsRef.current.send(JSON.stringify(msg))
-  }, [])
+    sendWithProject({ type: 'command', command: '/clear' })
+  }, [sendWithProject])
 
   const submitQuestionResponse = useCallback(
     (answers: Record<string, string | string[]>) => {
@@ -462,43 +554,61 @@ export function useWebSocket(): UseWebSocketReturn {
         })
         .join('\n')
       sendPrompt(answerText)
-      setPendingQuestion(null)
+      const pid = activeProjectIdRef.current
+      if (pid) {
+        const pState = getProjectState(pid)
+        pState.pendingQuestion = null
+        triggerRender()
+      }
     },
-    [sendPrompt]
+    [sendPrompt, getProjectState, triggerRender]
   )
 
   const dismissQuestion = useCallback(() => {
-    setPendingQuestion(null)
-  }, [])
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.pendingQuestion = null
+      triggerRender()
+    }
+  }, [getProjectState, triggerRender])
 
   const setModel = useCallback((model: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    const msg: ClientMessage = { type: 'set_model', model }
-    wsRef.current.send(JSON.stringify(msg))
-    setCurrentModel(model)
-  }, [])
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.currentModel = model
+      triggerRender()
+    }
+    sendWithProject({ type: 'set_model', model })
+  }, [getProjectState, sendWithProject, triggerRender])
 
   const setPermissionMode = useCallback((mode: PermissionMode) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    const msg: ClientMessage = { type: 'set_permission_mode', mode }
-    wsRef.current.send(JSON.stringify(msg))
-    setPermissionModeState(mode)
-  }, [])
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.permissionMode = mode
+      triggerRender()
+    }
+    sendWithProject({ type: 'set_permission_mode', mode })
+  }, [getProjectState, sendWithProject, triggerRender])
 
   const respondToPermission = useCallback((requestId: string, allow: boolean) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    const msg: ClientMessage = { type: 'respond_permission', requestId, allow }
-    wsRef.current.send(JSON.stringify(msg))
-    setPendingPermission(null)
-  }, [])
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.pendingPermission = null
+      triggerRender()
+    }
+    sendWithProject({ type: 'respond_permission', requestId, allow })
+  }, [getProjectState, sendWithProject, triggerRender])
 
-  const fetchSessions = useCallback(async (filterProjectId?: string): Promise<SessionInfo[]> => {
+  const fetchSessions = useCallback(async (): Promise<import('@codeclaws/shared').SessionInfo[]> => {
     try {
       const params = new URLSearchParams()
-      if (filterProjectId) {
-        params.set('projectId', filterProjectId)
-      } else if (cwd) {
-        params.set('cwd', cwd)
+      const pid = activeProjectIdRef.current
+      if (pid) {
+        params.set('projectId', pid)
       }
       const query = params.toString()
       const url = query ? `/api/sessions?${query}` : '/api/sessions'
@@ -509,23 +619,26 @@ export function useWebSocket(): UseWebSocketReturn {
     } catch {
       return []
     }
-  }, [cwd])
+  }, [])
+
+  // Read active project's state for the return value
+  const activeState = getActiveState()
 
   return {
     connected,
-    isRunning,
-    isAborting,
-    messages,
-    streamingText,
-    streamingThinking,
-    latestSummary,
-    pendingQuestion,
-    pendingPermission,
-    cwd,
+    isRunning: activeState.isRunning,
+    isAborting: activeState.isAborting,
+    messages: activeState.messages,
+    streamingText: activeState.streamingText,
+    streamingThinking: activeState.streamingThinking,
+    latestSummary: activeState.latestSummary,
+    pendingQuestion: activeState.pendingQuestion,
+    pendingPermission: activeState.pendingPermission,
+    cwd: activeState.cwd,
     availableModels,
-    currentModel,
-    permissionMode,
-    sessionId,
+    currentModel: activeState.currentModel,
+    permissionMode: activeState.permissionMode,
+    sessionId: activeState.sessionId,
     projectStatuses,
     sendPrompt,
     sendCommand,
