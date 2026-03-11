@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CodeClaws is an AI-powered coding engine — a monorepo with 6 TypeScript packages providing a server, React chat UI, documentation site, relay server, CLI, and shared library.
+CodeClaws is an AI-powered coding engine — a monorepo with 6 TypeScript packages and a native iOS app, providing a server, React chat UI, iOS chat UI, documentation site, relay server, CLI, and shared library.
 
 ## Commands
 
@@ -30,6 +30,7 @@ No test or lint commands are configured yet.
 cli → server, shared
 server → shared, express
 app → shared, react
+iOS → server (via API/WS)
 relay → shared
 web → (standalone)
 shared → (no internal deps)
@@ -43,6 +44,8 @@ shared → (no internal deps)
 - `src/mcp/` — MCP extensions: cron (scheduled tasks), push (web push notifications), chrome (DevTools Protocol automation).
 
 **App (`packages/app`)** — React 19 chat UI. Vite proxies `/api` and `/ws` to the server. Components: ChatPage, InputBar, MessageList, ModelSelector, SessionSidebar, SetupWizard, FileBrowser, ProjectList. State via hooks (useWebSocket, WebSocketContext).
+
+**iOS (`packages/iOS`)** — Native iOS/macOS app (Swift, SwiftUI, Xcode project). Provides the same chat UI functionality as the web app, connecting to the server via REST API and WebSocket.
 
 **Web (`packages/web`)** — Static documentation/setup guide site. Pages: Home, Setup, Docs, Plugins.
 
