@@ -9,6 +9,7 @@ import type {
   ServerMessage,
   ChatMessage,
   SessionInfo,
+  ProjectStatus,
 } from '@codeclaws/shared'
 import { getToken } from '../auth/index.js'
 import {
@@ -17,6 +18,8 @@ import {
   getClientState,
   removeClientState,
   getOrCreateProjectState,
+  getProjectState,
+  getActiveProjectIds,
   storeAssistantMessage,
   handlePermissionResponse,
   abortQuery,
@@ -246,6 +249,74 @@ function safeSend(ws: WebSocket, data: unknown) {
   }
 }
 
+// Broadcast message to ALL connected clients (regardless of project)
+function broadcastGlobal(message: ServerMessage) {
+  const data = JSON.stringify(message)
+  for (const client of clients.values()) {
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(data)
+    }
+  }
+}
+
+// Collect current status of all projects that have connected clients or active queries
+function getProjectStatuses(): ProjectStatus[] {
+  // Include projects from connected clients AND projects with active queries
+  const projectIds = new Set<string>()
+  for (const client of clients.values()) {
+    if (client.projectId) projectIds.add(client.projectId)
+  }
+  for (const id of getActiveProjectIds()) {
+    projectIds.add(id)
+  }
+
+  const statuses: ProjectStatus[] = []
+  for (const projectId of projectIds) {
+    const projectState = getProjectState(projectId)
+    const hasActiveQuery = !!projectState?.activeQuery
+
+    // Find the active/processing session and latest session for this project
+    let activeSessionId: string | undefined
+    let firstPrompt: string | undefined
+    let sessionProcessing = false
+    let latestModified: number | undefined
+    for (const session of sessions.values()) {
+      if (session.projectId !== projectId) continue
+      if (session.status === 'processing') {
+        activeSessionId = session.sessionId
+        firstPrompt = session.firstPrompt
+        sessionProcessing = true
+      }
+      if (session.messages.length > 0 && (!latestModified || session.lastModified > latestModified)) {
+        latestModified = session.lastModified
+        if (!activeSessionId) {
+          firstPrompt = session.firstPrompt
+        }
+      }
+    }
+
+    // Consider processing if either engine has active query OR session is marked processing
+    const isProcessing = hasActiveQuery || sessionProcessing
+
+    statuses.push({
+      projectId,
+      status: isProcessing ? 'processing' : 'idle',
+      sessionId: activeSessionId,
+      firstPrompt,
+      lastModified: latestModified,
+    })
+  }
+  return statuses
+}
+
+// Broadcast current project statuses to all clients
+function broadcastProjectStatuses() {
+  broadcastGlobal({
+    type: 'project_statuses',
+    statuses: getProjectStatuses(),
+  })
+}
+
 export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ server, path: '/ws' })
 
@@ -282,7 +353,47 @@ export function setupWebSocket(server: Server) {
     // Get existing session if client has one
     let session: Session | undefined = client.sessionId ? sessions.get(client.sessionId) : undefined
 
-    // Send init message (without sessionId until first message)
+    // Auto-resume session when connecting to a project
+    // - Always resume a processing session (active query running)
+    // - Resume the latest session if it was active within 10 minutes
+    // - Otherwise start with empty state (new session created on first message)
+    if (projectId && !session) {
+      const projectState = getProjectState(projectId)
+      const hasActiveQuery = !!projectState?.activeQuery
+      const SESSION_ACTIVE_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
+
+      if (hasActiveQuery) {
+        // Always resume a processing session
+        for (const s of sessions.values()) {
+          if (s.projectId === projectId && s.status === 'processing') {
+            session = s
+            client.sessionId = s.sessionId
+            clientState.sessionId = s.sdkSessionId
+            console.log(`[ws] Auto-resuming active session ${s.sessionId} for project ${projectId}`)
+            break
+          }
+        }
+      }
+
+      // If no active query, only resume if the latest session was active within 10 minutes
+      if (!session) {
+        let latestSession: Session | undefined
+        for (const s of sessions.values()) {
+          if (s.projectId !== projectId || s.messages.length === 0) continue
+          if (!latestSession || s.lastModified > latestSession.lastModified) {
+            latestSession = s
+          }
+        }
+        if (latestSession && (Date.now() - latestSession.lastModified) < SESSION_ACTIVE_THRESHOLD_MS) {
+          session = latestSession
+          client.sessionId = latestSession.sessionId
+          clientState.sessionId = latestSession.sdkSessionId
+          console.log(`[ws] Resuming recent session ${latestSession.sessionId} for project ${projectId} (${Math.round((Date.now() - latestSession.lastModified) / 1000)}s ago)`)
+        }
+      }
+    }
+
+    // Send init message
     sendToClient(client, {
       type: 'system',
       subtype: 'init',
@@ -309,10 +420,17 @@ export function setupWebSocket(server: Server) {
       })
     }
 
-    // If a query is running, tell the client
-    if (clientState.activeQuery) {
+    // If a query is running (on this client or on the project), tell the client
+    const projectState = projectId ? getProjectState(projectId) : undefined
+    if (clientState.activeQuery || projectState?.activeQuery) {
       sendToClient(client, { type: 'query_start' })
     }
+
+    // Send current project statuses
+    sendToClient(client, {
+      type: 'project_statuses',
+      statuses: getProjectStatuses(),
+    })
 
     ws.on('message', async (data) => {
       try {
@@ -329,13 +447,16 @@ export function setupWebSocket(server: Server) {
       clients.delete(clientId)
 
       // Update session status if this was the last client
+      // But don't set to idle if the project still has an active query running
       if (client.sessionId) {
         const session = sessions.get(client.sessionId)
         if (session) {
           const hasOtherClients = Array.from(clients.values()).some(
             (c) => c.sessionId === client.sessionId
           )
-          if (!hasOtherClients && session.status === 'processing') {
+          const projectState = client.projectId ? getProjectState(client.projectId) : undefined
+          const hasActiveQuery = !!projectState?.activeQuery
+          if (!hasOtherClients && session.status === 'processing' && !hasActiveQuery) {
             session.status = 'idle'
           }
         }
@@ -429,6 +550,15 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         return
       }
 
+      // Project-level lock: only one session can run at a time per project
+      if (client.projectId) {
+        const projectState = getOrCreateProjectState(client.projectId)
+        if (projectState.activeQuery) {
+          safeSend(ws, { type: 'error', message: 'Another session is already running in this project. Please wait for it to finish or abort it first.' })
+          return
+        }
+      }
+
       // Add user message to session
       const userMsg: ChatMessage = {
         id: genId(),
@@ -462,6 +592,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       // Start processing
       session.status = 'processing'
       sendToClient(client, { type: 'query_start' })
+      broadcastProjectStatuses()
 
       try {
         // Execute query with Claude SDK
@@ -600,6 +731,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       } finally {
         session.status = 'idle'
         broadcastToProject(client.projectId, { type: 'query_end' })
+        broadcastProjectStatuses()
       }
 
       break
@@ -699,6 +831,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           session.status = 'idle'
         }
         broadcastToProject(client.projectId, { type: 'aborted' })
+        broadcastProjectStatuses()
       }
       break
     }

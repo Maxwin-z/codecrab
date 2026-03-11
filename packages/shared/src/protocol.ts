@@ -190,6 +190,19 @@ export interface AvailableModelsMessage {
   models: ModelInfo[]
 }
 
+export interface ProjectStatus {
+  projectId: string
+  status: 'idle' | 'processing'
+  sessionId?: string
+  firstPrompt?: string
+  lastModified?: number
+}
+
+export interface ProjectStatusesMessage {
+  type: 'project_statuses'
+  statuses: ProjectStatus[]
+}
+
 export type ServerMessage =
   | SystemMessage
   | StreamDeltaMessage
@@ -214,6 +227,7 @@ export type ServerMessage =
   | MessageHistoryMessage
   | UserMessage
   | AvailableModelsMessage
+  | ProjectStatusesMessage
 
 // ============ Shared Types ============
 

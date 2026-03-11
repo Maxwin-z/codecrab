@@ -141,6 +141,15 @@ export function getProjectState(projectId: string): ProjectState | undefined {
   return projects.get(projectId)
 }
 
+// Get all project IDs that have active queries running
+export function getActiveProjectIds(): string[] {
+  const result: string[] = []
+  for (const [id, state] of projects) {
+    if (state.activeQuery) result.push(id)
+  }
+  return result
+}
+
 // Create new client state
 export function createClientState(
   clientId: string,

@@ -6,6 +6,7 @@ import type {
   ModelInfo,
   PendingPermission,
   PermissionMode,
+  ProjectStatus,
   Question,
   ServerMessage,
   SessionInfo,
@@ -73,6 +74,7 @@ export interface UseWebSocketReturn {
   currentModel: string
   permissionMode: PermissionMode
   sessionId: string
+  projectStatuses: ProjectStatus[]
   sendPrompt: (prompt: string) => void
   sendCommand: (command: string) => void
   abort: () => void
@@ -106,6 +108,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [permissionMode, setPermissionModeState] = useState<PermissionMode>('default')
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
   const [sessionId, setSessionId] = useState<string>('')
+  const [projectStatuses, setProjectStatuses] = useState<ProjectStatus[]>([])
 
   const projectIdRef = useRef<string | null>(null)
   const pendingCwdRef = useRef<string | null>(null)
@@ -344,6 +347,10 @@ export function useWebSocket(): UseWebSocketReturn {
           })
           break
 
+        case 'project_statuses':
+          setProjectStatuses(msg.statuses)
+          break
+
         case 'system':
           if (msg.subtype === 'init') {
             if (msg.model) setCurrentModel(msg.model)
@@ -514,6 +521,7 @@ export function useWebSocket(): UseWebSocketReturn {
     currentModel,
     permissionMode,
     sessionId,
+    projectStatuses,
     sendPrompt,
     sendCommand,
     abort,
