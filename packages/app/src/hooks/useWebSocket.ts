@@ -227,13 +227,23 @@ export function useWebSocket(): UseWebSocketReturn {
           if (isActiveProject) emitQueryStateChange(false)
 
           // Flush remaining streaming text into a message
-          if (pState.streamingText) {
-            const cleaned = pState.streamingText.replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
-            if (cleaned) {
-              pState.messages = [
-                ...pState.messages,
-                { id: genId(), role: 'assistant', content: cleaned, timestamp: Date.now() },
-              ]
+          if (pState.streamingText || pState.streamingThinking) {
+            const cleaned = (pState.streamingText || '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+            if (cleaned || pState.streamingThinking) {
+              // Check if last message is an assistant message we can attach thinking to
+              const lastMsg = pState.messages[pState.messages.length - 1]
+              if (pState.streamingThinking && lastMsg?.role === 'assistant' && !cleaned) {
+                // Attach thinking to existing assistant message
+                pState.messages = [
+                  ...pState.messages.slice(0, -1),
+                  { ...lastMsg, thinking: (lastMsg.thinking || '') + pState.streamingThinking },
+                ]
+              } else if (cleaned) {
+                pState.messages = [
+                  ...pState.messages,
+                  { id: genId(), role: 'assistant', content: cleaned, thinking: pState.streamingThinking || undefined, timestamp: Date.now() },
+                ]
+              }
             }
             pState.streamingText = ''
           }
@@ -253,6 +263,7 @@ export function useWebSocket(): UseWebSocketReturn {
           break
 
         case 'assistant_text': {
+          const thinkingToSave = pState.streamingThinking || undefined
           pState.streamingText = ''
           pState.streamingThinking = ''
           const cleanedText = msg.text.replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
@@ -262,6 +273,7 @@ export function useWebSocket(): UseWebSocketReturn {
               id: genId(),
               role: 'assistant',
               content: cleanedText,
+              thinking: thinkingToSave,
               parentToolUseId: msg.parentToolUseId ?? undefined,
               timestamp: Date.now(),
             },
@@ -287,9 +299,10 @@ export function useWebSocket(): UseWebSocketReturn {
           if (pState.streamingText) {
             pState.messages = [
               ...pState.messages,
-              { id: genId(), role: 'assistant', content: pState.streamingText, timestamp: Date.now() },
+              { id: genId(), role: 'assistant', content: pState.streamingText, thinking: pState.streamingThinking || undefined, timestamp: Date.now() },
             ]
             pState.streamingText = ''
+            pState.streamingThinking = ''
           }
           pState.messages = [
             ...pState.messages,
