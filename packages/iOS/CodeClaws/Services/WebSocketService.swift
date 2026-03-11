@@ -510,7 +510,7 @@ class WebSocketService: ObservableObject {
             self.cwd = cwd ?? ""
             latestSummary = nil
             currentModel = ""
-            permissionMode = "default"
+            permissionMode = "bypassPermissions"
         }
         
         sendWebSocketMessage([

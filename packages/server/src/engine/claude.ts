@@ -74,6 +74,8 @@ export interface ProjectState {
   activeQuery: ActiveQuery | null
   messages: ChatMessage[]
   lastActivity: number
+  pendingQuestion?: { toolId: string; questions: any[] } | null
+  pendingPermissionRequest?: any | null
 }
 
 // Session status tracking
