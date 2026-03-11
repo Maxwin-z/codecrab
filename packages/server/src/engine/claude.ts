@@ -95,6 +95,19 @@ let messageIdCounter = 0
 // Config paths
 const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
 const MODELS_FILE = path.join(CONFIG_DIR, 'models.json')
+const PROJECTS_FILE = path.join(CONFIG_DIR, 'projects.json')
+
+// Look up project path from projects.json
+function getProjectPath(projectId: string): string | null {
+  try {
+    const data = fs.readFileSync(PROJECTS_FILE, 'utf-8')
+    const projects: { id: string; path: string }[] = JSON.parse(data)
+    const project = projects.find((p) => p.id === projectId)
+    return project?.path || null
+  } catch {
+    return null
+  }
+}
 
 // Read models.json to get default model configuration
 function readModelsConfig(): { models: ModelConfig[]; defaultModelId?: string } {
@@ -128,7 +141,7 @@ export function getOrCreateProjectState(projectId: string): ProjectState {
   if (!project) {
     project = {
       projectId,
-      cwd: process.cwd(),
+      cwd: getProjectPath(projectId) || process.cwd(),
       permissionMode: 'bypassPermissions',
       activeQuery: null,
       messages: [],
@@ -425,6 +438,11 @@ export async function* executeQuery(
     permissionMode: isYolo ? 'bypassPermissions' : 'default',
     allowDangerouslySkipPermissions: isYolo,
     includePartialMessages: true,
+    systemPrompt: {
+      type: 'preset',
+      preset: 'claude_code',
+      append: `\n\nYour working directory is ${client.cwd}.`,
+    },
   }
 
   // Set up MCP servers (cron, push, chrome)
@@ -508,6 +526,11 @@ export async function* executeQuery(
       }
       opts.signal.addEventListener('abort', onAbort, { once: true })
     })
+  }
+
+  // Capture stderr from Claude Code process
+  options.stderr = (data: string) => {
+    console.error(`[ClaudeAdapter:stderr] ${data.trimEnd()}`)
   }
 
   // Set model: prefer client override, then modelId from config, then name for custom providers
@@ -630,6 +653,22 @@ export async function* executeQuery(
       abortController.signal.aborted ||
       (err.message && err.message.includes('aborted'))
     if (!isAbort) {
+      // If resume failed (process exited with code 1), retry without resume
+      if (
+        isResuming &&
+        err.message?.includes('exited with code 1')
+      ) {
+        console.warn(`[ClaudeAdapter] Resume failed for session ${client.sessionId}, retrying without resume...`)
+        client.sessionId = undefined
+        // Clear project state session too
+        if (client.projectId) {
+          const project = getOrCreateProjectState(client.projectId)
+          project.sessionId = undefined
+        }
+        // Retry without resume — yield from recursive call
+        yield* executeQuery(client, prompt, callbacks, images)
+        return
+      }
       console.error(`[ClaudeAdapter] Query error for project ${client.projectId}:`, err)
       throw err
     } else {
@@ -772,6 +811,12 @@ async function* processMessage(
 
     case 'result': {
       const result = message as any
+      console.log(`[ClaudeAdapter] Result message:`, JSON.stringify({
+        subtype: result.subtype,
+        is_error: result.is_error,
+        result: result.result,
+        duration_ms: result.duration_ms,
+      }))
       client.currentCostUsd = result.total_cost_usd
       client.currentDurationMs = result.duration_ms
 
