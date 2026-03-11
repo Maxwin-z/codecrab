@@ -529,7 +529,11 @@ export async function* executeQuery(
       yield* processMessage(message, client, callbacks)
     }
   } catch (err: any) {
-    if (err.name !== 'AbortError') {
+    const isAbort =
+      err.name === 'AbortError' ||
+      abortController.signal.aborted ||
+      (err.message && err.message.includes('aborted'))
+    if (!isAbort) {
       console.error('[ClaudeAdapter] Query error:', err)
       throw err
     }
