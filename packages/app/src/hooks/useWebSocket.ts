@@ -456,9 +456,9 @@ export function useWebSocket(): UseWebSocketReturn {
     if (!pid) return
     const pState = projectStatesRef.current.get(pid)
     ws.send(JSON.stringify({
-      ...msg,
       projectId: pid,
       sessionId: pState?.sessionId || undefined,
+      ...msg,
     }))
   }, [])
 

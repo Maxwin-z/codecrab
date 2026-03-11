@@ -171,7 +171,6 @@ function resumeSessionForProject(client: Client, projectId: string, sessionId: s
   }
 
   session.status = 'idle'
-  session.lastModified = Date.now()
   persistSession(session)
   return session
 }
