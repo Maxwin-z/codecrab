@@ -59,7 +59,7 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled }: I
           rows={1}
           className="flex-1 min-h-[44px] max-h-[150px] bg-muted rounded-lg px-4 py-2.5 pr-12 text-sm resize-none placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
         />
-        <div className="absolute right-16 bottom-1.5">
+        <div className="absolute right-2 bottom-1.5">
           {isRunning ? (
             <Button
               onClick={onAbort}

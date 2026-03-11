@@ -45,9 +45,10 @@ function timeAgo(ts: number, now: number): string {
 interface SessionSidebarProps {
   open: boolean
   onClose: () => void
+  projectId?: string
 }
 
-export function SessionSidebar({ open, onClose }: SessionSidebarProps) {
+export function SessionSidebar({ open, onClose, projectId }: SessionSidebarProps) {
   const ws = useWs()
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -64,14 +65,15 @@ export function SessionSidebar({ open, onClose }: SessionSidebarProps) {
   const fetchSessions = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true)
     try {
-      const data = await ws.fetchSessions()
+      // Fetch sessions filtered by projectId
+      const data = await ws.fetchSessions(projectId)
       setSessions(data)
     } catch {
       // ignore
     } finally {
       if (showLoading) setLoading(false)
     }
-  }, [ws])
+  }, [ws, projectId])
 
   // Initial fetch when opening
   useEffect(() => {

@@ -1,6 +1,6 @@
 // Session management API
 import { Router, type Router as RouterType } from 'express'
-import { getSessions, deleteSession } from '../ws/index.js'
+import { getSessionsList, deleteSession } from '../ws/index.js'
 
 const router: RouterType = Router()
 
@@ -9,7 +9,7 @@ router.get('/', (req, res) => {
   const projectId = req.query.projectId as string | undefined
   const cwd = req.query.cwd as string | undefined
 
-  const sessions = getSessions(projectId, cwd)
+  const sessions = getSessionsList(projectId, cwd)
   res.json(sessions)
 })
 

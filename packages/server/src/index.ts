@@ -64,7 +64,7 @@ ensureToken().then(() => {
   // Setup WebSocket server
   setupWebSocket(server)
 
-  server.listen(PORT, () => {
-    console.log(`[server] listening on http://localhost:${PORT}`)
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[server] listening on http://0.0.0.0:${PORT}`)
   })
 })

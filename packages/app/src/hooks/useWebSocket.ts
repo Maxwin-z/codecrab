@@ -480,9 +480,16 @@ export function useWebSocket(): UseWebSocketReturn {
     setPendingPermission(null)
   }, [])
 
-  const fetchSessions = useCallback(async (): Promise<SessionInfo[]> => {
+  const fetchSessions = useCallback(async (filterProjectId?: string): Promise<SessionInfo[]> => {
     try {
-      const url = cwd ? `/api/sessions?cwd=${encodeURIComponent(cwd)}` : '/api/sessions'
+      const params = new URLSearchParams()
+      if (filterProjectId) {
+        params.set('projectId', filterProjectId)
+      } else if (cwd) {
+        params.set('cwd', cwd)
+      }
+      const query = params.toString()
+      const url = query ? `/api/sessions?${query}` : '/api/sessions'
       const res = await authFetch(url)
       if (!res.ok) return []
       const data = await res.json()

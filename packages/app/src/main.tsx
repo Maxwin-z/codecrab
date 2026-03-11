@@ -103,9 +103,15 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/setup" element={
-        setupStatus === 'initialized'
-          ? <Navigate to="/" replace />
-          : <SetupPage onComplete={() => { setSetupStatus('initialized'); navigate('/') }} onUnauthorized={handleUnauthorized} />
+        <SetupPage
+          onComplete={() => {
+            if (setupStatus === 'uninitialized') {
+              setSetupStatus('initialized')
+            }
+            navigate('/')
+          }}
+          onUnauthorized={handleUnauthorized}
+        />
       } />
       <Route path="/projects/new" element={
         setupStatus === 'initialized'

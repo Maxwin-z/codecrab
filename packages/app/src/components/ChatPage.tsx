@@ -213,7 +213,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
       />
 
       {/* Session History Sidebar */}
-      <SessionSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <SessionSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} projectId={project?.id} />
     </div>
   )
 }
