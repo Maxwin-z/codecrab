@@ -6,6 +6,7 @@ import { query, type SDKMessage, type Query, createSdkMcpServer, tool } from '@a
 import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
+import { ensureChromeRunning, stopChrome, getChromeDebugUrl } from '../mcp/chrome/index.js'
 import type {
   ChatMessage,
   Question,
@@ -386,11 +387,20 @@ export async function* executeQuery(
         'Start a Chrome browser instance with remote debugging enabled.',
         {},
         async () => {
-          // Placeholder - actual implementation would start Chrome
-          return {
-            content: [
-              { type: 'text', text: 'Chrome started successfully on port 9222.' },
-            ],
+          try {
+            await ensureChromeRunning()
+            return {
+              content: [
+                { type: 'text', text: `Chrome started successfully. Debug URL: ${getChromeDebugUrl()}` },
+              ],
+            }
+          } catch (err: any) {
+            return {
+              content: [
+                { type: 'text', text: `Failed to start Chrome: ${err.message}` },
+              ],
+              isError: true,
+            }
           }
         }
       ),
@@ -399,33 +409,34 @@ export async function* executeQuery(
         'Stop the Chrome browser instance.',
         {},
         async () => {
+          await stopChrome()
           return { content: [{ type: 'text', text: 'Chrome stopped.' }] }
         }
       ),
     ],
   })
 
-  // MCP servers temporarily disabled - TODO: implement properly
-  // options.mcpServers = {
-  //   cron: {
-  //     type: 'stdio',
-  //     command: 'npx',
-  //     args: ['tsx', path.join(process.cwd(), 'src/mcp/cron/index.ts')],
-  //     env: {
-  //       CLAUDE_CONFIG_DIR: path.join(os.homedir(), '.codeclaws'),
-  //       PATH: process.env.PATH || '',
-  //     },
-  //   },
-  //   push: {
-  //     type: 'stdio',
-  //     command: 'npx',
-  //     args: ['tsx', path.join(process.cwd(), 'src/mcp/push/index.ts')],
-  //     env: {
-  //       PATH: process.env.PATH || '',
-  //     },
-  //   },
-  //   chrome: chromeMcp,
-  // }
+  // MCP servers — cron & push temporarily disabled, chrome enabled
+  options.mcpServers = {
+    // cron: {
+    //   type: 'stdio',
+    //   command: 'npx',
+    //   args: ['tsx', path.join(process.cwd(), 'src/mcp/cron/index.ts')],
+    //   env: {
+    //     CLAUDE_CONFIG_DIR: path.join(os.homedir(), '.codeclaws'),
+    //     PATH: process.env.PATH || '',
+    //   },
+    // },
+    // push: {
+    //   type: 'stdio',
+    //   command: 'npx',
+    //   args: ['tsx', path.join(process.cwd(), 'src/mcp/push/index.ts')],
+    //   env: {
+    //     PATH: process.env.PATH || '',
+    //   },
+    // },
+    chrome: chromeMcp,
+  }
 
   // Set up canUseTool for permission handling
   let reqCounter = 0

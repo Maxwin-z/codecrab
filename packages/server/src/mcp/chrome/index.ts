@@ -10,3 +10,6 @@
 //   - Persistent profile (~/.codeclaws/chrome-profile/)
 //   - macOS + Linux platform detection
 //   - Integrates with engine's built-in DevTools MCP
+
+export { ensureChromeRunning, getChromeDebugUrl, stopChrome } from './chrome.js'
+export { default as chromeRouter } from './routes.js'
