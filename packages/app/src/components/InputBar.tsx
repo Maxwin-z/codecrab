@@ -1,6 +1,6 @@
 // InputBar — user text input with image upload and drag & drop support
 import { useState, useRef, useEffect, useCallback } from 'react'
-import type { ImageAttachment } from '@codeclaws/shared'
+import type { ImageAttachment, PermissionMode } from '@codeclaws/shared'
 
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const MAX_LONG_EDGE = 1568
@@ -18,6 +18,8 @@ interface InputBarProps {
   isAborting?: boolean
   disabled: boolean
   currentModel?: string
+  permissionMode?: PermissionMode
+  onPermissionModeChange?: (mode: PermissionMode) => void
 }
 
 /** Compress and resize an image file, returns base64 ImageAttachment */
@@ -77,7 +79,7 @@ async function processImage(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel }: InputBarProps) {
+export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange }: InputBarProps) {
   const [text, setText] = useState('')
   const [images, setImages] = useState<PreviewImage[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -305,8 +307,36 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, cur
             )}
           </div>
 
-          {/* Right: send / abort button */}
+          {/* Right: mode toggle + send / abort button */}
           <div className="flex items-center gap-2">
+            {onPermissionModeChange && (
+              <button
+                onClick={() => onPermissionModeChange(permissionMode === 'bypassPermissions' ? 'default' : 'bypassPermissions')}
+                disabled={disabled || isRunning}
+                title={permissionMode === 'bypassPermissions' ? 'YOLO mode: all actions auto-approved' : 'Safe mode: dangerous actions require approval'}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 ${
+                  permissionMode === 'bypassPermissions'
+                    ? 'text-orange-500 bg-orange-500/10 hover:bg-orange-500/20'
+                    : 'text-green-600 bg-green-500/10 hover:bg-green-500/20 dark:text-green-400'
+                }`}
+              >
+                {permissionMode === 'bypassPermissions' ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                    </svg>
+                    YOLO
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                    Safe
+                  </>
+                )}
+              </button>
+            )}
             <span className="text-xs text-muted-foreground font-mono mr-1">{currentModel || 'Default'}</span>
             {isRunning ? (
               <button

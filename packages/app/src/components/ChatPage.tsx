@@ -214,6 +214,8 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         isAborting={ws.isAborting}
         disabled={!ws.connected}
         currentModel={ws.currentModel}
+        permissionMode={ws.permissionMode}
+        onPermissionModeChange={ws.setPermissionMode}
       />
 
       {/* Session History Sidebar */}
