@@ -29,13 +29,16 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(false)
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom when messages change or project loads
   useEffect(() => {
     const el = scrollRef.current
     if (el) {
-      el.scrollTop = el.scrollHeight
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight
+      })
     }
-  }, [ws.messages, ws.streamingText, ws.streamingThinking])
+  }, [ws.messages, ws.streamingText, ws.streamingThinking, project?.id])
 
   // Handle project query param
   useEffect(() => {
