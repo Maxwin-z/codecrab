@@ -339,7 +339,15 @@ export function setupWebSocket(server: Server) {
     console.log(`[ws] client connected: ${clientId}${projectId ? ` (project: ${projectId})` : ''}`)
 
     // Get or create client state for Claude SDK (session is created lazily on first message)
+    // If the client reconnected to a different project, create a fresh clientState
+    // to avoid inheriting activeQuery from the previous project's running query.
+    // The old clientState object is still referenced by the running query's closure,
+    // so its finally block will correctly clean up the old project's activeQuery.
     let clientState = getClientState(clientId)
+    if (clientState && clientState.projectId !== projectId) {
+      removeClientState(clientId)
+      clientState = undefined
+    }
     if (!clientState) {
       const cwd = process.cwd()
       clientState = createClientState(clientId, projectId, cwd)
@@ -420,9 +428,10 @@ export function setupWebSocket(server: Server) {
       })
     }
 
-    // If a query is running (on this client or on the project), tell the client
+    // If a query is running on this project, tell the client
+    // Only check project-level activeQuery, not clientState (which is fresh after project switch)
     const projectState = projectId ? getProjectState(projectId) : undefined
-    if (clientState.activeQuery || projectState?.activeQuery) {
+    if (projectState?.activeQuery) {
       sendToClient(client, { type: 'query_start' })
     }
 

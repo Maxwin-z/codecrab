@@ -415,11 +415,16 @@ export function useWebSocket(): UseWebSocketReturn {
     projectIdRef.current = projectId
     pendingCwdRef.current = projectCwd || null
 
+    // Reset all state when switching projects
     setStreamingText('')
     setStreamingThinking('')
     setPendingQuestion(null)
     setPendingPermission(null)
     setMessages([])
+    setIsRunning(false)
+    setIsAborting(false)
+    setSessionId('')
+    setLatestSummary(null)
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.close()
