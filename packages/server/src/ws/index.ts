@@ -69,6 +69,8 @@ async function persistSession(session: Session) {
       lastModified: session.lastModified,
       summary: session.summary,
       firstPrompt: session.firstPrompt,
+      pendingQuestion: session.pendingQuestion || null,
+      pendingPermissionRequest: session.pendingPermissionRequest || null,
     }
     await fs.writeFile(sessionFilePath(session.sessionId), JSON.stringify(data, null, 2), 'utf-8')
   } catch (err) {
@@ -105,6 +107,8 @@ async function loadPersistedSessions() {
             lastModified: data.lastModified || Date.now(),
             summary: data.summary,
             firstPrompt: data.firstPrompt,
+            pendingQuestion: data.pendingQuestion || null,
+            pendingPermissionRequest: data.pendingPermissionRequest || null,
           }
           sessions.set(session.sessionId, session)
           loaded++
@@ -147,6 +151,8 @@ interface Session {
   lastModified: number
   summary?: string
   firstPrompt?: string
+  pendingQuestion?: { toolId: string; questions: any[] } | null
+  pendingPermissionRequest?: { requestId: string; toolName: string; input: any; reason?: string } | null
 }
 
 const clients = new Map<string, Client>()
@@ -657,25 +663,28 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         projectId,
         sessionId: session?.sessionId,
       })
+    }
 
-      // Resend pending interactive state (ask_user_question / permission_request)
-      if (projectState.pendingQuestion) {
-        sendToClient(client, {
-          type: 'ask_user_question',
-          toolId: projectState.pendingQuestion.toolId,
-          questions: projectState.pendingQuestion.questions,
-          projectId,
-          sessionId: session?.sessionId,
-        })
-      }
-      if (projectState.pendingPermissionRequest) {
-        sendToClient(client, {
-          type: 'permission_request',
-          ...projectState.pendingPermissionRequest,
-          projectId,
-          sessionId: session?.sessionId,
-        })
-      }
+    // Resend pending interactive state (ask_user_question / permission_request)
+    // Check both in-memory ProjectState (server still running) and persisted Session (server restarted)
+    const pendingQ = projectState?.pendingQuestion || session?.pendingQuestion
+    const pendingP = projectState?.pendingPermissionRequest || session?.pendingPermissionRequest
+    if (pendingQ) {
+      sendToClient(client, {
+        type: 'ask_user_question',
+        toolId: pendingQ.toolId,
+        questions: pendingQ.questions,
+        projectId,
+        sessionId: session?.sessionId,
+      })
+    }
+    if (pendingP) {
+      sendToClient(client, {
+        type: 'permission_request',
+        ...pendingP,
+        projectId,
+        sessionId: session?.sessionId,
+      })
     }
 
     // Send updated project statuses
@@ -815,9 +824,12 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             }
           },
           onPermissionRequest: (requestId, toolName, input, reason) => {
-            // Store in project state for reconnecting clients
+            // Store in project state and session for reconnecting clients
             const projStateForP = getOrCreateProjectState(projectId)
-            projStateForP.pendingPermissionRequest = { requestId, toolName, input, reason }
+            const permData = { requestId, toolName, input, reason }
+            projStateForP.pendingPermissionRequest = permData
+            session!.pendingPermissionRequest = permData
+            persistSession(session!)
             broadcastToProject(projectId, {
               type: 'permission_request',
               requestId,
@@ -866,9 +878,11 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
                 toolId: (event.data as any).toolId,
                 questions: (event.data as any).questions,
               }
-              // Store in project state for reconnecting clients
+              // Store in project state and session for reconnecting clients
               const projStateForQ = getOrCreateProjectState(projectId)
               projStateForQ.pendingQuestion = questionData
+              session.pendingQuestion = questionData
+              persistSession(session)
               broadcastToProject(projectId, {
                 type: 'ask_user_question',
                 ...questionData,
@@ -922,6 +936,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         const projStateForEnd = getOrCreateProjectState(projectId)
         projStateForEnd.pendingQuestion = null
         projStateForEnd.pendingPermissionRequest = null
+        session.pendingQuestion = null
+        session.pendingPermissionRequest = null
         broadcastToProject(projectId, {
           type: 'query_end',
           projectId,
@@ -1067,9 +1083,11 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     case 'respond_question': {
       if (!session) return
 
-      // Clear pending question from project state
+      // Clear pending question from project state and session
       const projStateForQR = getOrCreateProjectState(projectId)
       projStateForQR.pendingQuestion = null
+      session.pendingQuestion = null
+      persistSession(session)
 
       const answerText = Object.entries(msg.answers)
         .map(([key, value]) => {
@@ -1090,9 +1108,13 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     }
 
     case 'respond_permission': {
-      // Clear pending permission from project state
+      // Clear pending permission from project state and session
       const projStateForPR = getOrCreateProjectState(projectId)
       projStateForPR.pendingPermissionRequest = null
+      if (session) {
+        session.pendingPermissionRequest = null
+        persistSession(session)
+      }
       const handled = handlePermissionResponse(clientState, msg.requestId, msg.allow)
       if (!handled) {
         // Try other client states for this project
