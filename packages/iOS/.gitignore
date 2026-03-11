@@ -1,0 +1,14 @@
+# Xcode - Shared schemes
+# Uncomment the line below if you want to ignore all shared schemes
+# xcshareddata/xcschemes/
+
+# Uncomment to ignore all of xcshareddata except for specific files you want to keep
+# xcshareddata/
+
+# Swift Package Manager
+.build/
+Package.resolved
+
+# Xcode
+*.xcuserstate
+project.xcworkspace/

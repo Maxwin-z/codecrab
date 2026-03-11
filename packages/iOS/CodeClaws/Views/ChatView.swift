@@ -45,10 +45,12 @@ struct ChatView: View {
                 .onChange(of: wsService.streamingText) { _ in scrollToBottom(proxy) }
                 .onChange(of: wsService.streamingThinking) { _ in scrollToBottom(proxy) }
                 .onChange(of: keyboardHeight) { _ in scrollToBottom(proxy) }
-                // Tap to dismiss keyboard
-                .onTapGesture {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
+                // Tap to dismiss keyboard - using simultaneousGesture to not block child button taps
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                )
             }
             
             // Summary Banner

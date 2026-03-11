@@ -149,6 +149,7 @@ struct InputBarView: View {
                         .cornerRadius(8)
                     }
                     .disabled(isRunning)
+                    .buttonStyle(.plain)
 
                     // Model name
                     Text(currentModel)
