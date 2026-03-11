@@ -2,11 +2,11 @@
 //
 // Wraps @anthropic-ai/claude-agent-sdk to conform to the EngineAdapter interface.
 
-import { query, type SDKMessage, type Query, createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKMessage, type Query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
-import { ensureChromeRunning, stopChrome, getChromeDebugUrl } from '../mcp/chrome/index.js'
+import { chromeTools } from '../mcp/chrome/index.js'
 import type {
   ChatMessage,
   Question,
@@ -381,39 +381,7 @@ export async function* executeQuery(
   // Set up MCP servers (cron, push, chrome)
   const chromeMcp = createSdkMcpServer({
     name: 'chrome',
-    tools: [
-      tool(
-        'start_chrome',
-        'Start a Chrome browser instance with remote debugging enabled.',
-        {},
-        async () => {
-          try {
-            await ensureChromeRunning()
-            return {
-              content: [
-                { type: 'text', text: `Chrome started successfully. Debug URL: ${getChromeDebugUrl()}` },
-              ],
-            }
-          } catch (err: any) {
-            return {
-              content: [
-                { type: 'text', text: `Failed to start Chrome: ${err.message}` },
-              ],
-              isError: true,
-            }
-          }
-        }
-      ),
-      tool(
-        'stop_chrome',
-        'Stop the Chrome browser instance.',
-        {},
-        async () => {
-          await stopChrome()
-          return { content: [{ type: 'text', text: 'Chrome stopped.' }] }
-        }
-      ),
-    ],
+    tools: chromeTools,
   })
 
   // MCP servers — cron & push temporarily disabled, chrome enabled

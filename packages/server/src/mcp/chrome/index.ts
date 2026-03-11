@@ -2,6 +2,8 @@
 //
 // Components:
 //   chrome.ts  — Chrome process lifecycle (lazy start/stop)
+//   cdp.ts     — Lightweight CDP WebSocket client
+//   tools.ts   — MCP tool definitions for Claude Agent SDK
 //   routes.ts  — REST endpoints (/api/chrome/*)
 //
 // Features:
@@ -9,7 +11,8 @@
 //   - Remote debugging port (9222)
 //   - Persistent profile (~/.codeclaws/chrome-profile/)
 //   - macOS + Linux platform detection
-//   - Integrates with engine's built-in DevTools MCP
+//   - 10 browser automation tools via CDP
 
 export { ensureChromeRunning, getChromeDebugUrl, stopChrome } from './chrome.js'
 export { default as chromeRouter } from './routes.js'
+export { chromeTools } from './tools.js'
