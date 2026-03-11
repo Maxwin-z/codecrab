@@ -1,32 +1,34 @@
-//
-//  CodeClawsApp.swift
-//  CodeClaws
-//
-//  Created by Maxwin on 2026/3/11.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct CodeClawsApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @StateObject var authService = AuthService()
+    @StateObject var webSocketService = WebSocketService()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environmentObject(authService)
+                .environmentObject(webSocketService)
+                .task {
+                    await authService.checkAuth()
+                }
         }
-        .modelContainer(sharedModelContainer)
+    }
+}
+
+struct RootView: View {
+    @EnvironmentObject var auth: AuthService
+
+    var body: some View {
+        if auth.isLoading {
+            ProgressView("Starting CodeClaws...")
+        } else if !auth.isAuthenticated {
+            LoginView()
+        } else {
+            NavigationStack {
+                HomeView()
+            }
+        }
     }
 }
