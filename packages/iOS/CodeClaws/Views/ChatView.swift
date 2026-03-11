@@ -88,7 +88,7 @@ struct ChatView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .navigationTitle(project.name)
+        .navigationTitle("\(project.icon) \(project.name)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
