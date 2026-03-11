@@ -19,7 +19,7 @@ struct ProjectChatState {
     var cwd: String = ""
     var latestSummary: String? = nil
     var currentModel: String = ""
-    var permissionMode: String = "default"
+    var permissionMode: String = "bypassPermissions"
 }
 
 @MainActor
@@ -39,7 +39,7 @@ class WebSocketService: ObservableObject {
     @Published var cwd: String = ""
     @Published var latestSummary: String? = nil
     @Published var currentModel: String = ""
-    @Published var permissionMode: String = "default"
+    @Published var permissionMode: String = "bypassPermissions"
     
     private var activeProjectId: String? = nil
     private var projectStates: [String: ProjectChatState] = [:]
@@ -57,37 +57,43 @@ class WebSocketService: ObservableObject {
     }
     
     func connect() {
-        guard !connected else { return }
-        guard let serverURLStr = UserDefaults.standard.string(forKey: "codeclaws_server_url"),
-              let token = KeychainHelper.shared.getToken() else { return }
-        
-        let wsURLStr = serverURLStr.replacingOccurrences(of: "http://", with: "ws://")
-                                   .replacingOccurrences(of: "https://", with: "wss://")
-        guard let url = URL(string: "\(wsURLStr)/ws?clientId=\(clientId)&token=\(token)") else { return }
-        
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        
-        webSocketTask = URLSession.shared.webSocketTask(with: request)
-        webSocketTask?.resume()
-        connected = true
-        
-        receiveLoop()
-        
-        if let projectId = activeProjectId {
-            let cwd = self.cwd.isEmpty ? nil : self.cwd
-            sendWebSocketMessage(["type": "switch_project", "projectId": projectId, "projectCwd": cwd as Any])
+        Task { @MainActor in
+            guard !self.connected else { return }
+            guard let serverURLStr = UserDefaults.standard.string(forKey: "codeclaws_server_url"),
+                  let token = KeychainHelper.shared.getToken() else { return }
+
+            let wsURLStr = serverURLStr.replacingOccurrences(of: "http://", with: "ws://")
+                                       .replacingOccurrences(of: "https://", with: "wss://")
+            guard let url = URL(string: "\(wsURLStr)/ws?clientId=\(self.clientId)&token=\(token)") else { return }
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5
+
+            self.webSocketTask = URLSession.shared.webSocketTask(with: request)
+            self.webSocketTask?.resume()
+            self.connected = true
+
+            self.receiveLoop()
+
+            if let projectId = self.activeProjectId {
+                let cwd = self.cwd.isEmpty ? nil : self.cwd
+                self.sendWebSocketMessage(["type": "switch_project", "projectId": projectId, "projectCwd": cwd as Any])
+            }
         }
     }
     
     func disconnect() {
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        connected = false
-        webSocketTask = nil
+        Task { @MainActor in
+            webSocketTask?.cancel(with: .goingAway, reason: nil)
+            connected = false
+            webSocketTask = nil
+        }
     }
-    
+
     private func reconnect() {
-        guard !connected else { return }
+        Task { @MainActor in
+            guard !connected else { return }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.connect()
         }
@@ -95,22 +101,22 @@ class WebSocketService: ObservableObject {
     
     private func receiveLoop() {
         webSocketTask?.receive { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-            case .success(let message):
-                switch message {
-                case .string(let text):
-                    self.handleMessage(text)
-                case .data(let data):
-                    if let text = String(data: data, encoding: .utf8) {
+            Task { @MainActor in
+                guard let self = self else { return }
+                switch result {
+                case .success(let message):
+                    switch message {
+                    case .string(let text):
                         self.handleMessage(text)
+                    case .data(let data):
+                        if let text = String(data: data, encoding: .utf8) {
+                            self.handleMessage(text)
+                        }
+                    @unknown default:
+                        break
                     }
-                @unknown default:
-                    break
-                }
-                self.receiveLoop()
-            case .failure(_):
-                Task { @MainActor in
+                    self.receiveLoop()
+                case .failure(_):
                     self.connected = false
                     self.reconnect()
                 }
