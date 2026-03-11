@@ -2,46 +2,54 @@ import SwiftUI
 
 struct ProjectListView: View {
     @EnvironmentObject var wsService: WebSocketService
+    @Binding var selectedProject: Project?
     @State private var projects: [Project] = []
     @State private var isLoading = false
     
-    let columns = [
-        GridItem(.adaptive(minimum: 160), spacing: 16)
-    ]
-    
     var body: some View {
-        ScrollView {
+        List(selection: $selectedProject) {
             if isLoading && projects.isEmpty {
-                ProgressView()
-                    .padding(.top, 50)
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.automatic)
             } else if projects.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "folder")
-                        .font(.system(size: 60))
+                        .font(.system(size: 48))
                         .foregroundColor(.gray)
                     Text("No projects yet")
                         .font(.headline)
                 }
-                .padding(.top, 100)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.automatic)
             } else {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(projects) { project in
-                        NavigationLink(destination: ChatView(project: project)) {
-                            ProjectCard(project: project)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                deleteProject(project)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
+                ForEach(projects) { project in
+                    Button {
+                        selectedProject = project
+                    } label: {
+                        ProjectCard(project: project, isSelected: selectedProject?.id == project.id)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                    .listRowSeparator(.automatic)
+                    .listRowBackground(Color.clear)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            deleteProject(project)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
-                .padding()
             }
         }
+        .listStyle(.plain)
         .refreshable {
             await fetchProjects()
         }
@@ -67,6 +75,9 @@ struct ProjectListView: View {
             do {
                 try await APIClient.shared.request(path: "/api/projects/\(project.id)", method: "DELETE")
                 projects.removeAll { $0.id == project.id }
+                if selectedProject?.id == project.id {
+                    selectedProject = nil
+                }
             } catch {
                 print("Failed to delete project: \(error)")
             }
@@ -76,53 +87,115 @@ struct ProjectListView: View {
 
 struct ProjectCard: View {
     let project: Project
+    let isSelected: Bool
     @EnvironmentObject var wsService: WebSocketService
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
                 Text(project.icon)
-                    .font(.title)
+                    .font(.system(size: 18))
+                Text(project.name)
+                    .font(.headline)
+                    .foregroundColor(isSelected ? .accentColor : .primary)
+                    .lineLimit(1)
                 Spacer()
                 indicator
             }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(project.path)
-                    .font(.caption)
+
+            HStack(spacing: 4) {
+                Text(shortenedPath(project.path))
+                    .font(.subheadline)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                Spacer()
+                Text(TimeAgo.format(from: project.updatedAt))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
-            
-            Spacer()
-            
-            Text("Updated " + TimeAgo.format(from: project.updatedAt))
-                .font(.caption2)
-                .foregroundColor(.secondary)
         }
-        .padding()
-        .frame(height: 140)
-        .background(Color(UIColor.secondarySystemGroupedBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
     }
-    
+
     @ViewBuilder
     var indicator: some View {
         if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }) {
             if status.status == "processing" {
-                Circle()
-                    .fill(Color.orange)
-                    .frame(width: 10, height: 10)
+                Circle().fill(Color.orange).frame(width: 8, height: 8)
             } else if let lastMod = status.lastModified, Date().timeIntervalSince1970 * 1000 - lastMod < 600_000 {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 10, height: 10)
+                Circle().fill(Color.green).frame(width: 8, height: 8)
             }
+        }
+    }
+
+    private func shortenedPath(_ path: String) -> String {
+        if let homeDir = ProcessInfo.processInfo.environment["HOME"],
+           path.hasPrefix(homeDir) {
+            return "~" + path.dropFirst(homeDir.count)
+        }
+        return path
+    }
+}
+
+// MARK: - Preview
+
+#Preview("Project List") {
+    let wsService: WebSocketService = {
+        let service = WebSocketService()
+        let now = Date().timeIntervalSince1970 * 1000
+        service.projectStatuses = [
+            ProjectStatus(projectId: "1", status: "idle", sessionId: nil, firstPrompt: nil, lastModified: now - 2 * 3600_000),
+            ProjectStatus(projectId: "2", status: "idle", sessionId: nil, firstPrompt: nil, lastModified: now - 5 * 3600_000),
+            ProjectStatus(projectId: "3", status: "processing", sessionId: "s1", firstPrompt: nil, lastModified: now - 86400_000),
+            ProjectStatus(projectId: "4", status: "processing", sessionId: "s2", firstPrompt: nil, lastModified: now - 3 * 86400_000),
+            ProjectStatus(projectId: "5", status: "idle", sessionId: nil, firstPrompt: nil, lastModified: now - 6 * 3600_000),
+            ProjectStatus(projectId: "6", status: "idle", sessionId: nil, firstPrompt: nil, lastModified: now - 7 * 86400_000),
+        ]
+        return service
+    }()
+
+    let sampleProjects: [Project] = [
+        Project(id: "1", name: "Pencil SDK", path: "~/code/pencil-sdk", icon: "\u{270F}\u{FE0F}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 2 * 3600_000),
+        Project(id: "2", name: "Design System", path: "~/code/design-system", icon: "\u{1F3A8}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 5 * 3600_000),
+        Project(id: "3", name: "Lightning API", path: "~/code/lightning-api", icon: "\u{26A1}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 86400_000),
+        Project(id: "4", name: "ML Pipeline", path: "~/code/ml-pipeline", icon: "\u{1F9E0}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 3 * 86400_000),
+        Project(id: "5", name: "Launch App", path: "~/code/launch-app", icon: "\u{1F680}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 6 * 3600_000),
+        Project(id: "6", name: "Config Tools", path: "~/code/config-tools", icon: "\u{1F527}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 7 * 86400_000),
+    ]
+
+    return NavigationStack {
+        ProjectListPreviewWrapper(projects: sampleProjects)
+            .environmentObject(wsService)
+    }
+}
+
+private struct ProjectListPreviewWrapper: View {
+    let projects: [Project]
+    @State private var selectedProject: Project?
+
+    var body: some View {
+        List(selection: $selectedProject) {
+            ForEach(projects) { project in
+                Button {
+                    selectedProject = project
+                } label: {
+                    ProjectCard(project: project, isSelected: selectedProject?.id == project.id)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                .listRowSeparator(.automatic)
+                .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("Projects")
+        .onAppear {
+            selectedProject = projects.first
         }
     }
 }
