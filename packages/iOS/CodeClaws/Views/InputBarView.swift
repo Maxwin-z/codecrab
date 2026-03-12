@@ -131,12 +131,22 @@ struct InputBarView: View {
                             }
                         }
                         .disabled(isRunning || sdkProbing)
-                        .popover(isPresented: $showMcpPopover) {
-                            McpPopoverView(
+                        .sheet(isPresented: $showMcpPopover) {
+                            McpPanelView(
                                 mcps: availableMcps,
                                 enabledMcps: enabledMcps,
-                                onToggle: onToggleMcp
+                                onToggle: onToggleMcp,
+                                onSkillTap: { skillName in
+                                    text = "/\(skillName) "
+                                    showMcpPopover = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                        isFocused = true
+                                    }
+                                },
+                                onDismiss: { showMcpPopover = false }
                             )
+                            .presentationDetents([.medium, .large])
+                            .presentationDragIndicator(.visible)
                         }
                         .onChange(of: sdkLoaded) { loaded in
                             if sdkProbing && loaded {
@@ -237,64 +247,102 @@ struct InputBarView: View {
     }
 }
 
-// MARK: - MCP Popover
+// MARK: - MCP Panel (Sheet)
 
-private struct McpPopoverView: View {
+private struct McpPanelView: View {
     let mcps: [McpInfo]
     let enabledMcps: [String]
     let onToggle: (String) -> Void
+    let onSkillTap: (String) -> Void
+    let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("MCP Servers & Skills")
-                    .font(.caption).bold()
-                Text("Toggle servers and skills for this query")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("MCP Servers & Skills")
+                        .font(.subheadline).fontWeight(.semibold)
+                    Text("Toggle servers and skills for this query")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(Color(UIColor.tertiarySystemFill))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
             Divider()
 
+            // List
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(mcps) { mcp in
                         let isEnabled = enabledMcps.contains(mcp.id)
-                        Button(action: { onToggle(mcp.id) }) {
-                            HStack(spacing: 10) {
-                                Text(mcp.icon ?? "🔌")
-                                    .font(.body)
-                                    .frame(width: 24)
+                        let isSkill = mcp.source == "skill"
 
-                                VStack(alignment: .leading, spacing: 1) {
-                                    HStack(spacing: 4) {
-                                        Text(mcp.name)
-                                            .font(.caption)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.primary)
-                                            .lineLimit(1)
+                        HStack(spacing: 12) {
+                            // Icon
+                            Text(mcp.icon ?? "🔌")
+                                .font(.body)
+                                .frame(width: 24)
 
-                                        // Source badge for SDK/Skill entries
-                                        if let source = mcp.source, source != "custom" {
-                                            Text(source == "sdk" ? "SDK" : "Skill")
-                                                .font(.system(size: 8, weight: .semibold))
-                                                .padding(.horizontal, 4)
-                                                .padding(.vertical, 1)
-                                                .background(source == "sdk" ? Color.blue.opacity(0.15) : Color.purple.opacity(0.15))
-                                                .foregroundColor(source == "sdk" ? .blue : .purple)
-                                                .cornerRadius(3)
-                                        }
+                            // Name + description (tappable for skills)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(mcp.name)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+
+                                    if let source = mcp.source, source != "custom" {
+                                        Text(source == "sdk" ? "SDK" : "Skill")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(source == "sdk" ? Color.blue.opacity(0.12) : Color.purple.opacity(0.12))
+                                            .foregroundColor(source == "sdk" ? .blue : .purple)
+                                            .cornerRadius(4)
                                     }
-                                    Text(mcp.description)
+                                }
+
+                                HStack(spacing: 4) {
+                                    Text(mcp.description.count > 60
+                                        ? String(mcp.description.prefix(57)) + "..."
+                                        : mcp.description)
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
                                         .lineLimit(1)
+
+                                    if isSkill {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 8, weight: .semibold))
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if isSkill {
+                                    onSkillTap(mcp.name)
+                                }
+                            }
 
-                                Spacer()
-
+                            // Tool count + toggle
+                            HStack(spacing: 6) {
                                 if mcp.toolCount > 0 {
                                     Text("\(mcp.toolCount) tools")
                                         .font(.caption2)
@@ -307,14 +355,15 @@ private struct McpPopoverView: View {
                                 ))
                                 .labelsHidden()
                                 .scaleEffect(0.75)
+                                .fixedSize()
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                     }
                 }
+                .padding(.vertical, 4)
             }
         }
-        .frame(width: 300, height: min(CGFloat(mcps.count) * 52 + 60, 320))
     }
 }

@@ -47,7 +47,7 @@ class WebSocketService: ObservableObject {
     @Published var currentModel: String = ""
     @Published var permissionMode: String = "bypassPermissions"
     @Published var sdkMcpServers: [SdkMcpServer] = []
-    @Published var sdkSkills: [String] = []
+    @Published var sdkSkills: [SdkSkill] = []
     @Published var sdkTools: [String] = []
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
