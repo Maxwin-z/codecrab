@@ -57,24 +57,6 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Connection Status
-            HStack {
-                Circle()
-                    .fill(wsService.connected ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
-                Text(wsService.connected ? "Connected" : "Disconnected")
-                    .font(.caption)
-                if !wsService.sessionId.isEmpty {
-                    Text("• " + String(wsService.sessionId.suffix(6)))
-                        .font(.caption)
-                        .fontDesign(.monospaced)
-                }
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 4)
-            .background(Color(UIColor.secondarySystemBackground))
-
             // Messages
             ScrollViewReader { proxy in
                 ScrollView {
@@ -174,16 +156,30 @@ struct ChatView: View {
                 prefillText: $prefillText
             )
             .padding(.horizontal)
-            .padding(.vertical, 8)
+            .padding(.top, 4)
         }
         .simultaneousGesture(
             TapGesture().onEnded {
                 isInputFocused = false
             }
         )
-        .navigationTitle("\(project.icon) \(project.name)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Text("\(project.icon) \(project.name)")
+                        .font(.headline)
+                    Circle()
+                        .fill(wsService.connected ? Color.green : Color.red)
+                        .frame(width: 6, height: 6)
+                    if !wsService.sessionId.isEmpty {
+                        Text(String(wsService.sessionId.suffix(6)))
+                            .font(.caption2)
+                            .fontDesign(.monospaced)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { showSidebar = true }) {
                     Image(systemName: "list.bullet")

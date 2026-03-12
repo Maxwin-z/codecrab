@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Speech
 
 struct InputBarView: View {
     let onSend: (String, [ImageAttachment]?, [String]?) -> Void
@@ -22,6 +23,9 @@ struct InputBarView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var showMcpPopover = false
     @State private var sdkProbing = false
+    @State private var showLocalePicker = false
+    @State private var micPulse = false
+    @StateObject private var speechService = SpeechService()
     @FocusState private var isFocused: Bool
 
     private var isSafe: Bool { permissionMode == "default" }
@@ -60,7 +64,11 @@ struct InputBarView: View {
             }
 
             // Text input
-            TextField(isRunning ? "Running..." : "Cmd+Enter to send", text: $text, axis: .vertical)
+            TextField(
+                isRunning ? "Running..." : (speechService.isRecording ? "Listening..." : "Cmd+Enter to send"),
+                text: $text,
+                axis: .vertical
+            )
                 .lineLimit(1...5)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -81,6 +89,11 @@ struct InputBarView: View {
                 }
                 .onChange(of: isInputFocused) { _, focused in
                     isFocused = focused
+                }
+                .onChange(of: speechService.transcribedText) { _, newText in
+                    if speechService.isRecording {
+                        text = newText
+                    }
                 }
 
             // Bottom toolbar
@@ -195,6 +208,37 @@ struct InputBarView: View {
                         .fontDesign(.monospaced)
                         .lineLimit(1)
 
+                    // Voice input
+                    if speechService.isRecording {
+                        Button(action: { speechService.stopRecording() }) {
+                            micButtonLabel
+                        }
+                    } else if !isRunning {
+                        Menu {
+                            let currentId = speechService.selectedLocale.identifier
+                            Button {
+                                speechService.changeLocale(Locale(identifier: "en-US"))
+                            } label: {
+                                Label("English", systemImage: currentId.hasPrefix("en") ? "checkmark" : "")
+                            }
+                            Button {
+                                speechService.changeLocale(Locale(identifier: "zh-Hans-CN"))
+                            } label: {
+                                Label("简体中文", systemImage: currentId.hasPrefix("zh-Hans") ? "checkmark" : "")
+                            }
+                            Divider()
+                            Button {
+                                showLocalePicker = true
+                            } label: {
+                                Label("More Languages...", systemImage: "globe")
+                            }
+                        } label: {
+                            micButtonLabel
+                        } primaryAction: {
+                            toggleRecording()
+                        }
+                    }
+
                     // Send / Abort button
                     if isRunning {
                         Button(action: onAbort) {
@@ -224,7 +268,7 @@ struct InputBarView: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.bottom, 8)
+            .padding(.bottom, 4)
         }
         .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16)
@@ -236,11 +280,80 @@ struct InputBarView: View {
                 isFocused = true
             }
         }
+        .onChange(of: speechService.isRecording) { _, recording in
+            if recording {
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    micPulse = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.2)) { micPulse = false }
+            }
+        }
+        .onChange(of: speechService.authorizationStatus) { _, status in
+            if status == .authorized {
+                speechService.startRecording(existingText: text)
+            }
+        }
+        .sheet(isPresented: $showLocalePicker) {
+            LocalePickerView(
+                locales: speechService.supportedLocales,
+                selected: speechService.selectedLocale
+            ) { locale in
+                speechService.changeLocale(locale)
+                showLocalePicker = false
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    @ViewBuilder
+    private var micButtonLabel: some View {
+        ZStack {
+            Image(systemName: speechService.isRecording ? "mic.fill" : "mic")
+                .font(.system(size: 14))
+                .foregroundColor(speechService.isRecording ? .white : Color(UIColor.systemBackground))
+                .frame(width: 32, height: 32)
+                .background(speechService.isRecording ? Color.red : Color.gray.opacity(0.3))
+                .clipShape(Circle())
+                .scaleEffect(micPulse ? 1.15 : 1.0)
+
+            // Locale badge
+            if !speechService.isRecording {
+                Text(speechService.selectedLocale.language.languageCode?.identifier.uppercased() ?? "")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.8))
+                    .clipShape(Capsule())
+                    .offset(x: 9, y: 10)
+            }
+        }
+    }
+
+    private func toggleRecording() {
+        switch speechService.authorizationStatus {
+        case .notDetermined:
+            speechService.requestAuthorization()
+        case .authorized:
+            speechService.startRecording(existingText: text)
+        default:
+            break
+        }
+    }
+
+    private func localeDisplayName(_ locale: Locale) -> String {
+        Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
     }
 
     private func send() {
+        if speechService.isRecording {
+            speechService.stopRecording()
+        }
         let msg = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty || !attachments.isEmpty else { return }
+        speechService.learnFromEdit(msg)
         onSend(msg, attachments.isEmpty ? nil : attachments, enabledMcps)
         text = ""
         attachments.removeAll()
@@ -364,6 +477,51 @@ private struct McpPanelView: View {
                 }
                 .padding(.vertical, 4)
             }
+        }
+    }
+}
+
+// MARK: - Locale Picker (Sheet)
+
+private struct LocalePickerView: View {
+    let locales: [Locale]
+    let selected: Locale
+    let onSelect: (Locale) -> Void
+
+    @State private var search = ""
+
+    private var filtered: [Locale] {
+        if search.isEmpty { return locales }
+        let q = search.lowercased()
+        return locales.filter { locale in
+            let name = Locale.current.localizedString(forIdentifier: locale.identifier)?.lowercased() ?? ""
+            return name.contains(q) || locale.identifier.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(filtered, id: \.identifier) { locale in
+                Button {
+                    onSelect(locale)
+                } label: {
+                    HStack {
+                        Text(Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier)
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text(locale.identifier)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if locale.identifier == selected.identifier {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.accentColor)
+                        }
+                    }
+                }
+            }
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search languages")
+            .navigationTitle("Speech Language")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
