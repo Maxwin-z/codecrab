@@ -153,6 +153,14 @@ class WebSocketService: ObservableObject {
             if let statusesData = try? JSONSerialization.data(withJSONObject: json["statuses"] ?? []),
                let statuses = try? JSONDecoder().decode([ProjectStatus].self, from: statusesData) {
                 self.projectStatuses = statuses
+                // Reconcile isRunning with authoritative server status for current project
+                if let pid = activeProjectId,
+                   let currentStatus = statuses.first(where: { $0.projectId == pid }) {
+                    let serverRunning = currentStatus.status == "processing"
+                    if self.isRunning != serverRunning {
+                        self.isRunning = serverRunning
+                    }
+                }
             }
         case "query_start":
             if isCurrentProject {
