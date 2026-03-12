@@ -123,7 +123,7 @@ function createEmptyProjectState(): ProjectChatState {
     latestSummary: null,
     suggestions: [],
     currentModel: '',
-    permissionMode: 'default',
+    permissionMode: 'bypassPermissions',
     sdkMcpServers: [],
     sdkSkills: [],
     sdkTools: [],

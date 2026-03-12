@@ -402,6 +402,10 @@ export function buildQueryOptions(
       type: 'preset',
       preset: 'claude_code',
       append: `\n\nYour working directory is ${client.cwd}.` +
+        `\n\nIMPORTANT: When running long-lived processes such as servers (http-server, python -m http.server, npm run dev, etc.), ` +
+        `you MUST use the Bash tool with run_in_background: true. Never run server processes in the foreground — ` +
+        `they will block the session and prevent further interaction. After starting the server in the background, ` +
+        `tell the user the URL they can visit.` +
         `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
         `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
         `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.`,
@@ -751,6 +755,7 @@ export async function* executeQuery(
     }
 
     let messageCount = 0
+    let gotResult = false
     for await (const message of stream) {
       if (messageCount === 0) {
         console.log(`[ClaudeAdapter] First message received for project ${client.projectId}: ${message.type}`)
@@ -838,8 +843,19 @@ export async function* executeQuery(
 
       // Process message and yield events
       yield* processMessage(message, client, callbacks)
+
+      // Break out of the loop once we've received the result message.
+      // The SDK subprocess may linger if a background process (run_in_background)
+      // holds stdout open, which would keep the stream alive indefinitely.
+      if (message.type === 'result') {
+        gotResult = true
+        console.log(`[ClaudeAdapter] Result received, closing stream for project ${client.projectId}`)
+        // Forcefully close the SDK subprocess so it doesn't block
+        try { stream.close() } catch { /* already closing */ }
+        break
+      }
     }
-    console.log(`[ClaudeAdapter] Stream completed for project ${client.projectId}, ${messageCount} messages`)
+    console.log(`[ClaudeAdapter] Stream completed for project ${client.projectId}, ${messageCount} messages (gotResult: ${gotResult})`)
   } catch (err: any) {
     const isAbort =
       err.name === 'AbortError' ||
