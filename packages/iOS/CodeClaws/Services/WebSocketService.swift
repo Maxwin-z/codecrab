@@ -153,13 +153,13 @@ class WebSocketService: ObservableObject {
             if let statusesData = try? JSONSerialization.data(withJSONObject: json["statuses"] ?? []),
                let statuses = try? JSONDecoder().decode([ProjectStatus].self, from: statusesData) {
                 self.projectStatuses = statuses
-                // Reconcile isRunning with authoritative server status for current project
+                // Only CLEAR isRunning from statuses — never set it to true.
+                // query_start is the authoritative signal for setting isRunning = true.
+                // (project_statuses can arrive with stale "processing" due to queue timing)
                 if let pid = activeProjectId,
-                   let currentStatus = statuses.first(where: { $0.projectId == pid }) {
-                    let serverRunning = currentStatus.status == "processing"
-                    if self.isRunning != serverRunning {
-                        self.isRunning = serverRunning
-                    }
+                   let currentStatus = statuses.first(where: { $0.projectId == pid }),
+                   currentStatus.status != "processing" {
+                    self.isRunning = false
                 }
             }
         case "query_start":
@@ -605,12 +605,10 @@ class WebSocketService: ObservableObject {
         latestSummary = nil
         suggestions = []
 
-        // Reconcile isRunning with server-reported project status
-        if let serverStatus = projectStatuses.first(where: { $0.projectId == projectId }) {
-            isRunning = serverStatus.status == "processing"
-        } else {
-            isRunning = false
-        }
+        // Always reset isRunning on project switch.
+        // If a query IS active, the server's switch_project response
+        // will send query_start which sets isRunning = true.
+        isRunning = false
         
         sendWebSocketMessage([
             "type": "switch_project",
