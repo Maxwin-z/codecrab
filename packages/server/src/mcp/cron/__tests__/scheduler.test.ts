@@ -183,17 +183,20 @@ describe('CronScheduler', () => {
     })
 
     it('should handle executor failure gracefully', async () => {
-      executor.mockRejectedValueOnce(new Error('Execution failed'))
+      // Reject all attempts (including retries)
+      executor.mockRejectedValue(new Error('Execution failed'))
 
       const job = createTestJob({
         schedule: { kind: 'at', at: new Date(Date.now() + 1000).toISOString() },
       })
 
       scheduler.scheduleJob(job)
-      await vi.advanceTimersByTimeAsync(2000)
+      // Advance past trigger (1s) + all retry backoffs (5s + 10s + 20s)
+      await vi.advanceTimersByTimeAsync(40000)
 
-      expect(executor).toHaveBeenCalledOnce()
-      // Job should be saved with 'failed' status
+      // 1 initial + 3 retries = 4 attempts
+      expect(executor).toHaveBeenCalledTimes(4)
+      // Job should be saved with 'failed' status after all retries exhausted
       expect(store.saveJob).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }))
     })
   })
@@ -208,6 +211,79 @@ describe('CronScheduler', () => {
       scheduler.start()
       scheduler.start() // Should not throw
       scheduler.stop()
+    })
+  })
+
+  describe('startup cleanup', () => {
+    it('should skip failed jobs on start', () => {
+      const failedJob = createTestJob({ status: 'failed' })
+      ;(store.loadJobs as any).mockReturnValueOnce(new Map([[failedJob.id, failedJob]]))
+
+      scheduler.start()
+
+      // Executor should not be called for failed jobs
+      expect(executor).not.toHaveBeenCalled()
+    })
+
+    it('should skip completed and disabled jobs on start', () => {
+      const completedJob = createTestJob({ status: 'completed' })
+      const disabledJob = createTestJob({ status: 'disabled' })
+      ;(store.loadJobs as any).mockReturnValueOnce(new Map([
+        [completedJob.id, completedJob],
+        [disabledJob.id, disabledJob],
+      ]))
+
+      scheduler.start()
+
+      expect(executor).not.toHaveBeenCalled()
+    })
+
+    it('should delete expired one-shot jobs with deleteAfterRun on start', () => {
+      const expiredJob = createTestJob({
+        schedule: { kind: 'at', at: new Date(Date.now() - 60000).toISOString() },
+        deleteAfterRun: true,
+        status: 'pending',
+      })
+      ;(store.loadJobs as any).mockReturnValueOnce(new Map([[expiredJob.id, expiredJob]]))
+
+      scheduler.start()
+
+      expect(store.deleteJob).toHaveBeenCalledWith(expiredJob.id)
+      expect(executor).not.toHaveBeenCalled()
+    })
+
+    it('should mark expired one-time jobs as failed if not deleteAfterRun', () => {
+      const expiredJob = createTestJob({
+        schedule: { kind: 'at', at: new Date(Date.now() - 60000).toISOString() },
+        deleteAfterRun: false,
+        status: 'pending',
+      })
+      ;(store.loadJobs as any).mockReturnValueOnce(new Map([[expiredJob.id, expiredJob]]))
+
+      scheduler.start()
+
+      expect(store.saveJob).toHaveBeenCalledWith(expect.objectContaining({
+        id: expiredJob.id,
+        status: 'failed',
+      }))
+      expect(executor).not.toHaveBeenCalled()
+    })
+
+    it('should schedule future pending jobs normally on start', async () => {
+      const futureJob = createTestJob({
+        schedule: { kind: 'at', at: new Date(Date.now() + 30000).toISOString() },
+        status: 'pending',
+      })
+      ;(store.loadJobs as any).mockReturnValueOnce(new Map([[futureJob.id, futureJob]]))
+
+      scheduler.start()
+
+      // Job should be scheduled, not yet executed
+      expect(executor).not.toHaveBeenCalled()
+
+      // Advance past scheduled time
+      await vi.advanceTimersByTimeAsync(35000)
+      expect(executor).toHaveBeenCalledOnce()
     })
   })
 })

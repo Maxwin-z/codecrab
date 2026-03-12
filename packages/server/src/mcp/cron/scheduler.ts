@@ -28,14 +28,38 @@ export class CronScheduler {
 
     console.log('[CronScheduler] Starting...')
     const jobs = loadJobs()
+    let skipped = 0
+    let cleaned = 0
 
     for (const job of jobs.values()) {
-      if (job.status !== 'disabled') {
-        this.scheduleJob(job)
+      // Skip terminal states
+      if (job.status === 'disabled' || job.status === 'failed' || job.status === 'completed') {
+        skipped++
+        continue
       }
+
+      // Clean up expired one-time jobs instead of re-triggering them
+      if (job.schedule.kind === 'at') {
+        const runTime = new Date(job.schedule.at).getTime()
+        if (runTime <= Date.now()) {
+          console.log(`[CronScheduler] Cleaning up expired one-shot job: ${job.id} (${job.name})`)
+          if (job.deleteAfterRun) {
+            deleteJob(job.id)
+          } else {
+            job.status = 'failed'
+            saveJob(job)
+          }
+          cleaned++
+          continue
+        }
+      }
+
+      this.scheduleJob(job)
     }
 
-    console.log(`[CronScheduler] Loaded ${this.scheduledTasks.size} jobs`)
+    if (skipped > 0) console.log(`[CronScheduler] Skipped ${skipped} finished/disabled jobs`)
+    if (cleaned > 0) console.log(`[CronScheduler] Cleaned up ${cleaned} expired one-shot jobs`)
+    console.log(`[CronScheduler] Loaded ${this.scheduledTasks.size} active jobs`)
   }
 
   stop(): void {
