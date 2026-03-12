@@ -190,7 +190,7 @@ struct MessageBubbleView: View {
                 expandThinking = isRunning
             }
         }
-        .onChange(of: isRunning) { running in
+        .onChange(of: isRunning) { _, running in
             if !running && message.thinking != nil && !message.thinking!.isEmpty {
                 withAnimation {
                     expandThinking = false

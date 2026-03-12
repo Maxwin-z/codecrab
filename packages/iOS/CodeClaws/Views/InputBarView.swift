@@ -69,7 +69,7 @@ struct InputBarView: View {
                 .onSubmit {
                     send()
                 }
-                .onChange(of: isRunning) { running in
+                .onChange(of: isRunning) { _, running in
                     if !running {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             isFocused = true
@@ -148,7 +148,7 @@ struct InputBarView: View {
                             .presentationDetents([.medium, .large])
                             .presentationDragIndicator(.visible)
                         }
-                        .onChange(of: sdkLoaded) { loaded in
+                        .onChange(of: sdkLoaded) { _, loaded in
                             if sdkProbing && loaded {
                                 sdkProbing = false
                                 showMcpPopover = true
@@ -229,7 +229,7 @@ struct InputBarView: View {
         .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: -2)
-        .onChange(of: prefillText) { newValue in
+        .onChange(of: prefillText) { _, newValue in
             if !newValue.isEmpty {
                 text = newValue
                 prefillText = ""

@@ -88,10 +88,10 @@ struct ChatView: View {
                     .id("Bottom")
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: wsService.messages.count) { _ in scrollToBottom(proxy) }
-                .onChange(of: wsService.streamingText) { _ in scrollToBottom(proxy) }
-                .onChange(of: wsService.streamingThinking) { _ in scrollToBottom(proxy) }
-                .onChange(of: isInputFocused) { _ in scrollToBottom(proxy) }
+                .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
+                .onChange(of: wsService.streamingText) { scrollToBottom(proxy) }
+                .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
+                .onChange(of: isInputFocused) { scrollToBottom(proxy) }
             }
 
             // Summary Banner
@@ -198,8 +198,8 @@ struct ChatView: View {
             fetchMcps()
         }
         // Auto-enable new SDK MCPs and skills when they appear
-        .onChange(of: wsService.sdkMcpServers.map { $0.name }) { _ in autoEnableNewEntries() }
-        .onChange(of: wsService.sdkSkills.map { $0.name }) { _ in autoEnableNewEntries() }
+        .onChange(of: wsService.sdkMcpServers.map { $0.name }) { autoEnableNewEntries() }
+        .onChange(of: wsService.sdkSkills.map { $0.name }) { autoEnableNewEntries() }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

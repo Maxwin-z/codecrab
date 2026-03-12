@@ -145,7 +145,6 @@ struct UserQuestionFormView: View {
     
     private func isAnswered(at index: Int) -> Bool {
         let key = String(index + 1)
-        let q = questions[index]
         let custom = (customTexts[key] ?? "").trimmingCharacters(in: .whitespaces)
         return !(answers[key] ?? []).isEmpty || !custom.isEmpty
     }

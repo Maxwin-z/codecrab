@@ -112,8 +112,8 @@ class WebSocketService: ObservableObject {
     
     private func receiveLoop() {
         webSocketTask?.receive { [weak self] result in
-            Task { @MainActor in
-                guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 switch result {
                 case .success(let message):
                     switch message {
@@ -326,7 +326,7 @@ class WebSocketService: ObservableObject {
             }
         case "result":
             if isCurrentProject {
-                var content = json["result"] as? String ?? ""
+                let content = json["result"] as? String ?? ""
                 let cost = json["costUsd"] as? Double
                 let duration = json["durationMs"] as? Double
                 let msg = ChatMessage(id: UUID().uuidString, role: "system", content: content, costUsd: cost, durationMs: duration, timestamp: Date().timeIntervalSince1970 * 1000)
@@ -367,7 +367,6 @@ class WebSocketService: ObservableObject {
     
     private func isDuplicate(_ message: ChatMessage) -> Bool {
         guard message.role == "user" else { return false }
-        let now = Date().timeIntervalSince1970 * 1000
         return messages.contains { existing in
             existing.role == "user" &&
             existing.content == message.content &&
