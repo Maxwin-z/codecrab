@@ -12,12 +12,15 @@ struct InputBarView: View {
     let availableMcps: [McpInfo]
     let enabledMcps: [String]
     let onToggleMcp: (String) -> Void
+    var sdkLoaded: Bool = false
+    var onProbeSdk: (() -> Void)? = nil
     @Binding var isInputFocused: Bool
 
     @State private var text: String = ""
     @State private var attachments: [ImageAttachment] = []
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var showMcpPopover = false
+    @State private var sdkProbing = false
     @FocusState private var isFocused: Bool
 
     private var isSafe: Bool { permissionMode == "default" }
@@ -103,19 +106,42 @@ struct InputBarView: View {
 
                     // MCP toggle
                     if !availableMcps.isEmpty {
-                        Button(action: { showMcpPopover.toggle() }) {
-                            Image(systemName: "puzzlepiece.extension")
-                                .font(.system(size: 15))
-                                .foregroundColor(enabledMcps.count < availableMcps.count ? .orange : .secondary)
-                                .frame(width: 34, height: 34)
+                        Button(action: {
+                            if !sdkLoaded && !sdkProbing, let probe = onProbeSdk {
+                                sdkProbing = true
+                                probe()
+                            } else {
+                                showMcpPopover.toggle()
+                            }
+                        }) {
+                            if sdkProbing {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .frame(width: 34, height: 34)
+                            } else {
+                                Image(systemName: "puzzlepiece.extension")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(
+                                        enabledMcps.count < availableMcps.count
+                                            ? .orange
+                                            : sdkLoaded ? .green : .secondary
+                                    )
+                                    .frame(width: 34, height: 34)
+                            }
                         }
-                        .disabled(isRunning)
+                        .disabled(isRunning || sdkProbing)
                         .popover(isPresented: $showMcpPopover) {
                             McpPopoverView(
                                 mcps: availableMcps,
                                 enabledMcps: enabledMcps,
                                 onToggle: onToggleMcp
                             )
+                        }
+                        .onChange(of: sdkLoaded) { loaded in
+                            if sdkProbing && loaded {
+                                sdkProbing = false
+                                showMcpPopover = true
+                            }
                         }
                     }
 
@@ -213,9 +239,9 @@ private struct McpPopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("MCP Servers")
+                Text("MCP Servers & Skills")
                     .font(.caption).bold()
-                Text("Toggle servers for this query")
+                Text("Toggle servers and skills for this query")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -235,11 +261,24 @@ private struct McpPopoverView: View {
                                     .frame(width: 24)
 
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(mcp.name)
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.primary)
-                                        .lineLimit(1)
+                                    HStack(spacing: 4) {
+                                        Text(mcp.name)
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+
+                                        // Source badge for SDK/Skill entries
+                                        if let source = mcp.source, source != "custom" {
+                                            Text(source == "sdk" ? "SDK" : "Skill")
+                                                .font(.system(size: 8, weight: .semibold))
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(source == "sdk" ? Color.blue.opacity(0.15) : Color.purple.opacity(0.15))
+                                                .foregroundColor(source == "sdk" ? .blue : .purple)
+                                                .cornerRadius(3)
+                                        }
+                                    }
                                     Text(mcp.description)
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
@@ -248,9 +287,11 @@ private struct McpPopoverView: View {
 
                                 Spacer()
 
-                                Text("\(mcp.toolCount) tools")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                if mcp.toolCount > 0 {
+                                    Text("\(mcp.toolCount) tools")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
 
                                 Toggle("", isOn: Binding(
                                     get: { isEnabled },

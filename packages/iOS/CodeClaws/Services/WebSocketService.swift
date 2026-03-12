@@ -20,6 +20,10 @@ struct ProjectChatState {
     var latestSummary: String? = nil
     var currentModel: String = ""
     var permissionMode: String = "bypassPermissions"
+    // SDK-reported MCP servers, skills, and tools (from init message)
+    var sdkMcpServers: [SdkMcpServer] = []
+    var sdkSkills: [String] = []
+    var sdkTools: [String] = []
 }
 
 @MainActor
@@ -40,7 +44,12 @@ class WebSocketService: ObservableObject {
     @Published var latestSummary: String? = nil
     @Published var currentModel: String = ""
     @Published var permissionMode: String = "bypassPermissions"
-    
+    @Published var sdkMcpServers: [SdkMcpServer] = []
+    @Published var sdkSkills: [String] = []
+    @Published var sdkTools: [String] = []
+
+    var sdkLoaded: Bool { !sdkTools.isEmpty }
+
     private var activeProjectId: String? = nil
     private var projectStates: [String: ProjectChatState] = [:]
     private var webSocketTask: URLSessionWebSocketTask?
@@ -322,6 +331,20 @@ class WebSocketService: ObservableObject {
             if isCurrentProject, let summary = json["summary"] as? String {
                 self.latestSummary = summary
             }
+        case "system":
+            if isCurrentProject, let subtype = json["subtype"] as? String, subtype == "init" {
+                if let model = json["model"] as? String { self.currentModel = model }
+                if let sid = json["sessionId"] as? String { self.sessionId = sid }
+                if let tools = json["tools"] as? [String] { self.sdkTools = tools }
+                if let skills = json["sdkSkills"] as? [String] { self.sdkSkills = skills }
+                if let serversJson = json["sdkMcpServers"] as? [[String: Any]] {
+                    self.sdkMcpServers = serversJson.compactMap { s in
+                        guard let name = s["name"] as? String,
+                              let status = s["status"] as? String else { return nil }
+                        return SdkMcpServer(name: name, status: status)
+                    }
+                }
+            }
         default:
             break
         }
@@ -349,7 +372,7 @@ class WebSocketService: ObservableObject {
     }
     
     // Actions
-    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil) {
+    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil, disabledSdkServers: [String]? = nil, disabledSkills: [String]? = nil) {
         guard let projectId = activeProjectId else { return }
 
         // Add user message locally first (like web version does)
@@ -373,6 +396,12 @@ class WebSocketService: ObservableObject {
         }
         if let mcps = enabledMcps {
             payload["enabledMcps"] = mcps
+        }
+        if let disabled = disabledSdkServers, !disabled.isEmpty {
+            payload["disabledSdkServers"] = disabled
+        }
+        if let disabled = disabledSkills, !disabled.isEmpty {
+            payload["disabledSkills"] = disabled
         }
         sendWebSocketMessage(payload)
     }
@@ -481,26 +510,38 @@ class WebSocketService: ObservableObject {
         self.pendingQuestion = nil
     }
     
+    func probeSdk() {
+        guard let projectId = activeProjectId else { return }
+        sendWebSocketMessage([
+            "type": "probe_sdk",
+            "projectId": projectId,
+            "sessionId": sessionId
+        ])
+    }
+
     func switchProject(projectId: String, cwd: String?) {
         if let current = activeProjectId {
-            projectStates[current] = ProjectChatState(
-                messages: messages,
-                streamingText: streamingText,
-                streamingThinking: streamingThinking,
-                pendingQuestion: pendingQuestion,
-                pendingPermission: pendingPermission,
-                isRunning: isRunning,
-                isAborting: isAborting,
-                sessionId: sessionId,
-                cwd: self.cwd,
-                latestSummary: latestSummary,
-                currentModel: currentModel,
-                permissionMode: permissionMode
-            )
+            var state = ProjectChatState()
+            state.messages = messages
+            state.streamingText = streamingText
+            state.streamingThinking = streamingThinking
+            state.pendingQuestion = pendingQuestion
+            state.pendingPermission = pendingPermission
+            state.isRunning = isRunning
+            state.isAborting = isAborting
+            state.sessionId = sessionId
+            state.cwd = self.cwd
+            state.latestSummary = latestSummary
+            state.currentModel = currentModel
+            state.permissionMode = permissionMode
+            state.sdkMcpServers = sdkMcpServers
+            state.sdkSkills = sdkSkills
+            state.sdkTools = sdkTools
+            projectStates[current] = state
         }
-        
+
         activeProjectId = projectId
-        
+
         if let state = projectStates[projectId] {
             messages = state.messages
             streamingText = state.streamingText
@@ -514,6 +555,9 @@ class WebSocketService: ObservableObject {
             latestSummary = state.latestSummary
             currentModel = state.currentModel
             permissionMode = state.permissionMode
+            sdkMcpServers = state.sdkMcpServers
+            sdkSkills = state.sdkSkills
+            sdkTools = state.sdkTools
         } else {
             messages = []
             streamingText = ""
@@ -527,6 +571,9 @@ class WebSocketService: ObservableObject {
             latestSummary = nil
             currentModel = ""
             permissionMode = "bypassPermissions"
+            sdkMcpServers = []
+            sdkSkills = []
+            sdkTools = []
         }
         
         sendWebSocketMessage([
