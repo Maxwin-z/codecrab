@@ -10,6 +10,14 @@ import type { CronJob } from './types.js'
 // Reference to the scheduler instance (set by initializeCronTools)
 let scheduler: CronScheduler | null = null
 
+// Per-query context — set before each SDK query so cron_create can reliably
+// access projectId/clientId/sessionId even if updateToolInput is unavailable.
+let currentQueryContext: { projectId?: string; clientId?: string; sessionId?: string } = {}
+
+export function setCurrentQueryContext(ctx: { projectId?: string; clientId?: string; sessionId?: string }): void {
+  currentQueryContext = ctx
+}
+
 export function initializeCronTools(cronScheduler: CronScheduler): void {
   scheduler = cronScheduler
 }
@@ -121,6 +129,12 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
         }
       }
 
+      // Merge tool input with module-level query context as fallback
+      // (updateToolInput in canUseTool may silently fail for MCP tools)
+      const projectId = input.projectId || currentQueryContext.projectId
+      const clientId = input.clientId || currentQueryContext.clientId
+      const sessionId = input.sessionId || currentQueryContext.sessionId
+
       const jobId = generateJobId()
       const job: CronJob = {
         id: jobId,
@@ -129,9 +143,9 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
         schedule: parsed.schedule,
         prompt: input.prompt,
         context: {
-          projectId: input.projectId,
-          clientId: input.clientId,
-          sessionId: input.sessionId,
+          projectId,
+          clientId,
+          sessionId,
         },
         status: 'pending',
         createdAt: new Date().toISOString(),
@@ -140,7 +154,7 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
         deleteAfterRun: input.deleteAfterRun ?? parsed.schedule.kind === 'at',
         delivery: {
           mode: 'websocket',
-          target: input.sessionId,
+          target: sessionId,
         },
       }
 

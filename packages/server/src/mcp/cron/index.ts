@@ -80,6 +80,6 @@ export function stopCronSystem(): void {
   cronSystem = null
 }
 
-export { cronTools } from './tools.js'
+export { cronTools, setCurrentQueryContext as setCronQueryContext } from './tools.js'
 export { default as cronRouter } from './routes.js'
 export type { CronExecutionRequest, CronExecutionResult } from './types.js'

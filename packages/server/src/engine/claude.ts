@@ -7,6 +7,7 @@ import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
 import { buildMcpServers } from '../mcp/index.js'
+import { setCronQueryContext } from '../mcp/cron/index.js'
 import type {
   ChatMessage,
   ImageAttachment,
@@ -542,6 +543,14 @@ export async function* executeQuery(
     console.log(`  ANTHROPIC_API_KEY: ${(queryEnv.ANTHROPIC_API_KEY || '').slice(0, 10)}...`)
     console.log(`  ANTHROPIC_BASE_URL: ${queryEnv.ANTHROPIC_BASE_URL || 'default'}`)
 
+    // Set cron query context so cron_create can reliably access project/session info
+    // (fallback for when canUseTool's updateToolInput is unavailable)
+    setCronQueryContext({
+      projectId: client.projectId,
+      clientId: client.clientId,
+      sessionId: client.sessionId,
+    })
+
     console.log(`[ClaudeAdapter] Spawning SDK query for project ${client.projectId}...`)
     const sdkPrompt = buildPrompt(prompt, images, client.sessionId)
     const stream = query({ prompt: sdkPrompt, options: options as any })
@@ -574,6 +583,13 @@ export async function* executeQuery(
           project.sessionId = newSessionId
           project.lastActivity = Date.now()
         }
+
+        // Update cron query context with the new sessionId
+        setCronQueryContext({
+          projectId: client.projectId,
+          clientId: client.clientId,
+          sessionId: newSessionId,
+        })
 
         callbacks.onSessionInit(newSessionId)
 
