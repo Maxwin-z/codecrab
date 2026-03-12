@@ -3,7 +3,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { MessageList } from './MessageList'
-import { InputBar } from './InputBar'
+import { InputBar, type InputBarHandle } from './InputBar'
 import { UserQuestionForm } from './UserQuestionForm'
 import { SessionSidebar } from './SessionSidebar'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const inputBarRef = useRef<InputBarHandle>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(false)
@@ -329,8 +330,24 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         </div>
       )}
 
+      {/* Suggested replies */}
+      {ws.suggestions.length > 0 && !ws.isRunning && (
+        <div className="px-4 py-2 flex flex-wrap gap-2 shrink-0">
+          {ws.suggestions.map((suggestion, i) => (
+            <button
+              key={i}
+              onClick={() => inputBarRef.current?.setText(suggestion)}
+              className="text-xs px-3 py-1.5 rounded-full border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors truncate max-w-[280px]"
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Input */}
       <InputBar
+        ref={inputBarRef}
         onSend={handleSend}
         onAbort={ws.abort}
         isRunning={ws.isRunning}

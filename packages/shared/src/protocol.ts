@@ -170,6 +170,11 @@ export interface QuerySummaryMessage extends ServerProjectContext {
   summary: string
 }
 
+export interface QuerySuggestionsMessage extends ServerProjectContext {
+  type: 'query_suggestions'
+  suggestions: string[]
+}
+
 export interface ClearedMessage extends ServerProjectContext {
   type: 'cleared'
 }
@@ -301,6 +306,7 @@ export type ServerMessage =
   | QueryStartMessage
   | QueryEndMessage
   | QuerySummaryMessage
+  | QuerySuggestionsMessage
   | ClearedMessage
   | AbortedMessage
   | CwdChangedMessage

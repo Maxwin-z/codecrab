@@ -1,5 +1,5 @@
 // InputBar — user text input with image upload and drag & drop support
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import type { ImageAttachment, McpInfo, PermissionMode } from '@codeclaws/shared'
 
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
@@ -84,7 +84,11 @@ async function processImage(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange, availableMcps, enabledMcps, onToggleMcp, sdkLoaded, onProbeSdk }: InputBarProps) {
+export interface InputBarHandle {
+  setText: (text: string) => void
+}
+
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange, availableMcps, enabledMcps, onToggleMcp, sdkLoaded, onProbeSdk }, ref) {
   const [text, setText] = useState('')
   const [images, setImages] = useState<PreviewImage[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -94,6 +98,14 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, cur
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
+
+  useImperativeHandle(ref, () => ({
+    setText: (t: string) => {
+      setText(t)
+      // Focus the textarea after setting text
+      setTimeout(() => textareaRef.current?.focus(), 0)
+    },
+  }))
 
   // When SDK finishes loading after a probe, stop spinner and auto-open popover
   useEffect(() => {
@@ -503,4 +515,4 @@ export function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, cur
       </div>
     </div>
   )
-}
+})

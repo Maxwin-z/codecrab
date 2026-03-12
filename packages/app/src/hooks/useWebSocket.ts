@@ -74,6 +74,7 @@ interface ProjectChatState {
   sessionId: string
   cwd: string
   latestSummary: string | null
+  suggestions: string[]
   currentModel: string
   permissionMode: PermissionMode
   // SDK-reported MCP servers, skills, and tools (from init message)
@@ -94,6 +95,7 @@ function createEmptyProjectState(): ProjectChatState {
     sessionId: '',
     cwd: '',
     latestSummary: null,
+    suggestions: [],
     currentModel: '',
     permissionMode: 'default',
     sdkMcpServers: [],
@@ -110,6 +112,7 @@ export interface UseWebSocketReturn {
   streamingText: string
   streamingThinking: string
   latestSummary: string | null
+  suggestions: string[]
   pendingQuestion: { toolId: string; questions: Question[] } | null
   pendingPermission: PendingPermission | null
   cwd: string
@@ -233,6 +236,7 @@ export function useWebSocket(): UseWebSocketReturn {
         case 'query_start':
           pState.isRunning = true
           pState.latestSummary = null
+          pState.suggestions = []
           if (isActiveProject) emitQueryStateChange(true)
           break
 
@@ -243,7 +247,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
           // Flush remaining streaming text into a message
           if (pState.streamingText || pState.streamingThinking) {
-            const cleaned = (pState.streamingText || '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+            const cleaned = (pState.streamingText || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
             if (cleaned || pState.streamingThinking) {
               // Check if last message is an assistant message we can attach thinking to
               const lastMsg = pState.messages[pState.messages.length - 1]
@@ -269,6 +273,10 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.latestSummary = msg.summary
           break
 
+        case 'query_suggestions':
+          pState.suggestions = msg.suggestions || []
+          break
+
         case 'stream_delta':
           if (msg.deltaType === 'text') {
             pState.streamingText += msg.text
@@ -281,7 +289,7 @@ export function useWebSocket(): UseWebSocketReturn {
           const thinkingToSave = pState.streamingThinking || undefined
           pState.streamingText = ''
           pState.streamingThinking = ''
-          const cleanedText = msg.text.replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+          const cleanedText = msg.text.replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
           pState.messages = [
             ...pState.messages,
             {
@@ -697,6 +705,7 @@ export function useWebSocket(): UseWebSocketReturn {
     streamingText: activeState.streamingText,
     streamingThinking: activeState.streamingThinking,
     latestSummary: activeState.latestSummary,
+    suggestions: activeState.suggestions,
     pendingQuestion: activeState.pendingQuestion,
     pendingPermission: activeState.pendingPermission,
     cwd: activeState.cwd,

@@ -523,7 +523,7 @@ const MAX_TOOL_RESULT_PREVIEW_LENGTH = 100
 // Convert ChatMessage to summary for initial history load
 // Assistant and user messages are sent in full; only tool call results are truncated
 function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').ChatMessageSummary {
-  const content = (message.content || '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+  const content = (message.content || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
   const hasToolCalls = !!(message.toolCalls && message.toolCalls.length > 0)
   const hasImages = !!(message.images && message.images.length > 0)
 
@@ -1044,6 +1044,18 @@ async function executeUserQuery(
         })
       } else {
         console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
+      }
+
+      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+      if (suggestionsMatch) {
+        const suggestions = suggestionsMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+        console.log(`[Suggestions] Extracted ${suggestions.length}: ${suggestions.join(', ')}`)
+        broadcastToProject(projectId, {
+          type: 'query_suggestions',
+          suggestions,
+          projectId,
+          sessionId: session.sessionId,
+        })
       }
 
       persistSession(session)

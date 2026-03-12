@@ -15,6 +15,7 @@ struct InputBarView: View {
     var sdkLoaded: Bool = false
     var onProbeSdk: (() -> Void)? = nil
     @Binding var isInputFocused: Bool
+    @Binding var prefillText: String
 
     @State private var text: String = ""
     @State private var attachments: [ImageAttachment] = []
@@ -218,6 +219,13 @@ struct InputBarView: View {
         .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: -2)
+        .onChange(of: prefillText) { newValue in
+            if !newValue.isEmpty {
+                text = newValue
+                prefillText = ""
+                isFocused = true
+            }
+        }
     }
 
     private func send() {

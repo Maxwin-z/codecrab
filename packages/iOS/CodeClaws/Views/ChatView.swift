@@ -8,6 +8,7 @@ struct ChatView: View {
     @State private var enabledIds: Set<String> = []
     @State private var isInputFocused: Bool = false
     @State private var initializedMcps = false
+    @State private var prefillText: String = ""
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -126,6 +127,29 @@ struct ChatView: View {
                 .padding(.vertical, 4)
             }
 
+            // Suggested Replies
+            if !wsService.suggestions.isEmpty && !wsService.isRunning {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(wsService.suggestions, id: \.self) { suggestion in
+                            Button(action: { prefillText = suggestion }) {
+                                Text(suggestion)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.accentColor.opacity(0.1))
+                                    .foregroundColor(.accentColor)
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.vertical, 4)
+            }
+
             // Input Bar
             InputBarView(
                 onSend: handleSend,
@@ -146,7 +170,8 @@ struct ChatView: View {
                 },
                 sdkLoaded: wsService.sdkLoaded,
                 onProbeSdk: { wsService.probeSdk() },
-                isInputFocused: $isInputFocused
+                isInputFocused: $isInputFocused,
+                prefillText: $prefillText
             )
             .padding(.horizontal)
             .padding(.vertical, 8)

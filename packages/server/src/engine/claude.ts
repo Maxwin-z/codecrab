@@ -318,13 +318,15 @@ function applyModelConfig(config: ModelConfig): void {
 
 const SUMMARY_INSTRUCTION = `\n[IMPORTANT: After completing your response, you MUST append a brief summary on its own line in exactly this format: [SUMMARY: ...]. This summary will be used as a push notification sent to the user, so write it as a natural, conversational reply to the user's request — as if you're briefly telling them what you did. Use first person, keep it casual and concise (one sentence). For example, if the user asked "check the directory structure", write something like "已查看目录结构，共有14个目录和26个文件". Match the language the user used. Never omit this line.]`
 
+const SUGGESTIONS_INSTRUCTION = `\n[IMPORTANT: After the [SUMMARY] line, you MUST also append exactly 3 suggested next actions in this format: [SUGGESTIONS: suggestion1 | suggestion2 | suggestion3]. Each suggestion is a complete, ready-to-send prompt that the user can use directly WITHOUT any editing. CRITICAL RULES: 1) NEVER use placeholders, ellipsis, or vague references like "某个文件", "具体的XXX", "某个方法" — instead use real names from the conversation context (e.g. "查看 src/utils/auth.ts 的内容" not "查看某个文件的内容"). 2) Each suggestion must be a specific, self-contained instruction — the user should be able to click it and get a meaningful result immediately. 3) Predict what the user would logically do next based on what just happened. For example, after reviewing a project structure, suggest examining specific key files you noticed; after fixing a bug, suggest running tests or checking related code. Keep each under 20 words. Match the user's language. Never omit this line.]`
+
 // Build prompt for SDK: plain string or SDKUserMessage with images
 export function buildPrompt(
   prompt: string,
   images?: ImageAttachment[],
   sessionId?: string,
 ): string | AsyncIterable<SDKUserMessage> {
-  const enhancedPrompt = prompt + SUMMARY_INSTRUCTION
+  const enhancedPrompt = prompt + SUMMARY_INSTRUCTION + SUGGESTIONS_INSTRUCTION
 
   if (!images || images.length === 0) {
     return enhancedPrompt

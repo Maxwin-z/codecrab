@@ -18,6 +18,7 @@ struct ProjectChatState {
     var sessionId: String = ""
     var cwd: String = ""
     var latestSummary: String? = nil
+    var suggestions: [String] = []
     var currentModel: String = ""
     var permissionMode: String = "bypassPermissions"
     // SDK-reported MCP servers, skills, and tools (from init message)
@@ -31,7 +32,7 @@ class WebSocketService: ObservableObject {
     @Published var connected: Bool = false
     @Published var availableModels: [ModelInfo] = []
     @Published var projectStatuses: [ProjectStatus] = []
-    
+
     @Published var messages: [ChatMessage] = []
     @Published var streamingText: String = ""
     @Published var streamingThinking: String = ""
@@ -42,6 +43,7 @@ class WebSocketService: ObservableObject {
     @Published var sessionId: String = ""
     @Published var cwd: String = ""
     @Published var latestSummary: String? = nil
+    @Published var suggestions: [String] = []
     @Published var currentModel: String = ""
     @Published var permissionMode: String = "bypassPermissions"
     @Published var sdkMcpServers: [SdkMcpServer] = []
@@ -153,7 +155,10 @@ class WebSocketService: ObservableObject {
                 self.projectStatuses = statuses
             }
         case "query_start":
-            if isCurrentProject { self.isRunning = true }
+            if isCurrentProject {
+                self.isRunning = true
+                self.suggestions = []
+            }
         case "query_end":
             if isCurrentProject {
                 self.isRunning = false
@@ -331,6 +336,10 @@ class WebSocketService: ObservableObject {
             if isCurrentProject, let summary = json["summary"] as? String {
                 self.latestSummary = summary
             }
+        case "query_suggestions":
+            if isCurrentProject, let items = json["suggestions"] as? [String] {
+                self.suggestions = items
+            }
         case "system":
             if isCurrentProject, let subtype = json["subtype"] as? String, subtype == "init" {
                 if let model = json["model"] as? String { self.currentModel = model }
@@ -361,7 +370,9 @@ class WebSocketService: ObservableObject {
     }
     
     private func cleanStreamingText(_ text: String) -> String {
-        return text.replacingOccurrences(of: "\\[SUMMARY:.*?\\]$", with: "", options: .regularExpression)
+        return text
+            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:.*?\\]\\s*$", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\n?\\[SUMMARY:.*?\\]\\s*$", with: "", options: .regularExpression)
     }
     
     private func sendWebSocketMessage(_ dict: [String: Any]) {
@@ -532,6 +543,7 @@ class WebSocketService: ObservableObject {
             state.sessionId = sessionId
             state.cwd = self.cwd
             state.latestSummary = latestSummary
+            state.suggestions = suggestions
             state.currentModel = currentModel
             state.permissionMode = permissionMode
             state.sdkMcpServers = sdkMcpServers
@@ -553,6 +565,7 @@ class WebSocketService: ObservableObject {
             sessionId = state.sessionId
             self.cwd = state.cwd
             latestSummary = state.latestSummary
+            suggestions = state.suggestions
             currentModel = state.currentModel
             permissionMode = state.permissionMode
             sdkMcpServers = state.sdkMcpServers
@@ -569,6 +582,7 @@ class WebSocketService: ObservableObject {
             sessionId = ""
             self.cwd = cwd ?? ""
             latestSummary = nil
+            suggestions = []
             currentModel = ""
             permissionMode = "bypassPermissions"
             sdkMcpServers = []
