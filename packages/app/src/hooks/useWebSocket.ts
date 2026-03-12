@@ -32,6 +32,31 @@ function getOrCreateClientId(): string {
   return id
 }
 
+// Strip trailing [SUMMARY: ...] / [SUGGESTIONS: ...] tags (or their partial prefixes)
+// from streaming text so they never flash on screen during streaming.
+const HIDDEN_TAG_PREFIXES = ['\n[SUMMARY:', '\n[SUGGESTIONS:']
+
+function getDisplayStreamingText(text: string): string {
+  if (!text) return text
+
+  // Complete tag start found — hide from there onwards
+  for (const prefix of HIDDEN_TAG_PREFIXES) {
+    const idx = text.lastIndexOf(prefix)
+    if (idx >= 0) return text.slice(0, idx)
+  }
+
+  // Partial prefix at the very end (e.g. "\n[S" arriving char-by-char) — buffer it
+  for (const pattern of HIDDEN_TAG_PREFIXES) {
+    for (let len = pattern.length - 1; len >= 2; len--) {
+      if (text.endsWith(pattern.slice(0, len))) {
+        return text.slice(0, text.length - len)
+      }
+    }
+  }
+
+  return text
+}
+
 // Module-level event emitters for cross-component communication
 type QueryStateCallback = (isRunning: boolean) => void
 const queryStateListeners = new Set<QueryStateCallback>()
@@ -702,7 +727,7 @@ export function useWebSocket(): UseWebSocketReturn {
     isRunning: activeState.isRunning,
     isAborting: activeState.isAborting,
     messages: activeState.messages,
-    streamingText: activeState.streamingText,
+    streamingText: getDisplayStreamingText(activeState.streamingText),
     streamingThinking: activeState.streamingThinking,
     latestSummary: activeState.latestSummary,
     suggestions: activeState.suggestions,
