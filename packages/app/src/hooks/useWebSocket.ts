@@ -12,6 +12,7 @@ import type {
   ProjectStatus,
   Question,
   SdkMcpServer,
+  SdkSkill,
   ServerMessage,
 } from '@codeclaws/shared'
 import { getToken, authFetch } from '@/lib/auth'
@@ -104,7 +105,7 @@ interface ProjectChatState {
   permissionMode: PermissionMode
   // SDK-reported MCP servers, skills, and tools (from init message)
   sdkMcpServers: SdkMcpServer[]
-  sdkSkills: string[]
+  sdkSkills: SdkSkill[]
   sdkTools: string[]
 }
 
@@ -147,7 +148,7 @@ export interface UseWebSocketReturn {
   sessionId: string
   projectStatuses: ProjectStatus[]
   sdkMcpServers: SdkMcpServer[]
-  sdkSkills: string[]
+  sdkSkills: SdkSkill[]
   sdkTools: string[]
   sdkLoaded: boolean
   probeSdk: () => void

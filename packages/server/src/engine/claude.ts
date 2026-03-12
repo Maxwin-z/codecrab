@@ -15,6 +15,7 @@ import type {
   Question,
   ModelInfo,
   PermissionMode,
+  SdkSkill,
 } from '@codeclaws/shared'
 
 // Re-export types for convenience
@@ -502,7 +503,47 @@ function buildQueryEnv(modelConfig: ModelConfig): Record<string, string | undefi
 export interface SdkInitInfo {
   tools: string[]
   sdkMcpServers: { name: string; status: string }[]
-  sdkSkills: string[]
+  sdkSkills: SdkSkill[]
+}
+
+/** Scan a skills directory for SKILL.md frontmatter descriptions.
+ *  Reads each <skillsDir>/<name>/SKILL.md and extracts the description field. */
+function scanSkillsDir(skillsDir: string, descriptions: Map<string, string>): void {
+  try {
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (descriptions.has(entry.name)) continue // project-level takes priority
+      const skillFile = path.join(skillsDir, entry.name, 'SKILL.md')
+      try {
+        const content = fs.readFileSync(skillFile, 'utf-8')
+        // Parse YAML frontmatter: --- ... description: "..." ... ---
+        const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
+        if (fmMatch) {
+          const descMatch = fmMatch[1].match(/^description:\s*["']?(.*?)["']?\s*$/m)
+          if (descMatch) {
+            descriptions.set(entry.name, descMatch[1])
+          }
+        }
+      } catch { /* skip unreadable skill files */ }
+    }
+  } catch { /* skills dir doesn't exist */ }
+}
+
+/** Enrich skill names with descriptions from disk.
+ *  Reads from both project-level (.claude/skills/) and user-level (~/.claude/skills/). */
+function enrichSkills(skillNames: string[], cwd?: string): SdkSkill[] {
+  const descriptions = new Map<string, string>()
+  // Project-level first (higher priority)
+  if (cwd) {
+    scanSkillsDir(path.join(cwd, '.claude', 'skills'), descriptions)
+  }
+  // User-level second
+  scanSkillsDir(path.join(CLAUDE_DIR, 'skills'), descriptions)
+  return skillNames.map((name) => ({
+    name,
+    description: descriptions.get(name) || '',
+  }))
 }
 
 /** Lightweight probe: start an SDK subprocess just to capture the init message
@@ -535,7 +576,7 @@ export async function probeSdkInit(client: ClientState): Promise<SdkInitInfo | n
         const result: SdkInitInfo = {
           tools: msg.tools || [],
           sdkMcpServers: msg.mcp_servers || [],
-          sdkSkills: msg.skills || [],
+          sdkSkills: enrichSkills(msg.skills || [], client.cwd),
         }
 
         // Got init — kill subprocess immediately (no API call made yet)
@@ -776,7 +817,7 @@ export async function* executeQuery(
               model: (message as any).model,
               tools: (message as any).tools,
               sdkMcpServers: (message as any).mcp_servers,
-              sdkSkills: (message as any).skills,
+              sdkSkills: enrichSkills((message as any).skills || []),
             },
           }
         }

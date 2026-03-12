@@ -15,3 +15,9 @@ struct SdkMcpServer: Equatable {
     let name: String
     let status: String
 }
+
+/// SDK skill info with name and description
+struct SdkSkill: Equatable {
+    let name: String
+    let description: String
+}

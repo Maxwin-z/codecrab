@@ -23,7 +23,7 @@ struct ProjectChatState {
     var permissionMode: String = "bypassPermissions"
     // SDK-reported MCP servers, skills, and tools (from init message)
     var sdkMcpServers: [SdkMcpServer] = []
-    var sdkSkills: [String] = []
+    var sdkSkills: [SdkSkill] = []
     var sdkTools: [String] = []
 }
 
@@ -345,7 +345,13 @@ class WebSocketService: ObservableObject {
                 if let model = json["model"] as? String { self.currentModel = model }
                 if let sid = json["sessionId"] as? String { self.sessionId = sid }
                 if let tools = json["tools"] as? [String] { self.sdkTools = tools }
-                if let skills = json["sdkSkills"] as? [String] { self.sdkSkills = skills }
+                if let skillsJson = json["sdkSkills"] as? [[String: Any]] {
+                    self.sdkSkills = skillsJson.compactMap { s in
+                        guard let name = s["name"] as? String else { return nil }
+                        let description = s["description"] as? String ?? ""
+                        return SdkSkill(name: name, description: description)
+                    }
+                }
                 if let serversJson = json["sdkMcpServers"] as? [[String: Any]] {
                     self.sdkMcpServers = serversJson.compactMap { s in
                         guard let name = s["name"] as? String,

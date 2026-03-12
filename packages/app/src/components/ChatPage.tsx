@@ -81,10 +81,10 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   // Build skill entries from init message
   const skillEntries: McpInfo[] = useMemo(() => {
     if (!ws.sdkSkills.length) return []
-    return ws.sdkSkills.map((name) => ({
-      id: `skill:${name}`,
-      name,
-      description: 'Skill',
+    return ws.sdkSkills.map((skill) => ({
+      id: `skill:${skill.name}`,
+      name: skill.name,
+      description: skill.description || 'Skill',
       icon: '⚡',
       toolCount: 0,
       source: 'skill' as const,

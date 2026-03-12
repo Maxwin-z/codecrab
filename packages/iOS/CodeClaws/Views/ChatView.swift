@@ -34,11 +34,11 @@ struct ChatView: View {
     // Build skill entries from init message (mirrors web skillEntries)
     private var skillEntries: [McpInfo] {
         guard !wsService.sdkSkills.isEmpty else { return [] }
-        return wsService.sdkSkills.map { name in
+        return wsService.sdkSkills.map { skill in
             McpInfo(
-                id: "skill:\(name)",
-                name: name,
-                description: "Skill",
+                id: "skill:\(skill.name)",
+                name: skill.name,
+                description: skill.description.isEmpty ? "Skill" : skill.description,
                 icon: "⚡",
                 toolCount: 0,
                 source: "skill"
@@ -199,7 +199,7 @@ struct ChatView: View {
         }
         // Auto-enable new SDK MCPs and skills when they appear
         .onChange(of: wsService.sdkMcpServers.map { $0.name }) { _ in autoEnableNewEntries() }
-        .onChange(of: wsService.sdkSkills) { _ in autoEnableNewEntries() }
+        .onChange(of: wsService.sdkSkills.map { $0.name }) { _ in autoEnableNewEntries() }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

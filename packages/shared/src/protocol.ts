@@ -95,7 +95,7 @@ export interface SystemMessage extends ServerProjectContext {
   model?: string
   tools?: string[]
   sdkMcpServers?: SdkMcpServer[]   // MCP servers reported by Claude Code SDK
-  sdkSkills?: string[]              // Skills reported by Claude Code SDK
+  sdkSkills?: SdkSkill[]            // Skills reported by Claude Code SDK
 }
 
 export interface StreamDeltaMessage extends ServerProjectContext {
@@ -404,4 +404,10 @@ export interface McpInfo {
 export interface SdkMcpServer {
   name: string
   status: string
+}
+
+/** SDK skill info with name and description */
+export interface SdkSkill {
+  name: string
+  description: string
 }
