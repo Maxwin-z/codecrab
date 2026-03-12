@@ -54,26 +54,63 @@ export { queryQueue }
 
 // Execute a prompt in a specific session (used by cron jobs)
 // Now enqueues through the query queue instead of executing directly
+// If sessionId is not provided, a new session will be created for the project
 export async function executePromptInSession(
-  sessionId: string,
+  sessionId: string | undefined,
+  projectId: string | undefined,
   prompt: string,
   cronJobName?: string,
   metadata?: { cronJobId?: string; cronRunId?: string },
 ): Promise<{ success: boolean; output?: string; error?: string }> {
-  const session = sessions.get(sessionId)
-  if (!session) {
-    return { success: false, error: `Session not found: ${sessionId}` }
+  // Find or create parent session
+  let parentSession: Session | undefined
+
+  if (sessionId) {
+    parentSession = sessions.get(sessionId)
   }
 
-  const projectId = session.projectId
-  if (!projectId) {
-    return { success: false, error: 'Session has no project' }
+  // If no session found by sessionId, try to find one by projectId or create new
+  if (!parentSession && projectId) {
+    // Try to find an existing session for this project
+    for (const s of sessions.values()) {
+      if (s.projectId === projectId) {
+        parentSession = s
+        break
+      }
+    }
+  }
+
+  // If still no session, create a new one for this project
+  if (!parentSession) {
+    if (!projectId) {
+      return { success: false, error: 'No session or project ID provided for cron job' }
+    }
+
+    const projState = getOrCreateProjectState(projectId)
+    const newSessionId = `cron-parent-${Date.now()}`
+    parentSession = {
+      sessionId: newSessionId,
+      projectId,
+      cwd: projState.cwd,
+      messages: [],
+      status: 'idle',
+      lastModified: Date.now(),
+      summary: cronJobName ? `Parent Session for: ${cronJobName}` : 'Parent Session for Scheduled Tasks',
+    }
+    sessions.set(newSessionId, parentSession)
+    persistSession(parentSession)
+    console.log(`[cron] Created parent session ${newSessionId} for project ${projectId}`)
+  }
+
+  const actualProjectId = parentSession.projectId
+  if (!actualProjectId) {
+    return { success: false, error: 'Parent session has no project' }
   }
 
   const { queryId, promise } = queryQueue.enqueue({
     type: 'cron',
-    projectId,
-    sessionId: session.sessionId,
+    projectId: actualProjectId,
+    sessionId: parentSession.sessionId,
     prompt,
     priority: 1, // Lower priority than user queries
     metadata: {
@@ -82,31 +119,47 @@ export async function executePromptInSession(
       cronRunId: metadata?.cronRunId,
     },
     executor: async (queuedQuery) => {
-      return executeCronQuery(session, projectId, prompt, cronJobName, queuedQuery)
+      return executeCronQuery(parentSession!, actualProjectId, prompt, cronJobName, queuedQuery, metadata)
     },
   })
 
-  console.log(`[cron] Enqueued cron query ${queryId} for session ${sessionId}`)
+  console.log(`[cron] Enqueued cron query ${queryId} for session ${parentSession.sessionId}`)
   return await promise
 }
 
 // Internal: execute a cron query (called by the queue when it's this query's turn)
+// Creates a new session for execution, then inserts result into parent session
 async function executeCronQuery(
-  session: Session,
+  parentSession: Session,
   projectId: string,
   prompt: string,
   cronJobName: string | undefined,
   queuedQuery: QueuedQuery,
+  metadata?: { cronJobId?: string; cronRunId?: string },
 ): Promise<QueryResult> {
   const projState = getOrCreateProjectState(projectId)
+  const cronJobId = metadata?.cronJobId || 'unknown'
 
-  // Create a virtual client state for this cron execution
+  // Create a new session for this cron execution
+  const execSessionId = `cron-${cronJobId}-${Date.now()}`
+  const execSession: Session = {
+    sessionId: execSessionId,
+    projectId,
+    cwd: parentSession.cwd || projState.cwd,
+    messages: [],
+    status: 'processing',
+    lastModified: Date.now(),
+    summary: cronJobName ? `Scheduled Task: ${cronJobName}` : 'Scheduled Task',
+    firstPrompt: prompt,
+  }
+  sessions.set(execSessionId, execSession)
+
+  // Create a virtual client state for this execution
   const cronClientId = `cron-${Date.now()}`
-  const clientState = createClientState(cronClientId, projectId, session.cwd || process.cwd())
-  clientState.sessionId = session.sdkSessionId
+  const clientState = createClientState(cronClientId, projectId, execSession.cwd || process.cwd())
   clientState.permissionMode = 'bypassPermissions' // Cron jobs run unattended
 
-  // Add a system message indicating this is a cron-triggered execution
+  // Add user message to execution session
   const cronLabel = cronJobName ? `[Scheduled Task: ${cronJobName}]` : '[Scheduled Task]'
   const userMsg: ChatMessage = {
     id: genId(),
@@ -114,21 +167,19 @@ async function executeCronQuery(
     content: `${cronLabel} ${prompt}`,
     timestamp: Date.now(),
   }
-  session.messages.push(userMsg)
-  session.lastModified = Date.now()
-  persistSession(session)
+  execSession.messages.push(userMsg)
+  execSession.lastModified = Date.now()
+  persistSession(execSession)
 
-  projState.messages.push(userMsg)
-
+  // Broadcast new session created
   broadcastToProject(projectId, {
-    type: 'user_message',
-    message: userMsg,
+    type: 'session_created',
+    sessionId: execSessionId,
+    parentSessionId: parentSession.sessionId,
+    cronJobId,
+    cronJobName,
     projectId,
-    sessionId: session.sessionId,
   })
-
-  session.status = 'processing'
-  broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
   broadcastProjectStatuses()
 
   // Link queue abort to engine abort
@@ -136,51 +187,29 @@ async function executeCronQuery(
     abortQuery(clientState)
   }, { once: true })
 
+  let finalText = ''
+  let isSuccess = true
+  let errorMessage = ''
+  let durationMs = 0
+  const startTime = Date.now()
+
   try {
     const stream = executeQuery(clientState, prompt, {
       onTextDelta: (text) => {
-        broadcastToProject(projectId, {
-          type: 'stream_delta',
-          deltaType: 'text',
-          text,
-          projectId,
-          sessionId: session.sessionId,
-        })
+        finalText += text
       },
-      onThinkingDelta: (thinking) => {
-        broadcastToProject(projectId, {
-          type: 'stream_delta',
-          deltaType: 'thinking',
-          text: thinking,
-          projectId,
-          sessionId: session.sessionId,
-        })
+      onThinkingDelta: () => {
+        // Cron execution doesn't broadcast thinking to parent
       },
-      onToolUse: (toolName, toolId, input) => {
-        broadcastToProject(projectId, {
-          type: 'tool_use',
-          toolName,
-          toolId,
-          input,
-          projectId,
-          sessionId: session.sessionId,
-        })
+      onToolUse: () => {
+        // Cron execution doesn't broadcast tool use to parent
       },
-      onToolResult: (toolId, content, isError) => {
-        broadcastToProject(projectId, {
-          type: 'tool_result',
-          toolId,
-          content,
-          isError,
-          projectId,
-          sessionId: session.sessionId,
-        })
+      onToolResult: () => {
+        // Cron execution doesn't broadcast tool result to parent
       },
       onSessionInit: (sdkSessionId) => {
-        session.sdkSessionId = sdkSessionId
-        persistSession(session)
-        const ps = getOrCreateProjectState(projectId)
-        ps.sessionId = sdkSessionId
+        execSession.sdkSessionId = sdkSessionId
+        persistSession(execSession)
       },
       onPermissionRequest: () => {
         // Cron jobs bypass permissions
@@ -188,67 +217,82 @@ async function executeCronQuery(
       onUsage: () => {},
     })
 
-    let finalText = ''
     for await (const event of stream) {
-      if (event.type === 'text_delta') {
-        finalText += (event.data as any).text
-      } else if (event.type === 'result') {
+      if (event.type === 'result') {
         const resultData = event.data as any
-        broadcastToProject(projectId, {
-          type: 'result',
-          subtype: resultData.subtype,
-          costUsd: resultData.costUsd,
-          durationMs: resultData.durationMs,
-          result: resultData.result,
-          isError: resultData.isError,
-          projectId,
-          sessionId: session.sessionId,
-        })
+        if (resultData.durationMs) {
+          durationMs = resultData.durationMs
+        }
+        if (resultData.isError) {
+          isSuccess = false
+        }
       }
     }
 
+    // Store assistant message in execution session
     const assistantMsg = storeAssistantMessage(clientState)
     if (assistantMsg) {
-      session.messages.push(assistantMsg)
-      session.lastModified = Date.now()
-      persistSession(session)
-
-      broadcastToProject(projectId, {
-        type: 'assistant_text',
-        text: assistantMsg.content,
-        projectId,
-        sessionId: session.sessionId,
-      })
-
+      execSession.messages.push(assistantMsg)
+      execSession.lastModified = Date.now()
+      persistSession(execSession)
       finalText = assistantMsg.content
     }
 
-    return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
+    execSession.status = 'idle'
+    persistSession(execSession)
+
   } catch (err: any) {
     console.error('[cron] Query error:', err)
-    broadcastToProject(projectId, {
-      type: 'error',
-      message: err.message || 'Cron query failed',
-      projectId,
-      sessionId: session.sessionId,
-    })
-    session.status = 'error'
-    return { success: false, error: err.message || 'Query failed', queryId: queuedQuery.id }
+    isSuccess = false
+    errorMessage = err.message || 'Cron query failed'
+    execSession.status = 'error'
+    persistSession(execSession)
   } finally {
-    session.status = 'idle'
-    projState.pendingQuestion = null
-    projState.pendingPermissionRequest = null
-    session.pendingQuestion = null
-    session.pendingPermissionRequest = null
-    broadcastToProject(projectId, {
-      type: 'query_end',
-      projectId,
-      sessionId: session.sessionId,
-      queryId: queuedQuery.id,
-    })
-    broadcastProjectStatuses()
-
+    durationMs = durationMs || Date.now() - startTime
     removeAllClientStates(cronClientId)
+  }
+
+  // Insert result into parent session
+  const resultSummary = isSuccess
+    ? `Completed successfully in ${durationMs}ms`
+    : `Failed: ${errorMessage}`
+  const resultMsg: ChatMessage = {
+    id: genId(),
+    role: 'assistant',
+    content: `[Scheduled Task Completed: ${cronJobName || 'Task'}]\nResult: ${resultSummary}\nOutput: ${finalText.slice(0, 1000)}${finalText.length > 1000 ? '...' : ''}`,
+    timestamp: Date.now(),
+    costUsd: clientState.currentCostUsd,
+    durationMs,
+  }
+
+  parentSession.messages.push(resultMsg)
+  parentSession.lastModified = Date.now()
+  persistSession(parentSession)
+
+  // Broadcast result to parent session
+  broadcastToProject(projectId, {
+    type: 'assistant_text',
+    text: resultMsg.content,
+    projectId,
+    sessionId: parentSession.sessionId,
+  })
+
+  // Also broadcast to execution session for visibility
+  broadcastToProject(projectId, {
+    type: 'cron_task_completed',
+    cronJobId,
+    cronJobName,
+    parentSessionId: parentSession.sessionId,
+    execSessionId,
+    success: isSuccess,
+    projectId,
+  })
+  broadcastProjectStatuses()
+
+  if (isSuccess) {
+    return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
+  } else {
+    return { success: false, error: errorMessage, queryId: queuedQuery.id }
   }
 }
 

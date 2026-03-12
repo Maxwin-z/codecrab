@@ -85,17 +85,13 @@ ensureToken().then(() => {
 
   // Set up cron execution callback to run prompt in the original session
   cronSystem.setExecuteCallback(async (request) => {
-    const { sessionId } = request.context
+    const { sessionId, projectId } = request.context
 
-    console.log(`[CronExecute] Job: ${request.name} (${request.jobId}), session=${sessionId}`)
-
-    if (!sessionId) {
-      console.error('[CronExecute] No sessionId in job context')
-      return { success: false, error: 'No session ID associated with this cron job' }
-    }
+    console.log(`[CronExecute] Job: ${request.name} (${request.jobId}), session=${sessionId}, project=${projectId}`)
 
     // Execute the prompt via the query queue
-    const result = await executePromptInSession(sessionId, request.prompt, request.name, {
+    // If no sessionId, we'll create one for this execution (parent session tracking)
+    const result = await executePromptInSession(sessionId, projectId, request.prompt, request.name, {
       cronJobId: request.jobId,
       cronRunId: request.runId,
     })

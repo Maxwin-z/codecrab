@@ -444,7 +444,10 @@ export async function* executeQuery(
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',
-      append: `\n\nYour working directory is ${client.cwd}.`,
+      append: `\n\nYour working directory is ${client.cwd}.` +
+        `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
+        `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
+        `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.`,
     },
   }
 

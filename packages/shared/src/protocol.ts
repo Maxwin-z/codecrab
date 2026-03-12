@@ -183,6 +183,22 @@ export interface SessionResumedMessage extends ServerProjectContext {
   type: 'session_resumed'
 }
 
+export interface SessionCreatedMessage extends ServerProjectContext {
+  type: 'session_created'
+  parentSessionId?: string
+  cronJobId?: string
+  cronJobName?: string
+}
+
+export interface CronTaskCompletedMessage extends ServerProjectContext {
+  type: 'cron_task_completed'
+  cronJobId: string
+  cronJobName?: string
+  parentSessionId: string
+  execSessionId: string
+  success: boolean
+}
+
 export interface SessionStatusChangedMessage extends ServerProjectContext {
   type: 'session_status_changed'
   status: 'idle' | 'processing' | 'error'
@@ -281,6 +297,7 @@ export type ServerMessage =
   | CwdChangedMessage
   | ErrorMessage
   | SessionResumedMessage
+  | SessionCreatedMessage
   | SessionStatusChangedMessage
   | AskUserQuestionMessage
   | ModelChangedMessage
@@ -293,6 +310,7 @@ export type ServerMessage =
   | ProjectStatusesMessage
   | QueryQueueStatusMessage
   | QueryQueuedMessage
+  | CronTaskCompletedMessage
 
 // ============ Image Attachments ============
 
