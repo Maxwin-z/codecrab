@@ -157,6 +157,7 @@ class WebSocketService: ObservableObject {
         case "query_start":
             if isCurrentProject {
                 self.isRunning = true
+                self.latestSummary = nil
                 self.suggestions = []
             }
         case "query_end":
@@ -445,6 +446,9 @@ class WebSocketService: ObservableObject {
     func resumeSession(_ sessionId: String) {
         guard let projectId = activeProjectId else { return }
         self.messages.removeAll()
+        self.latestSummary = nil
+        self.suggestions = []
+        self.isRunning = false
         sendWebSocketMessage([
             "type": "resume_session",
             "sessionId": sessionId,
@@ -565,12 +569,9 @@ class WebSocketService: ObservableObject {
             streamingThinking = state.streamingThinking
             pendingQuestion = state.pendingQuestion
             pendingPermission = state.pendingPermission
-            isRunning = state.isRunning
             isAborting = state.isAborting
             sessionId = state.sessionId
             self.cwd = state.cwd
-            latestSummary = state.latestSummary
-            suggestions = state.suggestions
             currentModel = state.currentModel
             permissionMode = state.permissionMode
             sdkMcpServers = state.sdkMcpServers
@@ -582,17 +583,25 @@ class WebSocketService: ObservableObject {
             streamingThinking = ""
             pendingQuestion = nil
             pendingPermission = nil
-            isRunning = false
             isAborting = false
             sessionId = ""
             self.cwd = cwd ?? ""
-            latestSummary = nil
-            suggestions = []
             currentModel = ""
             permissionMode = "bypassPermissions"
             sdkMcpServers = []
             sdkSkills = []
             sdkTools = []
+        }
+
+        // Always clear summary/suggestions on project switch
+        latestSummary = nil
+        suggestions = []
+
+        // Reconcile isRunning with server-reported project status
+        if let serverStatus = projectStatuses.first(where: { $0.projectId == projectId }) {
+            isRunning = serverStatus.status == "processing"
+        } else {
+            isRunning = false
         }
         
         sendWebSocketMessage([
