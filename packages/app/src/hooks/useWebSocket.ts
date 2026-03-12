@@ -5,11 +5,13 @@ import type {
   ChatMessage,
   ClientMessage,
   ImageAttachment,
+  McpInfo,
   ModelInfo,
   PendingPermission,
   PermissionMode,
   ProjectStatus,
   Question,
+  SdkMcpServer,
   ServerMessage,
 } from '@codeclaws/shared'
 import { getToken, authFetch } from '@/lib/auth'
@@ -74,6 +76,10 @@ interface ProjectChatState {
   latestSummary: string | null
   currentModel: string
   permissionMode: PermissionMode
+  // SDK-reported MCP servers, skills, and tools (from init message)
+  sdkMcpServers: SdkMcpServer[]
+  sdkSkills: string[]
+  sdkTools: string[]
 }
 
 function createEmptyProjectState(): ProjectChatState {
@@ -90,6 +96,9 @@ function createEmptyProjectState(): ProjectChatState {
     latestSummary: null,
     currentModel: '',
     permissionMode: 'default',
+    sdkMcpServers: [],
+    sdkSkills: [],
+    sdkTools: [],
   }
 }
 
@@ -109,7 +118,12 @@ export interface UseWebSocketReturn {
   permissionMode: PermissionMode
   sessionId: string
   projectStatuses: ProjectStatus[]
-  sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[]) => void
+  sdkMcpServers: SdkMcpServer[]
+  sdkSkills: string[]
+  sdkTools: string[]
+  sdkLoaded: boolean
+  probeSdk: () => void
+  sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => void
   sendCommand: (command: string) => void
   abort: () => void
   setWorkingDir: (dir: string) => void
@@ -447,6 +461,9 @@ export function useWebSocket(): UseWebSocketReturn {
           if (msg.subtype === 'init') {
             if (msg.model) pState.currentModel = msg.model
             if (msg.sessionId) pState.sessionId = msg.sessionId
+            if (msg.sdkMcpServers) pState.sdkMcpServers = msg.sdkMcpServers
+            if (msg.sdkSkills) pState.sdkSkills = msg.sdkSkills
+            if (msg.tools) pState.sdkTools = msg.tools
           }
           break
       }
@@ -483,7 +500,7 @@ export function useWebSocket(): UseWebSocketReturn {
     }))
   }, [])
 
-  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[], enabledMcps?: string[]) => {
+  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => {
     const pid = activeProjectIdRef.current
     if (!pid) return
     const pState = getProjectState(pid)
@@ -503,6 +520,8 @@ export function useWebSocket(): UseWebSocketReturn {
       prompt,
       ...(images?.length ? { images } : {}),
       ...(enabledMcps ? { enabledMcps } : {}),
+      ...(disabledSdkServers?.length ? { disabledSdkServers } : {}),
+      ...(disabledSkills?.length ? { disabledSkills } : {}),
     })
   }, [getProjectState, sendWithProject, triggerRender])
 
@@ -644,6 +663,10 @@ export function useWebSocket(): UseWebSocketReturn {
     sendWithProject({ type: 'respond_permission', requestId, allow })
   }, [getProjectState, sendWithProject, triggerRender])
 
+  const probeSdk = useCallback(() => {
+    sendWithProject({ type: 'probe_sdk' })
+  }, [sendWithProject])
+
   const fetchSessions = useCallback(async (): Promise<import('@codeclaws/shared').SessionInfo[]> => {
     try {
       const params = new URLSearchParams()
@@ -681,6 +704,11 @@ export function useWebSocket(): UseWebSocketReturn {
     permissionMode: activeState.permissionMode,
     sessionId: activeState.sessionId,
     projectStatuses,
+    sdkMcpServers: activeState.sdkMcpServers,
+    sdkSkills: activeState.sdkSkills,
+    sdkTools: activeState.sdkTools,
+    sdkLoaded: activeState.sdkTools.length > 0,
+    probeSdk,
     sendPrompt,
     sendCommand,
     abort,

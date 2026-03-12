@@ -31,6 +31,7 @@ import {
   generateSessionId,
   getModelDisplayName,
   getDefaultModelConfig,
+  probeSdkInit,
 } from '../engine/claude.js'
 import { QueryQueue } from '../engine/query-queue.js'
 import type { QueuedQuery, QueryResult } from '../engine/query-queue.js'
@@ -881,6 +882,8 @@ async function executeUserQuery(
   prompt: string,
   images: import('@codeclaws/shared').ImageAttachment[] | undefined,
   enabledMcps: string[] | undefined,
+  disabledSdkServers: string[] | undefined,
+  disabledSkills: string[] | undefined,
   queuedQuery: QueuedQuery,
 ): Promise<QueryResult> {
   // Link queue abort to engine abort
@@ -960,11 +963,27 @@ async function executeUserQuery(
         })
       },
       onUsage: (_usage) => {},
-    }, images, enabledMcps)
+    }, images, enabledMcps, disabledSdkServers, disabledSkills)
 
     let finalText = ''
     for await (const event of stream) {
       switch (event.type) {
+        case 'system_init': {
+          // Forward SDK MCP servers and skills to clients
+          const initData = event.data as any
+          if (initData.sdkMcpServers || initData.sdkSkills) {
+            broadcastToProject(projectId, {
+              type: 'system',
+              subtype: 'init',
+              projectId,
+              sessionId: session.sessionId,
+              tools: initData.tools,
+              sdkMcpServers: initData.sdkMcpServers,
+              sdkSkills: initData.sdkSkills,
+            })
+          }
+          break
+        }
         case 'text_delta':
           finalText += (event.data as any).text
           break
@@ -1230,6 +1249,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             capturedMsg.prompt,
             capturedMsg.images,
             capturedMsg.enabledMcps,
+            capturedMsg.disabledSdkServers,
+            capturedMsg.disabledSkills,
             queuedQuery,
           )
         },
@@ -1451,6 +1472,25 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       const projState = getOrCreateProjectState(projectId)
       projState.permissionMode = mode
       broadcastToProject(projectId, { type: 'permission_mode_changed', mode, projectId })
+      break
+    }
+
+    case 'probe_sdk': {
+      // Lightweight probe: start SDK subprocess to capture init info, then abort
+      probeSdkInit(clientState).then((info) => {
+        if (info) {
+          sendToClient(client, {
+            type: 'system',
+            subtype: 'init',
+            projectId,
+            tools: info.tools,
+            sdkMcpServers: info.sdkMcpServers,
+            sdkSkills: info.sdkSkills,
+          })
+        }
+      }).catch((err) => {
+        console.error('[ws] probe_sdk error:', err)
+      })
       break
     }
   }

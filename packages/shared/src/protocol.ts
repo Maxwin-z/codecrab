@@ -12,7 +12,9 @@ export interface PromptMessage extends ProjectContext {
   type: 'prompt'
   prompt: string
   images?: ImageAttachment[]
-  enabledMcps?: string[]  // MCP IDs to enable for this query (default: all)
+  enabledMcps?: string[]        // Custom MCP IDs to enable for this query (default: all)
+  disabledSdkServers?: string[] // SDK MCP server names to disable for this query
+  disabledSkills?: string[]     // Skill names to disable for this query
 }
 
 export interface CommandMessage extends ProjectContext {
@@ -62,6 +64,10 @@ export interface SwitchProjectMessage {
   projectCwd?: string
 }
 
+export interface ProbeSdkMessage extends ProjectContext {
+  type: 'probe_sdk'
+}
+
 export type ClientMessage =
   | PromptMessage
   | CommandMessage
@@ -73,6 +79,7 @@ export type ClientMessage =
   | SetModelMessage
   | SetPermissionModeMessage
   | SwitchProjectMessage
+  | ProbeSdkMessage
 
 // ============ Server → Client Messages ============
 
@@ -87,6 +94,8 @@ export interface SystemMessage extends ServerProjectContext {
   subtype: 'init' | string
   model?: string
   tools?: string[]
+  sdkMcpServers?: SdkMcpServer[]   // MCP servers reported by Claude Code SDK
+  sdkSkills?: string[]              // Skills reported by Claude Code SDK
 }
 
 export interface StreamDeltaMessage extends ServerProjectContext {
@@ -381,4 +390,12 @@ export interface McpInfo {
   description: string
   icon?: string           // emoji or icon identifier
   toolCount: number
+  source?: 'custom' | 'sdk' | 'skill'  // where this MCP/skill originates
+  tools?: string[]        // tool names (for SDK MCPs, used for disallowedTools)
+}
+
+/** SDK MCP server info from the Claude Code init message */
+export interface SdkMcpServer {
+  name: string
+  status: string
 }

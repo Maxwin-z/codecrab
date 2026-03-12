@@ -1,5 +1,5 @@
 // ChatPage — Main chat interface
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { MessageList } from './MessageList'
@@ -30,24 +30,102 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(false)
-  const [availableMcps, setAvailableMcps] = useState<McpInfo[]>([])
-  const [enabledMcps, setEnabledMcps] = useState<string[]>([])
+  const [customMcps, setCustomMcps] = useState<McpInfo[]>([])
+  const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
+  // Track whether we've initialized enabledIds from the first data load
+  const initializedRef = useRef(false)
 
-  // Fetch available MCPs on mount
+  // Fetch custom MCPs (chrome, cron, etc.) on mount
   useEffect(() => {
     authFetch('/api/mcps', {}, onUnauthorized)
       .then((r) => r.json())
       .then((data: McpInfo[]) => {
-        setAvailableMcps(data)
-        setEnabledMcps(data.map((m) => m.id)) // all enabled by default
+        const mcps = data.map((m) => ({ ...m, source: 'custom' as const }))
+        setCustomMcps(mcps)
+        // Enable all custom MCPs by default
+        setEnabledIds((prev) => {
+          const next = new Set(prev)
+          mcps.forEach((m) => next.add(m.id))
+          return next
+        })
+        initializedRef.current = true
       })
       .catch((err) => console.error('Failed to load MCPs:', err))
   }, [onUnauthorized])
 
+  // Build SDK MCP entries from init message
+  // Exclude our custom MCP names (they already appear in customMcps) and
+  // Claude Code system tools (not user-configurable, should not be toggled)
+  const sdkMcpEntries: McpInfo[] = useMemo(() => {
+    if (!ws.sdkMcpServers.length) return []
+    const customIds = new Set(customMcps.map((m) => m.id))
+    return ws.sdkMcpServers
+      .filter((s) => s.status === 'connected' && !customIds.has(s.name))
+      .map((server) => {
+        // Count tools belonging to this server: mcp__<name>__*
+        const prefix = `mcp__${server.name}__`
+        const serverTools = ws.sdkTools.filter((t) => t.startsWith(prefix))
+        return {
+          id: `sdk:${server.name}`,
+          name: server.name,
+          description: `SDK MCP server (${serverTools.length} tools)`,
+          icon: '🔌',
+          toolCount: serverTools.length,
+          source: 'sdk' as const,
+          tools: serverTools,
+        }
+      })
+  }, [ws.sdkMcpServers, ws.sdkTools, customMcps])
+
+  // Build skill entries from init message
+  const skillEntries: McpInfo[] = useMemo(() => {
+    if (!ws.sdkSkills.length) return []
+    return ws.sdkSkills.map((name) => ({
+      id: `skill:${name}`,
+      name,
+      description: 'Skill',
+      icon: '⚡',
+      toolCount: 0,
+      source: 'skill' as const,
+    }))
+  }, [ws.sdkSkills])
+
+  // Auto-enable new SDK MCPs and skills when they first appear
+  useEffect(() => {
+    if (!initializedRef.current) return
+    const allNew = [...sdkMcpEntries, ...skillEntries]
+    if (allNew.length === 0) return
+    setEnabledIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const entry of allNew) {
+        if (!next.has(entry.id)) {
+          next.add(entry.id)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [sdkMcpEntries, skillEntries])
+
+  // Unified list for the toggle UI
+  const allMcps: McpInfo[] = useMemo(
+    () => [...customMcps, ...sdkMcpEntries, ...skillEntries],
+    [customMcps, sdkMcpEntries, skillEntries],
+  )
+
+  const enabledMcpsList = useMemo(() => Array.from(enabledIds), [enabledIds])
+
   const handleToggleMcp = useCallback((mcpId: string) => {
-    setEnabledMcps((prev) =>
-      prev.includes(mcpId) ? prev.filter((id) => id !== mcpId) : [...prev, mcpId]
-    )
+    setEnabledIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(mcpId)) {
+        next.delete(mcpId)
+      } else {
+        next.add(mcpId)
+      }
+      return next
+    })
   }, [])
 
   // Auto-scroll to bottom when messages change or project loads
@@ -107,7 +185,21 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     if (text.startsWith('/')) {
       ws.sendCommand(text)
     } else {
-      ws.sendPrompt(text, images, mcps)
+      // Separate enabled custom MCPs from disabled SDK servers/skills
+      const enabledCustomMcps = mcps?.filter((id) => !id.startsWith('sdk:') && !id.startsWith('skill:'))
+      const disabledSdkServers = sdkMcpEntries
+        .filter((e) => !enabledIds.has(e.id))
+        .map((e) => e.name)
+      const disabledSkills = skillEntries
+        .filter((e) => !enabledIds.has(e.id))
+        .map((e) => e.name)
+      ws.sendPrompt(
+        text,
+        images,
+        enabledCustomMcps,
+        disabledSdkServers.length ? disabledSdkServers : undefined,
+        disabledSkills.length ? disabledSkills : undefined,
+      )
     }
   }
 
@@ -247,9 +339,11 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         currentModel={ws.currentModel}
         permissionMode={ws.permissionMode}
         onPermissionModeChange={ws.setPermissionMode}
-        availableMcps={availableMcps}
-        enabledMcps={enabledMcps}
+        availableMcps={allMcps}
+        enabledMcps={enabledMcpsList}
         onToggleMcp={handleToggleMcp}
+        sdkLoaded={ws.sdkLoaded}
+        onProbeSdk={ws.probeSdk}
       />
 
       {/* Session History Sidebar */}

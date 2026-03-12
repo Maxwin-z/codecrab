@@ -89,6 +89,8 @@ export interface ClientState {
   currentToolCalls: ChatMessage['toolCalls']
   currentCostUsd?: number
   currentDurationMs?: number
+  // Cached SDK info from init message (used for disallowedTools resolution)
+  sdkTools?: string[]
 }
 
 // Project-level state (shared across clients)
@@ -368,6 +370,8 @@ export function buildQueryOptions(
   client: ClientState,
   queryEnv: Record<string, string | undefined>,
   enabledMcps?: string[],
+  disabledSdkServers?: string[],
+  disabledSkills?: string[],
 ): Record<string, unknown> {
   const isYolo = client.permissionMode === 'bypassPermissions'
 
@@ -409,6 +413,34 @@ export function buildQueryOptions(
   const skillServers = buildSkillServers()
   options.mcpServers = { ...mcpServers, ...skillServers }
 
+  // Disable SDK MCP server tools and skills via disallowedTools
+  // SDK MCP tools follow the naming convention: mcp__<server_name>__<tool_name>
+  // We use the cached tools list to find exact tool names for each disabled server
+  const disallowed: string[] = []
+  if (disabledSdkServers?.length && client.sdkTools?.length) {
+    for (const serverName of disabledSdkServers) {
+      const prefix = `mcp__${serverName}__`
+      for (const toolName of client.sdkTools) {
+        if (toolName.startsWith(prefix)) {
+          disallowed.push(toolName)
+        }
+      }
+    }
+  }
+  if (disabledSkills?.length && client.sdkTools?.length) {
+    // Skills register tools with their name as part of the tool name
+    for (const skillName of disabledSkills) {
+      for (const toolName of client.sdkTools) {
+        if (toolName === skillName || toolName.startsWith(`${skillName}:`)) {
+          disallowed.push(toolName)
+        }
+      }
+    }
+  }
+  if (disallowed.length > 0) {
+    options.disallowedTools = disallowed
+  }
+
   // Programmatic agent definitions (only set when non-empty)
   if (Object.keys(agentDefinitions).length > 0) {
     options.agents = agentDefinitions
@@ -420,6 +452,97 @@ export function buildQueryOptions(
   }
 
   return options
+}
+
+/** Build per-query env vars from model config.
+ *  Extracted so probeSdkInit can reuse it without duplicating logic. */
+function buildQueryEnv(modelConfig: ModelConfig): Record<string, string | undefined> {
+  const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
+
+  const queryEnv: Record<string, string | undefined> = {
+    ...process.env,
+  }
+
+  // IMPORTANT: Do NOT set CLAUDE_CONFIG_DIR for OAuth models.
+  // The SDK's embedded CLI uses CLAUDE_CONFIG_DIR to compute the macOS Keychain
+  // service name (adds a sha256 hash suffix when the var is set). When the user
+  // logs in via the global `claude` CLI (which runs without CLAUDE_CONFIG_DIR),
+  // the credentials are stored WITHOUT the hash suffix. Setting CLAUDE_CONFIG_DIR
+  // explicitly causes a Keychain key mismatch → "Not logged in".
+  // For 3rd-party models with API keys, auth doesn't use Keychain, so it's safe
+  // to set CLAUDE_CONFIG_DIR to ensure skills/commands are loaded from ~/.claude.
+  if (apiKey) {
+    queryEnv.CLAUDE_CONFIG_DIR = CLAUDE_DIR
+    queryEnv.ANTHROPIC_API_KEY = apiKey
+  } else {
+    delete queryEnv.CLAUDE_CONFIG_DIR
+    delete queryEnv.ANTHROPIC_API_KEY
+  }
+
+  if (modelConfig.baseUrl) {
+    queryEnv.ANTHROPIC_BASE_URL = modelConfig.baseUrl
+  } else {
+    delete queryEnv.ANTHROPIC_BASE_URL
+  }
+
+  // Prevent nested-session detection when server runs inside a Claude Code terminal
+  delete queryEnv.CLAUDECODE
+  delete queryEnv.CLAUDE_CODE_ENTRYPOINT
+
+  return queryEnv
+}
+
+/** Probe result from a lightweight SDK init */
+export interface SdkInitInfo {
+  tools: string[]
+  sdkMcpServers: { name: string; status: string }[]
+  sdkSkills: string[]
+}
+
+/** Lightweight probe: start an SDK subprocess just to capture the init message
+ *  (tools, mcp_servers, skills), then abort immediately.
+ *  No API call is made — the init message is emitted before any LLM interaction. */
+export async function probeSdkInit(client: ClientState): Promise<SdkInitInfo | null> {
+  const modelConfig = getDefaultModelConfig()
+  if (!modelConfig) return null
+
+  const queryEnv = buildQueryEnv(modelConfig)
+  const options = buildQueryOptions(client, queryEnv)
+  const abortController = new AbortController()
+  options.abortController = abortController
+  options.maxTurns = 1
+
+  try {
+    const stream = query({ prompt: '.', options: options as any })
+
+    for await (const message of stream) {
+      if (
+        message.type === 'system' &&
+        'subtype' in message &&
+        (message as any).subtype === 'init'
+      ) {
+        const msg = message as any
+
+        // Cache on client for future disallowedTools resolution
+        if (msg.tools) client.sdkTools = msg.tools
+
+        const result: SdkInitInfo = {
+          tools: msg.tools || [],
+          sdkMcpServers: msg.mcp_servers || [],
+          sdkSkills: msg.skills || [],
+        }
+
+        // Got init — kill subprocess immediately (no API call made yet)
+        abortController.abort()
+        try { stream.close() } catch { /* already closing */ }
+        return result
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
 }
 
 // Execute a query with Claude SDK
@@ -437,6 +560,8 @@ export async function* executeQuery(
   },
   images?: ImageAttachment[],
   enabledMcps?: string[],
+  disabledSdkServers?: string[],
+  disabledSkills?: string[],
 ): AsyncGenerator<{ type: string; data?: unknown }> {
   // Get default model configuration from models.json
   const modelConfig = getDefaultModelConfig()
@@ -447,41 +572,7 @@ export async function* executeQuery(
     )
   }
 
-  // Build per-query env vars (avoid mutating process.env for concurrent query safety)
-  const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
-
-  // Per-query env: inherit process.env but override with model-specific config
-  const queryEnv: Record<string, string | undefined> = {
-    ...process.env,
-  }
-
-  // IMPORTANT: Do NOT set CLAUDE_CONFIG_DIR for OAuth models.
-  // The SDK's embedded CLI uses CLAUDE_CONFIG_DIR to compute the macOS Keychain
-  // service name (adds a sha256 hash suffix when the var is set). When the user
-  // logs in via the global `claude` CLI (which runs without CLAUDE_CONFIG_DIR),
-  // the credentials are stored WITHOUT the hash suffix. Setting CLAUDE_CONFIG_DIR
-  // explicitly causes a Keychain key mismatch → "Not logged in".
-  // For 3rd-party models with API keys, auth doesn't use Keychain, so it's safe
-  // to set CLAUDE_CONFIG_DIR to ensure skills/commands are loaded from ~/.claude.
-  if (apiKey) {
-    queryEnv.CLAUDE_CONFIG_DIR = CLAUDE_DIR
-    queryEnv.ANTHROPIC_API_KEY = apiKey
-  } else {
-    // OAuth mode: let SDK use default ~/.claude (no CLAUDE_CONFIG_DIR → no hash suffix)
-    delete queryEnv.CLAUDE_CONFIG_DIR
-    delete queryEnv.ANTHROPIC_API_KEY
-  }
-
-  if (modelConfig.baseUrl) {
-    queryEnv.ANTHROPIC_BASE_URL = modelConfig.baseUrl
-  } else {
-    // Clear stale base URL when switching back to default provider
-    delete queryEnv.ANTHROPIC_BASE_URL
-  }
-
-  // Prevent nested-session detection when server runs inside a Claude Code terminal
-  delete queryEnv.CLAUDECODE
-  delete queryEnv.CLAUDE_CODE_ENTRYPOINT
+  const queryEnv = buildQueryEnv(modelConfig)
 
   const abortController = new AbortController()
   client.activeQuery = { abort: abortController }
@@ -508,7 +599,7 @@ export async function* executeQuery(
 
   // Build options via shared builder (testable independently)
   const isYolo = client.permissionMode === 'bypassPermissions'
-  const options = buildQueryOptions(client, queryEnv, enabledMcps)
+  const options = buildQueryOptions(client, queryEnv, enabledMcps, disabledSdkServers, disabledSkills)
   options.abortController = abortController
 
   // Set up canUseTool for permission handling
@@ -628,6 +719,11 @@ export async function* executeQuery(
         client.sessionId = newSessionId
         client.lastActivity = Date.now()
 
+        // Cache SDK tools list for disallowedTools resolution in future queries
+        if ((message as any).tools) {
+          client.sdkTools = (message as any).tools
+        }
+
         // Update project state
         if (client.projectId) {
           const project = getOrCreateProjectState(client.projectId)
@@ -673,6 +769,8 @@ export async function* executeQuery(
               sessionId: newSessionId,
               model: (message as any).model,
               tools: (message as any).tools,
+              sdkMcpServers: (message as any).mcp_servers,
+              sdkSkills: (message as any).skills,
             },
           }
         }
