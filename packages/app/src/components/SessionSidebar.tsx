@@ -111,7 +111,7 @@ export function SessionSidebar({ open, onClose, projectId }: SessionSidebarProps
       <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
 
       {/* Sidebar */}
-      <div className="fixed top-0 left-0 h-full w-80 bg-background border-r z-50 flex flex-col shadow-xl">
+      <div className="fixed inset-0 sm:top-0 sm:left-0 sm:right-auto sm:bottom-0 sm:w-80 bg-background border-r z-50 flex flex-col shadow-xl">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="flex items-center gap-2">
             <History className="h-4 w-4 text-muted-foreground" />
