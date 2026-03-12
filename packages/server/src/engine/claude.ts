@@ -2,11 +2,12 @@
 //
 // Wraps @anthropic-ai/claude-agent-sdk to conform to the EngineAdapter interface.
 
-import { query, type SDKMessage, type SDKUserMessage, type Query } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKMessage, type SDKUserMessage, type Query, type AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
 import * as os from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
 import { buildMcpServers } from '../mcp/index.js'
+import { buildSkillServers } from '../skills/index.js'
 import { setCronQueryContext } from '../mcp/cron/index.js'
 import type {
   ChatMessage,
@@ -18,6 +19,30 @@ import type {
 
 // Re-export types for convenience
 export type { ChatMessage, Question, ModelInfo, PermissionMode }
+
+// ── Server defaults ──────────────────────────────────────────
+
+/** Maximum agentic turns before stopping (server default) */
+export const DEFAULT_MAX_TURNS = 200
+
+/** Thinking effort level (server default) */
+export const DEFAULT_EFFORT: 'low' | 'medium' | 'high' | 'max' = 'high'
+
+/** Read-only tools auto-approved in Safe mode (default permissionMode).
+ *  All other tools go through canUseTool callback for client approval. */
+export const SAFE_MODE_ALLOWED_TOOLS: readonly string[] = [
+  'Read',
+  'Glob',
+  'Grep',
+  'WebSearch',
+  'WebFetch',
+]
+
+/** Programmatic subagent definitions — always available via the Agent tool.
+ *  Project-level agents from .claude/agents/ are loaded via settingSources. */
+export const agentDefinitions: Record<string, AgentDefinition> = {
+  // Agents will be added here as features require them.
+}
 
 // Engine configuration from models.json
 export interface ModelConfig {
@@ -362,6 +387,67 @@ export function buildPrompt(
   return singleMessage()
 }
 
+/** Build the SDK query options object.
+ *  Extracted for testability — unit tests can inspect the returned options
+ *  without needing to mock the SDK query() call. */
+export function buildQueryOptions(
+  client: ClientState,
+  queryEnv: Record<string, string | undefined>,
+  enabledMcps?: string[],
+): Record<string, unknown> {
+  const isYolo = client.permissionMode === 'bypassPermissions'
+
+  const options: Record<string, unknown> = {
+    cwd: client.cwd,
+    env: queryEnv,
+    permissionMode: isYolo ? 'bypassPermissions' : 'default',
+    allowDangerouslySkipPermissions: isYolo,
+    includePartialMessages: true,
+
+    // Load CLAUDE.md, skills, commands, agents from:
+    //   "project" → .claude/skills/, .claude/commands/, CLAUDE.md (project-level)
+    //   "user"    → ~/.claude/skills/, ~/.claude/commands/ (user-level, installed skills)
+    settingSources: ['project', 'user'],
+
+    // Server-side defaults
+    maxTurns: DEFAULT_MAX_TURNS,
+    effort: DEFAULT_EFFORT,
+
+    systemPrompt: {
+      type: 'preset',
+      preset: 'claude_code',
+      append: `\n\nYour working directory is ${client.cwd}.` +
+        `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
+        `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
+        `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.`,
+    },
+  }
+
+  // In Safe mode, pre-approve only read-only tools.
+  // All other tools go through canUseTool callback for client approval.
+  // In YOLO mode, don't set allowedTools — bypassPermissions handles it.
+  if (!isYolo) {
+    options.allowedTools = [...SAFE_MODE_ALLOWED_TOOLS]
+  }
+
+  // MCP servers — filtered by user's enabledMcps selection + skill servers
+  const mcpServers = buildMcpServers(enabledMcps)
+  const skillServers = buildSkillServers()
+  options.mcpServers = { ...mcpServers, ...skillServers }
+
+  // Programmatic agent definitions (only set when non-empty)
+  if (Object.keys(agentDefinitions).length > 0) {
+    options.agents = agentDefinitions
+  }
+
+  // Session resume
+  if (client.sessionId) {
+    options.resume = client.sessionId
+  }
+
+  return options
+}
+
 // Execute a query with Claude SDK
 export async function* executeQuery(
   client: ClientState,
@@ -433,27 +519,10 @@ export async function* executeQuery(
     cacheCreationTokens: 0,
   }
 
-  // Build options (matching claude-remote-app)
+  // Build options via shared builder (testable independently)
   const isYolo = client.permissionMode === 'bypassPermissions'
-  const options: Record<string, unknown> = {
-    abortController,
-    cwd: client.cwd,
-    env: queryEnv,
-    permissionMode: isYolo ? 'bypassPermissions' : 'default',
-    allowDangerouslySkipPermissions: isYolo,
-    includePartialMessages: true,
-    systemPrompt: {
-      type: 'preset',
-      preset: 'claude_code',
-      append: `\n\nYour working directory is ${client.cwd}.` +
-        `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
-        `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
-        `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.`,
-    },
-  }
-
-  // Set up MCP servers — filtered by user's enabledMcps selection
-  options.mcpServers = buildMcpServers(enabledMcps)
+  const options = buildQueryOptions(client, queryEnv, enabledMcps)
+  options.abortController = abortController
 
   // Set up canUseTool for permission handling
   let reqCounter = 0
@@ -523,11 +592,6 @@ export async function* executeQuery(
   } else if (modelConfig.provider === 'custom') {
     // For custom providers without explicit modelId, use the name as fallback
     options.model = modelConfig.name
-  }
-
-  // Set session resume if available
-  if (client.sessionId) {
-    options.resume = client.sessionId
   }
 
   const isResuming = !!options.resume

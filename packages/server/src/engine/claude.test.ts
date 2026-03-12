@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   buildPrompt,
+  buildQueryOptions,
   createClientState,
   getClientState,
   removeClientState,
@@ -18,6 +19,10 @@ import {
   getSessionStatuses,
   getCachedModels,
   loadModelsFromConfig,
+  DEFAULT_MAX_TURNS,
+  DEFAULT_EFFORT,
+  SAFE_MODE_ALLOWED_TOOLS,
+  agentDefinitions,
 } from './claude.js'
 import type { ClientState, ProjectState } from './claude.js'
 
@@ -492,5 +497,179 @@ describe('buildPrompt', () => {
       }
       expect(messages[0].message.content[0].source.media_type).toBe(mediaType)
     }
+  })
+})
+
+// --- Server defaults ---
+describe('Server defaults', () => {
+  it('DEFAULT_MAX_TURNS should be 200', () => {
+    expect(DEFAULT_MAX_TURNS).toBe(200)
+  })
+
+  it('DEFAULT_EFFORT should be high', () => {
+    expect(DEFAULT_EFFORT).toBe('high')
+  })
+
+  it('SAFE_MODE_ALLOWED_TOOLS should contain exactly the read-only tools', () => {
+    expect(SAFE_MODE_ALLOWED_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
+  })
+
+  it('agentDefinitions should be an empty object initially', () => {
+    expect(agentDefinitions).toEqual({})
+  })
+})
+
+// --- buildQueryOptions ---
+describe('buildQueryOptions', () => {
+  const clientId = 'test-options'
+
+  beforeEach(() => {
+    removeAllClientStates(clientId)
+  })
+
+  it('should include settingSources with project and user', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.settingSources).toEqual(['project', 'user'])
+  })
+
+  it('should set maxTurns to DEFAULT_MAX_TURNS', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.maxTurns).toBe(200)
+  })
+
+  it('should set effort to DEFAULT_EFFORT', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.effort).toBe('high')
+  })
+
+  it('should not set maxBudgetUsd (unlimited)', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.maxBudgetUsd).toBeUndefined()
+  })
+
+  it('should set includePartialMessages to true', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.includePartialMessages).toBe(true)
+  })
+
+  it('should set cwd from client', () => {
+    const client = createClientState(clientId, 'proj', '/my/project')
+    const options = buildQueryOptions(client, {})
+    expect(options.cwd).toBe('/my/project')
+  })
+
+  it('should pass queryEnv as env', () => {
+    const client = createClientState(clientId, 'proj', '/tmp')
+    const env = { ANTHROPIC_API_KEY: 'test-key', CUSTOM_VAR: 'value' }
+    const options = buildQueryOptions(client, env)
+    expect(options.env).toBe(env)
+  })
+
+  it('should include systemPrompt with preset claude_code and cwd', () => {
+    const client = createClientState(clientId, 'proj', '/my/project')
+    const options = buildQueryOptions(client, {})
+    const prompt = options.systemPrompt as { type: string; preset: string; append: string }
+    expect(prompt.type).toBe('preset')
+    expect(prompt.preset).toBe('claude_code')
+    expect(prompt.append).toContain('/my/project')
+  })
+
+  it('should include mcpServers object', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.mcpServers).toBeDefined()
+    expect(typeof options.mcpServers).toBe('object')
+  })
+
+  it('should set resume when client has sessionId', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    client.sessionId = 'sess-12345'
+    const options = buildQueryOptions(client, {})
+    expect(options.resume).toBe('sess-12345')
+  })
+
+  it('should not set resume when client has no sessionId', () => {
+    const client = createClientState(clientId, 'proj', '/tmp/test')
+    const options = buildQueryOptions(client, {})
+    expect(options.resume).toBeUndefined()
+  })
+
+  it('should not include agents when agentDefinitions is empty', () => {
+    const client = createClientState(clientId, 'proj', '/tmp')
+    const options = buildQueryOptions(client, {})
+    expect(options.agents).toBeUndefined()
+  })
+
+  // --- Safe mode (default) ---
+  describe('Safe mode (permissionMode: default)', () => {
+    it('should set allowedTools to read-only tools', () => {
+      const client = createClientState(clientId, 'proj', '/tmp/test')
+      client.permissionMode = 'default'
+      const options = buildQueryOptions(client, {})
+      expect(options.allowedTools).toEqual(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
+    })
+
+    it('should not include write tools in allowedTools', () => {
+      const client = createClientState(clientId, 'proj', '/tmp/test')
+      client.permissionMode = 'default'
+      const options = buildQueryOptions(client, {})
+      const allowed = options.allowedTools as string[]
+      expect(allowed).not.toContain('Write')
+      expect(allowed).not.toContain('Edit')
+      expect(allowed).not.toContain('Bash')
+      expect(allowed).not.toContain('Agent')
+      expect(allowed).not.toContain('Skill')
+    })
+
+    it('should not include MCP tools in allowedTools (they go through canUseTool)', () => {
+      const client = createClientState(clientId, 'proj', '/tmp/test')
+      client.permissionMode = 'default'
+      const options = buildQueryOptions(client, {})
+      const allowed = options.allowedTools as string[]
+      const hasMcpTool = allowed.some(t => t.startsWith('mcp__'))
+      expect(hasMcpTool).toBe(false)
+    })
+
+    it('should set permissionMode to default', () => {
+      const client = createClientState(clientId, 'proj', '/tmp/test')
+      client.permissionMode = 'default'
+      const options = buildQueryOptions(client, {})
+      expect(options.permissionMode).toBe('default')
+      expect(options.allowDangerouslySkipPermissions).toBe(false)
+    })
+
+    it('should return a copy of SAFE_MODE_ALLOWED_TOOLS (not the original)', () => {
+      const client = createClientState(clientId, 'proj', '/tmp')
+      client.permissionMode = 'default'
+      const options = buildQueryOptions(client, {})
+      const allowed = options.allowedTools as string[]
+      // Mutate the returned array
+      allowed.push('Bash')
+      // Original should be unchanged
+      expect(SAFE_MODE_ALLOWED_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'])
+    })
+  })
+
+  // --- YOLO mode (bypassPermissions) ---
+  describe('YOLO mode (permissionMode: bypassPermissions)', () => {
+    it('should not set allowedTools', () => {
+      const client = createClientState(clientId, 'proj', '/tmp/test')
+      client.permissionMode = 'bypassPermissions'
+      const options = buildQueryOptions(client, {})
+      expect(options.allowedTools).toBeUndefined()
+    })
+
+    it('should set permissionMode to bypassPermissions', () => {
+      const client = createClientState(clientId, 'proj', '/tmp/test')
+      client.permissionMode = 'bypassPermissions'
+      const options = buildQueryOptions(client, {})
+      expect(options.permissionMode).toBe('bypassPermissions')
+      expect(options.allowDangerouslySkipPermissions).toBe(true)
+    })
   })
 })
