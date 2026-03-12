@@ -55,19 +55,15 @@ router.get('/models', async (_req, res) => {
 
 // POST /api/setup/models — add a model
 router.post('/models', async (req, res) => {
-  const { name, provider, apiKey, configDir, baseUrl } = req.body as Partial<ModelConfig>
+  const { name, provider, apiKey, baseUrl, modelId } = req.body as Partial<ModelConfig>
   if (!name || !provider) {
     res.status(400).json({ error: 'name and provider are required' })
-    return
-  }
-  if (!apiKey && !configDir) {
-    res.status(400).json({ error: 'Either apiKey or configDir is required' })
     return
   }
 
   const settings = await readModels()
   const id = crypto.randomUUID()
-  const model: ModelConfig = { id, name, provider, apiKey, configDir, baseUrl }
+  const model: ModelConfig = { id, name, provider, apiKey, baseUrl, modelId }
   settings.models.push(model)
 
   if (!settings.defaultModelId) {
@@ -87,12 +83,12 @@ router.put('/models/:id', async (req, res) => {
     return
   }
 
-  const { name, provider, apiKey, configDir, baseUrl } = req.body as Partial<ModelConfig>
+  const { name, provider, apiKey, baseUrl, modelId } = req.body as Partial<ModelConfig>
   if (name) settings.models[idx].name = name
   if (provider) settings.models[idx].provider = provider
   if (apiKey !== undefined) settings.models[idx].apiKey = apiKey
-  if (configDir !== undefined) settings.models[idx].configDir = configDir
   if (baseUrl !== undefined) settings.models[idx].baseUrl = baseUrl
+  if (modelId !== undefined) settings.models[idx].modelId = modelId
 
   await writeModels(settings)
   res.json({ ok: true })
@@ -123,15 +119,17 @@ router.put('/default-model', async (req, res) => {
   res.json({ ok: true })
 })
 
-// POST /api/setup/use-claude — register ~/.claude as a model account
+// POST /api/setup/use-claude — register CLI subscription as a model account
+// Auth is always via ~/.claude (OAuth) — no configDir needed in model config
 router.post('/use-claude', async (req, res) => {
   const { subscriptionType } = req.body as { subscriptionType?: string }
 
   const settings = await readModels()
 
-  // Avoid duplicate: check if a model with this configDir already exists
+  // Avoid duplicate: check if a subscription model already exists
+  // (legacy: check configDir; new: check provider=anthropic with no apiKey)
   const exists = settings.models.some(
-    (m: ModelConfig) => m.configDir === CLAUDE_DIR
+    (m: ModelConfig) => m.configDir === CLAUDE_DIR || (m.provider === 'anthropic' && !m.apiKey)
   )
   if (exists) {
     res.json({ ok: true, message: 'Already configured' })
@@ -147,7 +145,6 @@ router.post('/use-claude', async (req, res) => {
     id,
     name: label,
     provider: 'anthropic',
-    configDir: CLAUDE_DIR,
   }
   settings.models.push(model)
   if (!settings.defaultModelId) {
@@ -167,14 +164,9 @@ router.post('/models/:id/test', async (req, res) => {
     return
   }
 
-  // CLI-managed auth — nothing to test via HTTP
-  if (model.configDir) {
-    res.json({ ok: true, skipped: true })
-    return
-  }
-
+  // No API key = CLI OAuth-managed auth — nothing to test via HTTP
   if (!model.apiKey) {
-    res.json({ ok: false, error: 'No API key configured' })
+    res.json({ ok: true, skipped: true, message: 'Using CLI OAuth session' })
     return
   }
 

@@ -25,9 +25,8 @@ export interface EngineAdapter {
 }
 
 export interface EngineConfig {
-  apiKey: string
+  apiKey?: string
   baseUrl?: string
-  configDir?: string
   permissionMode: 'bypassPermissions' | 'default'
 }
 

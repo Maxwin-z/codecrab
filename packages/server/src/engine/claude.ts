@@ -52,6 +52,7 @@ export interface ModelConfig {
   modelId?: string   // Actual model identifier for the API (e.g., "claude-sonnet-4-20250514")
   apiKey?: string
   baseUrl?: string
+  /** @deprecated Ignored — CLAUDE_CONFIG_DIR is always ~/.claude */
   configDir?: string
 }
 
@@ -121,9 +122,12 @@ let cachedModels: ModelInfo[] | null = null
 let messageIdCounter = 0
 
 // Config paths
-const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
-const MODELS_FILE = path.join(CONFIG_DIR, 'models.json')
-const PROJECTS_FILE = path.join(CONFIG_DIR, 'projects.json')
+// ~/.claude  — SDK runtime: auth (OAuth), skills, commands, settings (shared with CLI)
+// ~/.codeclaws — CodeClaws-specific: models.json, projects.json, sessions, cron, etc.
+const CLAUDE_DIR = path.join(os.homedir(), '.claude')
+const CODECLAWS_DIR = path.join(os.homedir(), '.codeclaws')
+const MODELS_FILE = path.join(CODECLAWS_DIR, 'models.json')
+const PROJECTS_FILE = path.join(CODECLAWS_DIR, 'projects.json')
 
 // Look up project path from projects.json
 function getProjectPath(projectId: string): string | null {
@@ -298,46 +302,26 @@ export function getModelDisplayName(modelId: string): string {
   }
 }
 
-// Load API key from config directory
-function loadApiKeyFromConfigDir(configDir: string): string | undefined {
-  try {
-    const configPath = path.join(configDir, 'config.json')
-    if (fs.existsSync(configPath)) {
-      const configContent = fs.readFileSync(configPath, 'utf-8')
-      const config = JSON.parse(configContent)
-      if (config.apiKey) {
-        return config.apiKey
-      }
-    }
-  } catch (err) {
-    console.log(`[Config] Failed to load API key from ${configDir}:`, err)
-  }
-  return undefined
-}
-
 // Apply model configuration to environment
 function applyModelConfig(config: ModelConfig): void {
-  // Set config directory
-  const configDir = config.configDir || path.join(os.homedir(), '.codeclaws')
-  process.env.CLAUDE_CONFIG_DIR = configDir
+  // CLAUDE_CONFIG_DIR always points to ~/.claude — shared with CLI for auth, skills, commands
+  process.env.CLAUDE_CONFIG_DIR = CLAUDE_DIR
 
-  // Set API key
-  const apiKey = config.apiKey || loadApiKeyFromConfigDir(configDir) || process.env.ANTHROPIC_API_KEY
+  // Set API key (only for 3rd-party models)
+  const apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY
   if (apiKey) {
     process.env.ANTHROPIC_API_KEY = apiKey
   }
 
-  // Set base URL
+  // Set base URL for 3rd-party providers
   if (config.baseUrl) {
     process.env.ANTHROPIC_BASE_URL = config.baseUrl
-  } else if (process.env.ANTHROPIC_BASE_URL) {
-    // Keep existing
   }
 
   console.log(`[ClaudeAdapter] Applied config for model: ${config.id}`)
-  console.log(`  Config dir: ${configDir}`)
+  console.log(`  CLAUDE_CONFIG_DIR: ${CLAUDE_DIR}`)
   console.log(`  Base URL: ${process.env.ANTHROPIC_BASE_URL || 'default'}`)
-  console.log(`  API Key: ${apiKey ? apiKey.slice(0, 10) + '...' : 'not set'}`)
+  console.log(`  API Key: ${apiKey ? apiKey.slice(0, 10) + '...' : 'not set (using CLI OAuth)'}`)
 }
 
 // Build prompt for SDK: plain string or SDKUserMessage with images
@@ -474,26 +458,28 @@ export async function* executeQuery(
   }
 
   // Build per-query env vars (avoid mutating process.env for concurrent query safety)
-  const configDir = modelConfig.configDir || path.join(os.homedir(), '.codeclaws')
-
-  // Get API key from model config or fallback
-  const apiKey = modelConfig.apiKey || loadApiKeyFromConfigDir(configDir) || process.env.ANTHROPIC_API_KEY
-
-  // Check if API key is configured
-  if (!apiKey) {
-    throw new Error(
-      'ANTHROPIC_API_KEY not configured. Please set it in the model configuration or set the ANTHROPIC_API_KEY environment variable.'
-    )
-  }
+  // CLAUDE_CONFIG_DIR always ~/.claude — SDK uses CLI's auth, skills, commands
+  const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
 
   // Per-query env: inherit process.env but override with model-specific config
   const queryEnv: Record<string, string | undefined> = {
     ...process.env,
-    CLAUDE_CONFIG_DIR: configDir,
-    ANTHROPIC_API_KEY: apiKey,
+    CLAUDE_CONFIG_DIR: CLAUDE_DIR,
+  }
+
+  // For 3rd-party models: set API key + base URL to override the endpoint
+  // For subscription (OAuth) models: don't set ANTHROPIC_API_KEY — SDK picks up OAuth from ~/.claude
+  if (apiKey) {
+    queryEnv.ANTHROPIC_API_KEY = apiKey
+  } else {
+    // Clear any stale API key so the SDK uses OAuth from CLAUDE_CONFIG_DIR
+    delete queryEnv.ANTHROPIC_API_KEY
   }
   if (modelConfig.baseUrl) {
     queryEnv.ANTHROPIC_BASE_URL = modelConfig.baseUrl
+  } else {
+    // Clear stale base URL when switching back to default provider
+    delete queryEnv.ANTHROPIC_BASE_URL
   }
 
   const abortController = new AbortController()
@@ -604,7 +590,7 @@ export async function* executeQuery(
     console.log(`  Model ID: ${options.model}`)
     console.log(`  Permission mode: ${client.permissionMode}`)
     console.log(`  CLAUDE_CONFIG_DIR: ${queryEnv.CLAUDE_CONFIG_DIR}`)
-    console.log(`  ANTHROPIC_API_KEY: ${(queryEnv.ANTHROPIC_API_KEY || '').slice(0, 10)}...`)
+    console.log(`  Auth: ${queryEnv.ANTHROPIC_API_KEY ? 'API key (' + queryEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...)' : 'CLI OAuth (~/.claude)'}`)
     console.log(`  ANTHROPIC_BASE_URL: ${queryEnv.ANTHROPIC_BASE_URL || 'default'}`)
 
     // Set cron query context so cron_create can reliably access project/session info

@@ -25,7 +25,6 @@ interface MaskedModel {
   id: string
   name: string
   provider: string
-  configDir?: string
   apiKey?: string
   baseUrl?: string
 }
@@ -99,7 +98,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
   // Auto-test API-key models on load
   useEffect(() => {
     for (const m of models) {
-      if (m.apiKey && !m.configDir && !testedRef.current.has(m.id)) {
+      if (m.apiKey && !testedRef.current.has(m.id)) {
         testedRef.current.add(m.id)
         testModel(m.id)
       }
@@ -226,7 +225,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
   // --- Derived state ---
 
   const cliUsable = detect?.cliAvailable && detect?.auth?.loggedIn
-  const hasClaudeModel = models.some((m) => m.configDir)
+  const hasClaudeModel = models.some((m) => m.provider === 'anthropic' && !m.apiKey)
   const showDetectBanner = claudeFound && !imported && !hasClaudeModel && (probing || detect?.claudeCodeInstalled)
 
   return (
@@ -301,7 +300,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{m.name}</div>
                       <div className="text-xs text-muted-foreground font-mono">
-                        {m.configDir || m.apiKey || 'No credentials'}
+                        {m.apiKey ? m.apiKey : 'CLI OAuth'}
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded capitalize shrink-0">

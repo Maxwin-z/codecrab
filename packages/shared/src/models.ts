@@ -1,17 +1,22 @@
 // Model configuration types
 //
-// A "model" in CodeClaws is an account configuration — it points to either:
-//   1. A Claude Code config directory (~/.claude) where the CLI handles auth, or
-//   2. A manual API key for direct provider access.
+// Auth is always handled by the Claude Code CLI via ~/.claude (OAuth session).
+// CLAUDE_CONFIG_DIR always points to ~/.claude so skills, commands, settings,
+// and auth are shared seamlessly between Claude Code CLI and CodeClaws.
+//
+// For 3rd-party models, apiKey + baseUrl override the API endpoint while
+// still using ~/.claude for SDK runtime (skills, commands, etc.).
 
 export interface ModelConfig {
   id: string
   name: string
   provider: 'anthropic' | 'openai' | 'google' | 'custom'
-  /** Claude Code config directory (e.g. ~/.claude). When set, auth is handled by the CLI. */
+  /** @deprecated No longer used. CLAUDE_CONFIG_DIR is always ~/.claude. Kept for backward compat with existing models.json files. */
   configDir?: string
-  /** API key for manual/direct provider access. Optional when configDir is used. */
+  /** API key for 3rd-party provider access. When omitted, SDK uses CLI's OAuth session from ~/.claude. */
   apiKey?: string
+  /** Model identifier for the API (e.g. "claude-sonnet-4-20250514"). */
+  modelId?: string
   baseUrl?: string
 }
 
