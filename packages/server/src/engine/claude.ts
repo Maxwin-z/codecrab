@@ -303,24 +303,14 @@ export function getModelDisplayName(modelId: string): string {
 }
 
 // Apply model configuration to environment
+// NOTE: Per-query env is built fresh in executeQuery() to avoid process.env pollution.
+// This function only sets state needed at startup (logging).
 function applyModelConfig(config: ModelConfig): void {
-  // CLAUDE_CONFIG_DIR always points to ~/.claude — shared with CLI for auth, skills, commands
-  process.env.CLAUDE_CONFIG_DIR = CLAUDE_DIR
-
-  // Set API key (only for 3rd-party models)
-  const apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY
-  if (apiKey) {
-    process.env.ANTHROPIC_API_KEY = apiKey
-  }
-
-  // Set base URL for 3rd-party providers
-  if (config.baseUrl) {
-    process.env.ANTHROPIC_BASE_URL = config.baseUrl
-  }
+  const apiKey = config.apiKey
 
   console.log(`[ClaudeAdapter] Applied config for model: ${config.id}`)
-  console.log(`  CLAUDE_CONFIG_DIR: ${CLAUDE_DIR}`)
-  console.log(`  Base URL: ${process.env.ANTHROPIC_BASE_URL || 'default'}`)
+  console.log(`  CLAUDE_DIR: ${CLAUDE_DIR}`)
+  console.log(`  Base URL: ${config.baseUrl || 'default'}`)
   console.log(`  API Key: ${apiKey ? apiKey.slice(0, 10) + '...' : 'not set (using CLI OAuth)'}`)
 }
 
@@ -458,29 +448,40 @@ export async function* executeQuery(
   }
 
   // Build per-query env vars (avoid mutating process.env for concurrent query safety)
-  // CLAUDE_CONFIG_DIR always ~/.claude — SDK uses CLI's auth, skills, commands
   const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
 
   // Per-query env: inherit process.env but override with model-specific config
   const queryEnv: Record<string, string | undefined> = {
     ...process.env,
-    CLAUDE_CONFIG_DIR: CLAUDE_DIR,
   }
 
-  // For 3rd-party models: set API key + base URL to override the endpoint
-  // For subscription (OAuth) models: don't set ANTHROPIC_API_KEY — SDK picks up OAuth from ~/.claude
+  // IMPORTANT: Do NOT set CLAUDE_CONFIG_DIR for OAuth models.
+  // The SDK's embedded CLI uses CLAUDE_CONFIG_DIR to compute the macOS Keychain
+  // service name (adds a sha256 hash suffix when the var is set). When the user
+  // logs in via the global `claude` CLI (which runs without CLAUDE_CONFIG_DIR),
+  // the credentials are stored WITHOUT the hash suffix. Setting CLAUDE_CONFIG_DIR
+  // explicitly causes a Keychain key mismatch → "Not logged in".
+  // For 3rd-party models with API keys, auth doesn't use Keychain, so it's safe
+  // to set CLAUDE_CONFIG_DIR to ensure skills/commands are loaded from ~/.claude.
   if (apiKey) {
+    queryEnv.CLAUDE_CONFIG_DIR = CLAUDE_DIR
     queryEnv.ANTHROPIC_API_KEY = apiKey
   } else {
-    // Clear any stale API key so the SDK uses OAuth from CLAUDE_CONFIG_DIR
+    // OAuth mode: let SDK use default ~/.claude (no CLAUDE_CONFIG_DIR → no hash suffix)
+    delete queryEnv.CLAUDE_CONFIG_DIR
     delete queryEnv.ANTHROPIC_API_KEY
   }
+
   if (modelConfig.baseUrl) {
     queryEnv.ANTHROPIC_BASE_URL = modelConfig.baseUrl
   } else {
     // Clear stale base URL when switching back to default provider
     delete queryEnv.ANTHROPIC_BASE_URL
   }
+
+  // Prevent nested-session detection when server runs inside a Claude Code terminal
+  delete queryEnv.CLAUDECODE
+  delete queryEnv.CLAUDE_CODE_ENTRYPOINT
 
   const abortController = new AbortController()
   client.activeQuery = { abort: abortController }
@@ -589,8 +590,8 @@ export async function* executeQuery(
     console.log(`  Using model: ${modelConfig.name} (${modelConfig.provider})`)
     console.log(`  Model ID: ${options.model}`)
     console.log(`  Permission mode: ${client.permissionMode}`)
-    console.log(`  CLAUDE_CONFIG_DIR: ${queryEnv.CLAUDE_CONFIG_DIR}`)
-    console.log(`  Auth: ${queryEnv.ANTHROPIC_API_KEY ? 'API key (' + queryEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...)' : 'CLI OAuth (~/.claude)'}`)
+    console.log(`  CLAUDE_CONFIG_DIR: ${queryEnv.CLAUDE_CONFIG_DIR || '(default ~/.claude)'}`)
+    console.log(`  Auth: ${queryEnv.ANTHROPIC_API_KEY ? 'API key (' + queryEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...)' : 'CLI OAuth (default keychain)'}`)
     console.log(`  ANTHROPIC_BASE_URL: ${queryEnv.ANTHROPIC_BASE_URL || 'default'}`)
 
     // Set cron query context so cron_create can reliably access project/session info
