@@ -13,7 +13,6 @@ struct ProjectChatState {
     var streamingThinking: String = ""
     var pendingQuestion: PendingQuestion? = nil
     var pendingPermission: PendingPermission? = nil
-    var isRunning: Bool = false
     var isAborting: Bool = false
     var sessionId: String = ""
     var cwd: String = ""
@@ -33,10 +32,19 @@ class WebSocketService: ObservableObject {
     @Published var availableModels: [ModelInfo] = []
     @Published var projectStatuses: [ProjectStatus] = []
 
+    /// Single source of truth for which projects are currently processing.
+    /// Driven by query_start (insert) and query_end (remove).
+    @Published var runningProjectIds = Set<String>()
+
+    /// Convenience for the active project — derived from runningProjectIds.
+    var isRunning: Bool {
+        guard let pid = activeProjectId else { return false }
+        return runningProjectIds.contains(pid)
+    }
+
     @Published var messages: [ChatMessage] = []
     @Published var streamingText: String = ""
     @Published var streamingThinking: String = ""
-    @Published var isRunning: Bool = false
     @Published var isAborting: Bool = false
     @Published var pendingQuestion: PendingQuestion? = nil
     @Published var pendingPermission: PendingPermission? = nil
@@ -56,6 +64,9 @@ class WebSocketService: ObservableObject {
     private var projectStates: [String: ProjectChatState] = [:]
     private var webSocketTask: URLSessionWebSocketTask?
     private var clientId: String
+    /// Projects that recently received query_end — blocks stale "processing"
+    /// from project_statuses broadcasts until a clean "idle" confirms it.
+    private var recentlyEndedProjectIds = Set<String>()
     
     init() {
         if let savedId = UserDefaults.standard.string(forKey: "codeclaws_client_id") {
@@ -153,24 +164,34 @@ class WebSocketService: ObservableObject {
             if let statusesData = try? JSONSerialization.data(withJSONObject: json["statuses"] ?? []),
                let statuses = try? JSONDecoder().decode([ProjectStatus].self, from: statusesData) {
                 self.projectStatuses = statuses
-                // Only CLEAR isRunning from statuses — never set it to true.
-                // query_start is the authoritative signal for setting isRunning = true.
-                // (project_statuses can arrive with stale "processing" due to queue timing)
-                if let pid = activeProjectId,
-                   let currentStatus = statuses.first(where: { $0.projectId == pid }),
-                   currentStatus.status != "processing" {
-                    self.isRunning = false
+                // Sync runningProjectIds from broadcast, respecting query_end precedence.
+                for status in statuses {
+                    if status.status == "processing" {
+                        // Ignore stale "processing" for projects that just finished.
+                        if !recentlyEndedProjectIds.contains(status.projectId) {
+                            runningProjectIds.insert(status.projectId)
+                        }
+                    } else {
+                        runningProjectIds.remove(status.projectId)
+                        recentlyEndedProjectIds.remove(status.projectId)
+                    }
                 }
             }
         case "query_start":
+            if let pid = projectId {
+                runningProjectIds.insert(pid)
+                recentlyEndedProjectIds.remove(pid)
+            }
             if isCurrentProject {
-                self.isRunning = true
                 self.latestSummary = nil
                 self.suggestions = []
             }
         case "query_end":
+            if let pid = projectId {
+                runningProjectIds.remove(pid)
+                recentlyEndedProjectIds.insert(pid)
+            }
             if isCurrentProject {
-                self.isRunning = false
                 self.isAborting = false
                 // Save message if there's text or thinking content
                 if !self.streamingText.isEmpty || !self.streamingThinking.isEmpty {
@@ -315,7 +336,7 @@ class WebSocketService: ObservableObject {
             if isCurrentProject, let errMsg = json["error"] as? String {
                 let msg = ChatMessage(id: UUID().uuidString, role: "system", content: "Error: \(errMsg)", timestamp: Date().timeIntervalSince1970 * 1000)
                 self.messages.append(msg)
-                self.isRunning = false
+                if let pid = projectId { runningProjectIds.remove(pid) }
                 self.isAborting = false
             }
         case "cleared":
@@ -325,12 +346,12 @@ class WebSocketService: ObservableObject {
                 self.streamingThinking = ""
                 self.pendingQuestion = nil
                 self.pendingPermission = nil
-                self.isRunning = false
+                if let pid = projectId { runningProjectIds.remove(pid) }
                 self.isAborting = false
             }
         case "aborted":
             if isCurrentProject {
-                self.isRunning = false
+                if let pid = projectId { runningProjectIds.remove(pid) }
                 self.isAborting = false
             }
         case "result":
@@ -456,7 +477,7 @@ class WebSocketService: ObservableObject {
         self.messages.removeAll()
         self.latestSummary = nil
         self.suggestions = []
-        self.isRunning = false
+        runningProjectIds.remove(projectId)
         sendWebSocketMessage([
             "type": "resume_session",
             "sessionId": sessionId,
@@ -555,7 +576,6 @@ class WebSocketService: ObservableObject {
             state.streamingThinking = streamingThinking
             state.pendingQuestion = pendingQuestion
             state.pendingPermission = pendingPermission
-            state.isRunning = isRunning
             state.isAborting = isAborting
             state.sessionId = sessionId
             state.cwd = self.cwd
@@ -605,11 +625,10 @@ class WebSocketService: ObservableObject {
         latestSummary = nil
         suggestions = []
 
-        // Always reset isRunning on project switch.
-        // If a query IS active, the server's switch_project response
-        // will send query_start which sets isRunning = true.
-        isRunning = false
-        
+        // runningProjectIds is global — no need to reset per project.
+        // If a query IS active, runningProjectIds already has this project.
+        // If not, the server's switch_project may send query_start to add it.
+
         sendWebSocketMessage([
             "type": "switch_project",
             "projectId": projectId,

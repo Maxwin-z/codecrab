@@ -126,12 +126,12 @@ struct ProjectCard: View {
 
     @ViewBuilder
     var indicator: some View {
-        if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }) {
-            if status.status == "processing" {
-                Circle().fill(Color.orange).frame(width: 8, height: 8)
-            } else if let lastMod = status.lastModified, Date().timeIntervalSince1970 * 1000 - lastMod < 600_000 {
-                Circle().fill(Color.green).frame(width: 8, height: 8)
-            }
+        if wsService.runningProjectIds.contains(project.id) {
+            Circle().fill(Color.orange).frame(width: 8, height: 8)
+        } else if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }),
+                  let lastMod = status.lastModified,
+                  Date().timeIntervalSince1970 * 1000 - lastMod < 600_000 {
+            Circle().fill(Color.green).frame(width: 8, height: 8)
         }
     }
 
