@@ -232,6 +232,7 @@ export function useWebSocket(): UseWebSocketReturn {
       switch (msg.type) {
         case 'query_start':
           pState.isRunning = true
+          pState.latestSummary = null
           if (isActiveProject) emitQueryStateChange(true)
           break
 

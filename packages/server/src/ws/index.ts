@@ -523,7 +523,7 @@ const MAX_TOOL_RESULT_PREVIEW_LENGTH = 100
 // Convert ChatMessage to summary for initial history load
 // Assistant and user messages are sent in full; only tool call results are truncated
 function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').ChatMessageSummary {
-  const content = message.content || ''
+  const content = (message.content || '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
   const hasToolCalls = !!(message.toolCalls && message.toolCalls.length > 0)
   const hasImages = !!(message.images && message.images.length > 0)
 
@@ -1035,12 +1035,15 @@ async function executeUserQuery(
       const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
       if (summaryMatch) {
         session.summary = summaryMatch[1].trim()
+        console.log(`[Summary] Extracted: ${session.summary}`)
         broadcastToProject(projectId, {
           type: 'query_summary',
           summary: session.summary,
           projectId,
           sessionId: session.sessionId,
         })
+      } else {
+        console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
       }
 
       persistSession(session)

@@ -316,14 +316,18 @@ function applyModelConfig(config: ModelConfig): void {
   console.log(`  API Key: ${apiKey ? apiKey.slice(0, 10) + '...' : 'not set (using CLI OAuth)'}`)
 }
 
+const SUMMARY_INSTRUCTION = `\n[IMPORTANT: After completing your response, you MUST append a brief summary on its own line in exactly this format: [SUMMARY: ...]. This summary will be used as a push notification sent to the user, so write it as a natural, conversational reply to the user's request — as if you're briefly telling them what you did. Use first person, keep it casual and concise (one sentence). For example, if the user asked "check the directory structure", write something like "已查看目录结构，共有14个目录和26个文件". Match the language the user used. Never omit this line.]`
+
 // Build prompt for SDK: plain string or SDKUserMessage with images
 export function buildPrompt(
   prompt: string,
   images?: ImageAttachment[],
   sessionId?: string,
 ): string | AsyncIterable<SDKUserMessage> {
+  const enhancedPrompt = prompt + SUMMARY_INSTRUCTION
+
   if (!images || images.length === 0) {
-    return prompt
+    return enhancedPrompt
   }
 
   // Build content blocks: images first, then text
@@ -342,7 +346,7 @@ export function buildPrompt(
 
   contentBlocks.push({
     type: 'text',
-    text: prompt,
+    text: enhancedPrompt,
   })
 
   const userMessage: SDKUserMessage = {
