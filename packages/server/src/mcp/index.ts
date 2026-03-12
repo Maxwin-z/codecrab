@@ -6,6 +6,7 @@
 
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { chromeTools } from './chrome/index.js'
+import { cronTools } from './cron/index.js'
 import type { McpInfo } from '@codeclaws/shared'
 
 export interface McpDefinition {
@@ -25,7 +26,14 @@ export const mcpRegistry: McpDefinition[] = [
     icon: '🌐',
     tools: chromeTools,
   },
-  // Future: cron, push, etc.
+  {
+    id: 'cron',
+    name: 'Cron',
+    description: 'Scheduled tasks — create reminders, recurring jobs, and timed actions via natural language',
+    icon: '⏰',
+    tools: cronTools,
+  },
+  // Future: push, etc.
 ]
 
 /** Get McpInfo list for client consumption */

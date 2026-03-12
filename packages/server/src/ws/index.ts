@@ -461,6 +461,9 @@ export function setupWebSocket(server: Server) {
     const client: Client = { ws, connectionId, clientId, subscribedProjects: new Map() }
     clients.set(connectionId, client)
 
+    // Attach client info to WebSocket for cron executor lookup
+    ;(ws as any).clientInfo = { clientId }
+
     console.log(`[ws] client connected: ${clientId} (${connectionId})`)
 
     // Send global state on connect
@@ -526,6 +529,8 @@ export function setupWebSocket(server: Server) {
   })
 
   console.log('[ws] WebSocket server ready')
+
+  return wss
 }
 
 // Helper to get or create session lazily (on first message for a project)
@@ -616,6 +621,9 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     if (!client.subscribedProjects.has(projectId)) {
       client.subscribedProjects.set(projectId, {})
     }
+
+    // Update clientInfo for cron executor lookup
+    ;(ws as any).clientInfo = { clientId: client.clientId, projectId }
 
     // Get or create client state for this project
     const clientState = getOrCreateClientStateForProject(client.clientId, projectId)
