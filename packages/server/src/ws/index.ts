@@ -32,9 +32,225 @@ import {
   getModelDisplayName,
   getDefaultModelConfig,
 } from '../engine/claude.js'
+import { QueryQueue } from '../engine/query-queue.js'
+import type { QueuedQuery, QueryResult } from '../engine/query-queue.js'
 
 // Export for API use
 export { getSessionStatuses as getSessions }
+
+// Per-project query queue — replaces the old rejection-based concurrency control
+const queryQueue = new QueryQueue((event) => {
+  broadcastToProject(event.projectId, {
+    type: 'query_queue_status',
+    queryId: event.queryId,
+    status: event.status,
+    position: event.position,
+    queueLength: event.queueLength,
+    projectId: event.projectId,
+    sessionId: event.sessionId,
+  })
+})
+export { queryQueue }
+
+// Execute a prompt in a specific session (used by cron jobs)
+// Now enqueues through the query queue instead of executing directly
+export async function executePromptInSession(
+  sessionId: string,
+  prompt: string,
+  cronJobName?: string,
+  metadata?: { cronJobId?: string; cronRunId?: string },
+): Promise<{ success: boolean; output?: string; error?: string }> {
+  const session = sessions.get(sessionId)
+  if (!session) {
+    return { success: false, error: `Session not found: ${sessionId}` }
+  }
+
+  const projectId = session.projectId
+  if (!projectId) {
+    return { success: false, error: 'Session has no project' }
+  }
+
+  const { queryId, promise } = queryQueue.enqueue({
+    type: 'cron',
+    projectId,
+    sessionId: session.sessionId,
+    prompt,
+    priority: 1, // Lower priority than user queries
+    metadata: {
+      cronJobName: cronJobName,
+      cronJobId: metadata?.cronJobId,
+      cronRunId: metadata?.cronRunId,
+    },
+    executor: async (queuedQuery) => {
+      return executeCronQuery(session, projectId, prompt, cronJobName, queuedQuery)
+    },
+  })
+
+  console.log(`[cron] Enqueued cron query ${queryId} for session ${sessionId}`)
+  return await promise
+}
+
+// Internal: execute a cron query (called by the queue when it's this query's turn)
+async function executeCronQuery(
+  session: Session,
+  projectId: string,
+  prompt: string,
+  cronJobName: string | undefined,
+  queuedQuery: QueuedQuery,
+): Promise<QueryResult> {
+  const projState = getOrCreateProjectState(projectId)
+
+  // Create a virtual client state for this cron execution
+  const cronClientId = `cron-${Date.now()}`
+  const clientState = createClientState(cronClientId, projectId, session.cwd || process.cwd())
+  clientState.sessionId = session.sdkSessionId
+  clientState.permissionMode = 'bypassPermissions' // Cron jobs run unattended
+
+  // Add a system message indicating this is a cron-triggered execution
+  const cronLabel = cronJobName ? `[Scheduled Task: ${cronJobName}]` : '[Scheduled Task]'
+  const userMsg: ChatMessage = {
+    id: genId(),
+    role: 'user',
+    content: `${cronLabel} ${prompt}`,
+    timestamp: Date.now(),
+  }
+  session.messages.push(userMsg)
+  session.lastModified = Date.now()
+  persistSession(session)
+
+  projState.messages.push(userMsg)
+
+  broadcastToProject(projectId, {
+    type: 'user_message',
+    message: userMsg,
+    projectId,
+    sessionId: session.sessionId,
+  })
+
+  session.status = 'processing'
+  broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
+  broadcastProjectStatuses()
+
+  // Link queue abort to engine abort
+  queuedQuery.abortController.signal.addEventListener('abort', () => {
+    abortQuery(clientState)
+  }, { once: true })
+
+  try {
+    const stream = executeQuery(clientState, prompt, {
+      onTextDelta: (text) => {
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'text',
+          text,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onThinkingDelta: (thinking) => {
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'thinking',
+          text: thinking,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onToolUse: (toolName, toolId, input) => {
+        broadcastToProject(projectId, {
+          type: 'tool_use',
+          toolName,
+          toolId,
+          input,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onToolResult: (toolId, content, isError) => {
+        broadcastToProject(projectId, {
+          type: 'tool_result',
+          toolId,
+          content,
+          isError,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onSessionInit: (sdkSessionId) => {
+        session.sdkSessionId = sdkSessionId
+        persistSession(session)
+        const ps = getOrCreateProjectState(projectId)
+        ps.sessionId = sdkSessionId
+      },
+      onPermissionRequest: () => {
+        // Cron jobs bypass permissions
+      },
+      onUsage: () => {},
+    })
+
+    let finalText = ''
+    for await (const event of stream) {
+      if (event.type === 'text_delta') {
+        finalText += (event.data as any).text
+      } else if (event.type === 'result') {
+        const resultData = event.data as any
+        broadcastToProject(projectId, {
+          type: 'result',
+          subtype: resultData.subtype,
+          costUsd: resultData.costUsd,
+          durationMs: resultData.durationMs,
+          result: resultData.result,
+          isError: resultData.isError,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      }
+    }
+
+    const assistantMsg = storeAssistantMessage(clientState)
+    if (assistantMsg) {
+      session.messages.push(assistantMsg)
+      session.lastModified = Date.now()
+      persistSession(session)
+
+      broadcastToProject(projectId, {
+        type: 'assistant_text',
+        text: assistantMsg.content,
+        projectId,
+        sessionId: session.sessionId,
+      })
+
+      finalText = assistantMsg.content
+    }
+
+    return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
+  } catch (err: any) {
+    console.error('[cron] Query error:', err)
+    broadcastToProject(projectId, {
+      type: 'error',
+      message: err.message || 'Cron query failed',
+      projectId,
+      sessionId: session.sessionId,
+    })
+    session.status = 'error'
+    return { success: false, error: err.message || 'Query failed', queryId: queuedQuery.id }
+  } finally {
+    session.status = 'idle'
+    projState.pendingQuestion = null
+    projState.pendingPermissionRequest = null
+    session.pendingQuestion = null
+    session.pendingPermissionRequest = null
+    broadcastToProject(projectId, {
+      type: 'query_end',
+      projectId,
+      sessionId: session.sessionId,
+      queryId: queuedQuery.id,
+    })
+    broadcastProjectStatuses()
+
+    removeAllClientStates(cronClientId)
+  }
+}
 
 // Get full session messages for HTTP API
 export function getSessionMessages(sessionId: string): ChatMessage[] | null {
@@ -354,7 +570,7 @@ function getProjectStatuses(): ProjectStatus[] {
   const statuses: ProjectStatus[] = []
   for (const projectId of projectIds) {
     const projectState = getProjectState(projectId)
-    const hasActiveQuery = !!projectState?.activeQuery
+    const hasActiveQuery = !!projectState?.activeQuery || queryQueue.isProjectBusy(projectId)
 
     // Find the active/processing session and latest session for this project
     let activeSessionId: string | undefined
@@ -401,7 +617,7 @@ function broadcastProjectStatuses() {
 // Auto-resume logic for a project: find the best session to resume
 function autoResumeSessionForProject(client: Client, clientId: string, projectId: string): Session | undefined {
   const projectState = getProjectState(projectId)
-  const hasActiveQuery = !!projectState?.activeQuery
+  const hasActiveQuery = !!projectState?.activeQuery || queryQueue.isProjectBusy(projectId)
   const SESSION_ACTIVE_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
   let session: Session | undefined
 
@@ -612,6 +828,198 @@ function getOrCreateClientStateForProject(
   return clientState
 }
 
+// Internal: execute a user query (called by the queue when it's this query's turn)
+async function executeUserQuery(
+  client: Client,
+  session: Session,
+  clientState: import('../engine/claude.js').ClientState,
+  projectId: string,
+  prompt: string,
+  images: import('@codeclaws/shared').ImageAttachment[] | undefined,
+  enabledMcps: string[] | undefined,
+  queuedQuery: QueuedQuery,
+): Promise<QueryResult> {
+  // Link queue abort to engine abort
+  queuedQuery.abortController.signal.addEventListener('abort', () => {
+    abortQuery(clientState)
+  }, { once: true })
+
+  session.status = 'processing'
+  broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
+  broadcastProjectStatuses()
+
+  try {
+    const stream = executeQuery(clientState, prompt, {
+      onTextDelta: (text) => {
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'text',
+          text,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onThinkingDelta: (thinking) => {
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'thinking',
+          text: thinking,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onToolUse: (toolName, toolId, input) => {
+        broadcastToProject(projectId, {
+          type: 'tool_use',
+          toolName,
+          toolId,
+          input,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onToolResult: (toolId, content, isError) => {
+        broadcastToProject(projectId, {
+          type: 'tool_result',
+          toolId,
+          content,
+          isError,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onSessionInit: (sdkSessionId) => {
+        session.sdkSessionId = sdkSessionId
+        persistSession(session)
+        const ps = getOrCreateProjectState(projectId)
+        ps.sessionId = sdkSessionId
+        broadcastToProject(projectId, {
+          type: 'session_resumed',
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onPermissionRequest: (requestId, toolName, input, reason) => {
+        const projStateForP = getOrCreateProjectState(projectId)
+        const permData = { requestId, toolName, input, reason }
+        projStateForP.pendingPermissionRequest = permData
+        session.pendingPermissionRequest = permData
+        persistSession(session)
+        broadcastToProject(projectId, {
+          type: 'permission_request',
+          requestId,
+          toolName,
+          input,
+          reason,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      },
+      onUsage: (_usage) => {},
+    }, images, enabledMcps)
+
+    let finalText = ''
+    for await (const event of stream) {
+      switch (event.type) {
+        case 'text_delta':
+          finalText += (event.data as any).text
+          break
+        case 'thinking_delta':
+          break
+        case 'tool_use':
+          break
+        case 'tool_result':
+          break
+        case 'result': {
+          const resultData = event.data as any
+          broadcastToProject(projectId, {
+            type: 'result',
+            subtype: resultData.subtype,
+            costUsd: resultData.costUsd,
+            durationMs: resultData.durationMs,
+            result: resultData.result,
+            isError: resultData.isError,
+            projectId,
+            sessionId: session.sessionId,
+          })
+          break
+        }
+        case 'ask_user_question': {
+          const questionData = {
+            toolId: (event.data as any).toolId,
+            questions: (event.data as any).questions,
+          }
+          const projStateForQ = getOrCreateProjectState(projectId)
+          projStateForQ.pendingQuestion = questionData
+          session.pendingQuestion = questionData
+          persistSession(session)
+          broadcastToProject(projectId, {
+            type: 'ask_user_question',
+            ...questionData,
+            projectId,
+            sessionId: session.sessionId,
+          })
+          break
+        }
+      }
+    }
+
+    const assistantMsg = storeAssistantMessage(clientState)
+    if (assistantMsg) {
+      session.messages.push(assistantMsg)
+      session.lastModified = Date.now()
+
+      const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
+      if (summaryMatch) {
+        session.summary = summaryMatch[1].trim()
+        broadcastToProject(projectId, {
+          type: 'query_summary',
+          summary: session.summary,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      }
+
+      persistSession(session)
+
+      broadcastToProject(projectId, {
+        type: 'assistant_text',
+        text: assistantMsg.content,
+        projectId,
+        sessionId: session.sessionId,
+      })
+
+      finalText = assistantMsg.content
+    }
+
+    return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
+  } catch (err: any) {
+    console.error('[ws] Query error:', err)
+    broadcastToProject(projectId, {
+      type: 'error',
+      message: err.message || 'Query failed',
+      projectId,
+      sessionId: session.sessionId,
+    })
+    session.status = 'error'
+    return { success: false, error: err.message || 'Query failed', queryId: queuedQuery.id }
+  } finally {
+    session.status = 'idle'
+    const projStateForEnd = getOrCreateProjectState(projectId)
+    projStateForEnd.pendingQuestion = null
+    projStateForEnd.pendingPermissionRequest = null
+    session.pendingQuestion = null
+    session.pendingPermissionRequest = null
+    broadcastToProject(projectId, {
+      type: 'query_end',
+      projectId,
+      sessionId: session.sessionId,
+      queryId: queuedQuery.id,
+    })
+    broadcastProjectStatuses()
+  }
+}
+
 async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMessage) {
   // Handle switch_project separately — it's a subscription management message
   if (msg.type === 'switch_project') {
@@ -665,7 +1073,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
     // If a query is running on this project, tell the client
     const projectState = getProjectState(projectId)
-    if (projectState?.activeQuery) {
+    if (projectState?.activeQuery || queryQueue.isProjectBusy(projectId)) {
       sendToClient(client, {
         type: 'query_start',
         projectId,
@@ -731,22 +1139,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         session = getOrCreateSessionForProject(client, client.clientId, projectId, clientState)
       }
 
-      // Check if already running
-      if (clientState.activeQuery) {
-        console.log(`[ws] Rejected: client already has active query for project ${projectId}`)
-        safeSend(ws, { type: 'error', message: 'A query is already running', projectId })
-        return
-      }
-
-      // Project-level lock
+      // Add user message to session immediately (visible even while queued)
       const projState = getOrCreateProjectState(projectId)
-      if (projState.activeQuery) {
-        console.log(`[ws] Rejected: project ${projectId} already has active query from another session`)
-        safeSend(ws, { type: 'error', message: 'Another session is already running in this project. Please wait for it to finish or abort it first.', projectId })
-        return
-      }
-
-      // Add user message to session
       const userMsg: ChatMessage = {
         id: genId(),
         role: 'user',
@@ -763,7 +1157,6 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
       persistSession(session)
 
-      // Add to project state
       projState.messages.push(userMsg)
 
       // Broadcast to other clients subscribed to this project
@@ -773,186 +1166,40 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         client.connectionId
       )
 
-      // Start processing
-      session.status = 'processing'
-      sendToClient(client, { type: 'query_start', projectId, sessionId: session.sessionId })
-      broadcastProjectStatuses()
+      // Capture variables for the closure
+      const capturedSession = session
+      const capturedClientState = clientState
+      const capturedMsg = msg
 
-      try {
-        const stream = executeQuery(clientState, msg.prompt, {
-          onTextDelta: (text) => {
-            broadcastToProject(projectId, {
-              type: 'stream_delta',
-              deltaType: 'text',
-              text,
-              projectId,
-              sessionId: session!.sessionId,
-            })
-          },
-          onThinkingDelta: (thinking) => {
-            broadcastToProject(projectId, {
-              type: 'stream_delta',
-              deltaType: 'thinking',
-              text: thinking,
-              projectId,
-              sessionId: session!.sessionId,
-            })
-          },
-          onToolUse: (toolName, toolId, input) => {
-            broadcastToProject(projectId, {
-              type: 'tool_use',
-              toolName,
-              toolId,
-              input,
-              projectId,
-              sessionId: session!.sessionId,
-            })
-          },
-          onToolResult: (toolId, content, isError) => {
-            broadcastToProject(projectId, {
-              type: 'tool_result',
-              toolId,
-              content,
-              isError,
-              projectId,
-              sessionId: session!.sessionId,
-            })
-          },
-          onSessionInit: (sdkSessionId) => {
-            if (session) {
-              session.sdkSessionId = sdkSessionId
-              persistSession(session)
-              const ps = getOrCreateProjectState(projectId)
-              ps.sessionId = sdkSessionId
-              broadcastToProject(projectId, {
-                type: 'session_resumed',
-                projectId,
-                sessionId: session.sessionId,
-              })
-            }
-          },
-          onPermissionRequest: (requestId, toolName, input, reason) => {
-            // Store in project state and session for reconnecting clients
-            const projStateForP = getOrCreateProjectState(projectId)
-            const permData = { requestId, toolName, input, reason }
-            projStateForP.pendingPermissionRequest = permData
-            session!.pendingPermissionRequest = permData
-            persistSession(session!)
-            broadcastToProject(projectId, {
-              type: 'permission_request',
-              requestId,
-              toolName,
-              input,
-              reason,
-              projectId,
-              sessionId: session!.sessionId,
-            })
-          },
-          onUsage: (_usage) => {
-            // Usage is tracked internally
-          },
-        }, msg.images, msg.enabledMcps)
-
-        // Process stream events
-        let finalText = ''
-        for await (const event of stream) {
-          switch (event.type) {
-            case 'text_delta':
-              finalText += (event.data as any).text
-              break
-            case 'thinking_delta':
-              // Handled by onThinkingDelta callback (stream_delta broadcast)
-              break
-            case 'tool_use':
-              break
-            case 'tool_result':
-              break
-            case 'result': {
-              const resultData = event.data as any
-              broadcastToProject(projectId, {
-                type: 'result',
-                subtype: resultData.subtype,
-                costUsd: resultData.costUsd,
-                durationMs: resultData.durationMs,
-                result: resultData.result,
-                isError: resultData.isError,
-                projectId,
-                sessionId: session.sessionId,
-              })
-              break
-            }
-            case 'ask_user_question': {
-              const questionData = {
-                toolId: (event.data as any).toolId,
-                questions: (event.data as any).questions,
-              }
-              // Store in project state and session for reconnecting clients
-              const projStateForQ = getOrCreateProjectState(projectId)
-              projStateForQ.pendingQuestion = questionData
-              session.pendingQuestion = questionData
-              persistSession(session)
-              broadcastToProject(projectId, {
-                type: 'ask_user_question',
-                ...questionData,
-                projectId,
-                sessionId: session.sessionId,
-              })
-              break
-            }
-          }
-        }
-
-        // Store assistant message
-        const assistantMsg = storeAssistantMessage(clientState)
-        if (assistantMsg) {
-          session.messages.push(assistantMsg)
-          session.lastModified = Date.now()
-
-          const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
-          if (summaryMatch) {
-            session.summary = summaryMatch[1].trim()
-            broadcastToProject(projectId, {
-              type: 'query_summary',
-              summary: session.summary,
-              projectId,
-              sessionId: session.sessionId,
-            })
-          }
-
-          persistSession(session)
-
-          broadcastToProject(projectId, {
-            type: 'assistant_text',
-            text: assistantMsg.content,
+      // Enqueue the query
+      const { queryId } = queryQueue.enqueue({
+        type: 'user',
+        projectId,
+        sessionId: capturedSession.sessionId,
+        prompt: msg.prompt,
+        executor: async (queuedQuery) => {
+          return executeUserQuery(
+            client,
+            capturedSession,
+            capturedClientState,
             projectId,
-            sessionId: session.sessionId,
-          })
-        }
+            capturedMsg.prompt,
+            capturedMsg.images,
+            capturedMsg.enabledMcps,
+            queuedQuery,
+          )
+        },
+      })
 
-      } catch (err: any) {
-        console.error('[ws] Query error:', err)
-        broadcastToProject(projectId, {
-          type: 'error',
-          message: err.message || 'Query failed',
-          projectId,
-          sessionId: session.sessionId,
-        })
-        session.status = 'error'
-      } finally {
-        session.status = 'idle'
-        // Clear any pending interactive state
-        const projStateForEnd = getOrCreateProjectState(projectId)
-        projStateForEnd.pendingQuestion = null
-        projStateForEnd.pendingPermissionRequest = null
-        session.pendingQuestion = null
-        session.pendingPermissionRequest = null
-        broadcastToProject(projectId, {
-          type: 'query_end',
-          projectId,
-          sessionId: session.sessionId,
-        })
-        broadcastProjectStatuses()
-      }
+      // Notify client that query was queued with its ID
+      sendToClient(client, {
+        type: 'query_queued',
+        queryId,
+        position: 0,
+        queueLength: 0,
+        projectId,
+        sessionId: capturedSession.sessionId,
+      })
 
       break
     }
@@ -1015,12 +1262,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           })
         }
       } else {
-        // Handle other commands as prompts
-        if (clientState.activeQuery) {
-          safeSend(ws, { type: 'error', message: 'A query is already running', projectId })
-          return
-        }
-
+        // Handle other commands as prompts (will be queued if project is busy)
         await handleClientMessage(ws, client, {
           type: 'prompt',
           prompt: msg.command,
@@ -1044,16 +1286,29 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     }
 
     case 'abort': {
-      console.log(`[ws] Abort requested for project ${projectId}, hasActiveQuery: ${!!clientState.activeQuery}`)
-      if (abortQuery(clientState)) {
+      console.log(`[ws] Abort requested for project ${projectId}`)
+
+      // Abort the running query via the queue (which triggers the abortController)
+      const abortedQuery = queryQueue.abortRunning(projectId)
+      if (abortedQuery) {
+        // Also abort through the engine's abort mechanism
+        abortQuery(clientState)
         if (session) {
           session.status = 'idle'
         }
         broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
         broadcastProjectStatuses()
-        console.log(`[ws] Abort completed for project ${projectId}`)
+        console.log(`[ws] Abort completed for project ${projectId}, query ${abortedQuery.id}`)
+      } else if (abortQuery(clientState)) {
+        // Fallback: abort via client state directly
+        if (session) {
+          session.status = 'idle'
+        }
+        broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
+        broadcastProjectStatuses()
+        console.log(`[ws] Abort completed for project ${projectId} (via clientState)`)
       } else {
-        console.log(`[ws] Abort failed for project ${projectId}: no active query`)
+        console.log(`[ws] Abort: no active query for project ${projectId}`)
       }
       break
     }

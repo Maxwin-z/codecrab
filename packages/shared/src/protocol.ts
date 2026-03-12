@@ -131,10 +131,29 @@ export interface ResultMessage extends ServerProjectContext {
 
 export interface QueryStartMessage extends ServerProjectContext {
   type: 'query_start'
+  queryId?: string
 }
 
 export interface QueryEndMessage extends ServerProjectContext {
   type: 'query_end'
+  queryId?: string
+}
+
+export type QueryQueueItemStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'
+
+export interface QueryQueueStatusMessage extends ServerProjectContext {
+  type: 'query_queue_status'
+  queryId: string
+  status: QueryQueueItemStatus
+  position?: number
+  queueLength?: number
+}
+
+export interface QueryQueuedMessage extends ServerProjectContext {
+  type: 'query_queued'
+  queryId: string
+  position: number
+  queueLength: number
 }
 
 export interface QuerySummaryMessage extends ServerProjectContext {
@@ -272,6 +291,8 @@ export type ServerMessage =
   | UserMessage
   | AvailableModelsMessage
   | ProjectStatusesMessage
+  | QueryQueueStatusMessage
+  | QueryQueuedMessage
 
 // ============ Image Attachments ============
 

@@ -38,7 +38,7 @@ describe('CronScheduler', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     executor = vi.fn().mockResolvedValue(undefined)
-    scheduler = new CronScheduler(executor)
+    scheduler = new CronScheduler(executor as any)
   })
 
   afterEach(() => {

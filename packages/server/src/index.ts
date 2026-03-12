@@ -9,7 +9,7 @@ import { chromeRouter } from './mcp/chrome/index.js'
 import { cronRouter, initCronSystem } from './mcp/cron/index.js'
 import { getAvailableMcps } from './mcp/index.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
-import { setupWebSocket } from './ws/index.js'
+import { setupWebSocket, executePromptInSession } from './ws/index.js'
 import path from 'path'
 import os from 'os'
 
@@ -83,50 +83,25 @@ ensureToken().then(() => {
     mainAppUrl: `http://localhost:${PORT}/api/cron`,
   })
 
-  // Set up cron execution callback to dispatch via WebSocket
+  // Set up cron execution callback to run prompt in the original session
   cronSystem.setExecuteCallback(async (request) => {
-    const { clientId, projectId } = request.context
+    const { sessionId } = request.context
 
-    console.log(`[CronExecute] Job: ${request.name} (${request.jobId}), target: client=${clientId}, project=${projectId}`)
+    console.log(`[CronExecute] Job: ${request.name} (${request.jobId}), session=${sessionId}`)
 
-    // Find target WebSocket client
-    let targetWs: import('ws').WebSocket | null = null
-
-    for (const ws of wss.clients) {
-      const info = (ws as any).clientInfo as { clientId?: string; projectId?: string } | undefined
-      if (!info) continue
-      if (clientId && info.clientId === clientId) {
-        targetWs = ws
-        break
-      }
-      if (projectId && info.projectId === projectId) {
-        targetWs = ws
-      }
+    if (!sessionId) {
+      console.error('[CronExecute] No sessionId in job context')
+      return { success: false, error: 'No session ID associated with this cron job' }
     }
 
-    if (!targetWs || targetWs.readyState !== 1 /* WebSocket.OPEN */) {
-      console.error('[CronExecute] No connected client found')
-      return { success: false, error: 'No connected client found to execute the task' }
-    }
-
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        console.error('[CronExecute] Execution timeout')
-        resolve({ success: false, error: 'Execution timeout - client did not respond within 60 seconds' })
-      }, 60000)
-
-      // Store resolver for when client reports back
-      const resolvers: Map<string, (result: any) => void> =
-        (globalThis as any).__cronExecutionResolvers ??= new Map()
-      resolvers.set(request.runId, (result: any) => {
-        clearTimeout(timeout)
-        resolve(result)
-      })
-
-      // Send execution request to client
-      targetWs!.send(JSON.stringify({ type: 'cron_execution_request', ...request }))
-      console.log(`[CronExecute] Request sent to client`)
+    // Execute the prompt via the query queue
+    const result = await executePromptInSession(sessionId, request.prompt, request.name, {
+      cronJobId: request.jobId,
+      cronRunId: request.runId,
     })
+
+    console.log(`[CronExecute] Job ${request.jobId} result: success=${result.success}`)
+    return result
   })
 
   server.listen(PORT, '0.0.0.0', () => {

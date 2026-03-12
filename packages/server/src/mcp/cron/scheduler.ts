@@ -106,61 +106,82 @@ export class CronScheduler {
     }
   }
 
+  private static readonly MAX_RETRIES = 3
+  private static readonly RETRY_BASE_MS = 5000
+
   private async triggerJob(job: CronJob): Promise<void> {
-    const runId = generateRunId()
-    console.log(`[Scheduler] Triggering job: ${job.id} (${job.name}), runId=${runId}`)
+    const maxRetries = CronScheduler.MAX_RETRIES
+    const baseBackoffMs = CronScheduler.RETRY_BASE_MS
 
-    job.status = 'running'
-    job.lastRunAt = new Date().toISOString()
-    saveJob(job)
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const runId = generateRunId()
+      const isRetry = attempt > 0
+      console.log(`[Scheduler] ${isRetry ? `Retry ${attempt}/${maxRetries}` : 'Triggering'} job: ${job.id} (${job.name}), runId=${runId}`)
 
-    appendRun(job.id, {
-      id: runId,
-      jobId: job.id,
-      startedAt: new Date().toISOString(),
-      status: 'running',
-    })
-
-    try {
-      await this.executor(job, runId)
-
-      job.runCount++
-      job.status = 'pending'
-
-      if (job.deleteAfterRun && job.schedule.kind === 'at') {
-        console.log(`[Scheduler] One-shot job complete, deleting: ${job.id}`)
-        deleteJob(job.id)
-        this.cancelSchedule(job.id)
-        return
-      }
-
-      if (job.maxRuns && job.runCount >= job.maxRuns) {
-        job.status = 'disabled'
-        this.cancelSchedule(job.id)
-      }
-
-      saveJob(job)
-
-      // Reschedule if recurring
-      if (
-        job.status === 'pending' &&
-        (job.schedule.kind === 'cron' || job.schedule.kind === 'every')
-      ) {
-        this.scheduleJob(job)
-      }
-    } catch (err) {
-      console.error(`[Scheduler] Job ${job.id} execution failed:`, err)
-      job.status = 'failed'
+      job.status = 'running'
+      job.lastRunAt = new Date().toISOString()
       saveJob(job)
 
       appendRun(job.id, {
         id: runId,
         jobId: job.id,
-        startedAt: job.lastRunAt!,
-        endedAt: new Date().toISOString(),
-        status: 'failed',
-        error: String(err),
+        startedAt: new Date().toISOString(),
+        status: 'running',
       })
+
+      try {
+        await this.executor(job, runId)
+
+        // Success
+        job.runCount++
+        job.status = 'pending'
+
+        if (job.deleteAfterRun && job.schedule.kind === 'at') {
+          console.log(`[Scheduler] One-shot job complete, deleting: ${job.id}`)
+          deleteJob(job.id)
+          this.cancelSchedule(job.id)
+          return
+        }
+
+        if (job.maxRuns && job.runCount >= job.maxRuns) {
+          job.status = 'disabled'
+          this.cancelSchedule(job.id)
+        }
+
+        saveJob(job)
+
+        // Reschedule if recurring
+        if (
+          job.status === 'pending' &&
+          (job.schedule.kind === 'cron' || job.schedule.kind === 'every')
+        ) {
+          this.scheduleJob(job)
+        }
+        return // Success, exit retry loop
+      } catch (err) {
+        console.error(`[Scheduler] Job ${job.id} attempt ${attempt + 1}/${maxRetries + 1} failed:`, err)
+
+        appendRun(job.id, {
+          id: runId,
+          jobId: job.id,
+          startedAt: job.lastRunAt!,
+          endedAt: new Date().toISOString(),
+          status: 'failed',
+          error: String(err),
+        })
+
+        if (attempt < maxRetries) {
+          const backoffMs = baseBackoffMs * Math.pow(2, attempt) // 5s, 10s, 20s
+          console.log(`[Scheduler] Retrying job ${job.id} in ${backoffMs}ms...`)
+          await new Promise(resolve => setTimeout(resolve, backoffMs))
+          continue
+        }
+
+        // Final failure
+        console.error(`[Scheduler] Job ${job.id} failed after ${maxRetries + 1} attempts`)
+        job.status = 'failed'
+        saveJob(job)
+      }
     }
   }
 
