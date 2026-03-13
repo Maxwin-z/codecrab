@@ -9,6 +9,9 @@ struct ChatView: View {
     @State private var isInputFocused: Bool = false
     @State private var initializedMcps = false
     @State private var prefillText: String = ""
+    @State private var breathe = false
+    @State private var lastSession: SessionInfo?
+    @State private var arrowBounce = false
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -55,25 +58,36 @@ struct ChatView: View {
         Array(enabledIds)
     }
 
+    private var showEmptyState: Bool {
+        wsService.messages.isEmpty && wsService.streamingText.isEmpty && wsService.streamingThinking.isEmpty && !wsService.isRunning
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Messages
-            ScrollViewReader { proxy in
-                ScrollView {
-                    MessageListView(
-                        messages: wsService.messages,
-                        streamingText: wsService.streamingText,
-                        streamingThinking: wsService.streamingThinking,
-                        isRunning: wsService.isRunning
-                    )
-                    .padding()
-                    .id("Bottom")
+            if showEmptyState {
+                Spacer()
+                emptyStateView
+                Spacer()
+                Spacer()
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        MessageListView(
+                            messages: wsService.messages,
+                            streamingText: wsService.streamingText,
+                            streamingThinking: wsService.streamingThinking,
+                            isRunning: wsService.isRunning
+                        )
+                        .padding()
+                        .id("Bottom")
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
+                    .onChange(of: wsService.streamingText) { scrollToBottom(proxy) }
+                    .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
+                    .onChange(of: isInputFocused) { scrollToBottom(proxy) }
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
-                .onChange(of: wsService.streamingText) { scrollToBottom(proxy) }
-                .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
-                .onChange(of: isInputFocused) { scrollToBottom(proxy) }
             }
 
             // Summary Banner
@@ -173,8 +187,9 @@ struct ChatView: View {
                         Circle()
                             .fill(heartbeatDotColor)
                             .frame(width: 6, height: 6)
-                            .opacity(wsService.activityHeartbeat != nil && !(wsService.activityHeartbeat?.paused ?? false) ? 0.6 : 1.0)
-                            .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: wsService.activityHeartbeat != nil)
+                            .opacity(wsService.activityHeartbeat != nil && !(wsService.activityHeartbeat?.paused ?? false) ? (breathe ? 0.3 : 1.0) : 1.0)
+                            .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: breathe)
+                            .onAppear { breathe = true }
                         if !wsService.sessionId.isEmpty {
                             Text(String(wsService.sessionId.suffix(6)))
                                 .font(.caption2)
@@ -206,10 +221,94 @@ struct ChatView: View {
         .onAppear {
             wsService.switchProject(projectId: project.id, cwd: project.path)
             fetchMcps()
+            fetchLastSession()
         }
         // Auto-enable new SDK MCPs and skills when they appear
         .onChange(of: wsService.sdkMcpServers.map { $0.name }) { autoEnableNewEntries() }
         .onChange(of: wsService.sdkSkills.map { $0.name }) { autoEnableNewEntries() }
+    }
+
+    // MARK: - Empty State
+
+    private var emptyStateView: some View {
+        VStack(spacing: 0) {
+            // Icon
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(.secondary.opacity(0.5))
+                .padding(.bottom, 16)
+
+            // Title
+            Text("CodeClaws")
+                .font(.system(size: 28, weight: .bold))
+                .padding(.bottom, 6)
+
+            // Subtitle
+            Text("Your AI coding companion")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            // Last session card
+            if let session = lastSession {
+                Button(action: {
+                    wsService.resumeSession(session.sessionId)
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.summary.isEmpty ? (session.firstPrompt ?? "Untitled session") : session.summary)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                                .foregroundStyle(.primary)
+                            Text(TimeAgo.format(from: session.lastModified))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+            }
+
+            // Down arrow indicator
+            VStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.5))
+                    .offset(y: arrowBounce ? 4 : 0)
+                    .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: arrowBounce)
+                Text("Send a message to start a new session")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.top, 28)
+            .onAppear { arrowBounce = true }
+        }
+        .padding(.horizontal)
+    }
+
+    private func fetchLastSession() {
+        Task {
+            do {
+                let fetched: [SessionInfo] = try await APIClient.shared.fetch(path: "/api/sessions?projectId=\(project.id)")
+                let sorted = fetched.sorted { $0.lastModified > $1.lastModified }
+                lastSession = sorted.first
+            } catch {
+                // Silently fail — empty state will just not show a session card
+            }
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

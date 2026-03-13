@@ -8,16 +8,7 @@ struct MessageListView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            if messages.isEmpty && streamingText.isEmpty && streamingThinking.isEmpty && !isRunning {
-                VStack(spacing: 16) {
-                    Text("CodeClaws")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    Text("Send a message to start coding with AI")
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 100)
-            } else {
+            if !messages.isEmpty || !streamingText.isEmpty || !streamingThinking.isEmpty || isRunning {
                 ForEach(messages) { msg in
                     MessageBubbleView(message: msg, isRunning: isRunning)
                 }
