@@ -124,4 +124,20 @@ ensureToken().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`[server] listening on http://0.0.0.0:${PORT}`)
   })
+
+  // Graceful shutdown — close server and WebSocket on termination signals
+  const shutdown = (signal: string) => {
+    console.log(`[server] ${signal} received, shutting down...`)
+    wss.close()
+    cronSystem.stop()
+    server.close(() => {
+      console.log(`[server] closed`)
+      process.exit(0)
+    })
+    // Force exit if graceful shutdown takes too long
+    setTimeout(() => process.exit(1), 3000)
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
 })
