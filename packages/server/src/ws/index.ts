@@ -34,6 +34,7 @@ import {
   probeSdkInit,
 } from '../engine/claude.js'
 import { QueryQueue } from '../engine/query-queue.js'
+import { sendQueryCompletionPush } from '../mcp/push/index.js'
 import type { QueuedQuery, QueryResult, QueryTimerState } from '../engine/query-queue.js'
 
 // Export for API use
@@ -1097,6 +1098,8 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
+        // Send push notification (best-effort, never throws)
+        sendQueryCompletionPush(session.summary, projectId)
       } else {
         console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
       }

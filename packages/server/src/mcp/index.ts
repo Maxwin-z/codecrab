@@ -7,6 +7,7 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { chromeTools } from './chrome/index.js'
 import { cronTools } from './cron/index.js'
+import { pushTools } from './push/index.js'
 import type { McpInfo } from '@codeclaws/shared'
 
 export interface McpDefinition {
@@ -33,7 +34,13 @@ export const mcpRegistry: McpDefinition[] = [
     icon: '⏰',
     tools: cronTools,
   },
-  // Future: push, etc.
+  {
+    id: 'push',
+    name: 'Push',
+    description: 'Send push notifications to iOS devices via Apple Push Notification service',
+    icon: '🔔',
+    tools: pushTools,
+  },
 ]
 
 /** Get McpInfo list for client consumption */
