@@ -66,29 +66,37 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Messages
-            if showEmptyState {
-                Spacer()
-                emptyStateView
-                Spacer()
-                Spacer()
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        MessageListView(
-                            messages: wsService.messages,
-                            streamingText: wsService.streamingText,
-                            streamingThinking: wsService.streamingThinking,
-                            isRunning: wsService.isRunning
-                        )
-                        .padding()
-                        .id("Bottom")
+            Group {
+                if showEmptyState {
+                    VStack {
+                        Spacer()
+                        emptyStateView
+                        Spacer()
+                        Spacer()
                     }
-                    .scrollDismissesKeyboard(.interactively)
-                    .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
-                    .onChange(of: wsService.streamingText) { scrollToBottom(proxy) }
-                    .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
-                    .onChange(of: isInputFocused) { scrollToBottom(proxy) }
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            MessageListView(
+                                messages: wsService.messages,
+                                streamingText: wsService.streamingText,
+                                streamingThinking: wsService.streamingThinking,
+                                isRunning: wsService.isRunning
+                            )
+                            .padding()
+                            .id("Bottom")
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                        .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
+                        .onChange(of: wsService.streamingText) { scrollToBottom(proxy) }
+                        .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
+                        .onChange(of: isInputFocused) { scrollToBottom(proxy) }
+                    }
                 }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isInputFocused = false
             }
 
             // Summary Banner
@@ -167,17 +175,13 @@ struct ChatView: View {
                 },
                 sdkLoaded: wsService.sdkLoaded,
                 onProbeSdk: { wsService.probeSdk() },
+                projectPath: project.path,
                 isInputFocused: $isInputFocused,
                 prefillText: $prefillText
             )
             .padding(.horizontal)
             .padding(.top, 4)
         }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                isInputFocused = false
-            }
-        )
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {

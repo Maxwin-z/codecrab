@@ -2,6 +2,10 @@ import { Router, type Router as RouterType } from 'express'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache',
@@ -124,6 +128,117 @@ router.get('/read', async (req, res) => {
     res.status(400).json({ error: (err as Error).message })
   }
 })
+
+// Search files recursively (respects .gitignore via git ls-files)
+router.get('/search', async (req, res) => {
+  const query = (req.query.q as string || '').toLowerCase()
+  const root = req.query.root as string
+  const limit = Math.min(parseInt(req.query.limit as string) || 500, 1000)
+
+  if (!root) {
+    res.status(400).json({ error: 'Missing root parameter' })
+    return
+  }
+
+  try {
+    const resolved = path.resolve(root)
+
+    // Try git ls-files first (respects .gitignore)
+    const gitFiles = await getGitFiles(resolved)
+    if (gitFiles) {
+      const seen = new Set<string>()
+      const results: { name: string; path: string; relativePath: string; isDirectory: boolean }[] = []
+
+      // Collect unique directories from file paths
+      for (const relPath of gitFiles) {
+        const parts = relPath.split('/')
+        let accumulated = ''
+        for (let i = 0; i < parts.length - 1; i++) {
+          accumulated = accumulated ? accumulated + '/' + parts[i] : parts[i]
+          if (!seen.has('d:' + accumulated)) {
+            seen.add('d:' + accumulated)
+            const dirName = parts[i]
+            if (!query || dirName.toLowerCase().includes(query) || accumulated.toLowerCase().includes(query)) {
+              if (results.length < limit) {
+                results.push({
+                  name: dirName,
+                  path: path.join(resolved, accumulated),
+                  relativePath: accumulated,
+                  isDirectory: true,
+                })
+              }
+            }
+          }
+        }
+
+        // Add file
+        const fileName = path.basename(relPath)
+        if (!query || fileName.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
+          if (results.length < limit) {
+            results.push({
+              name: fileName,
+              path: path.join(resolved, relPath),
+              relativePath: relPath,
+              isDirectory: false,
+            })
+          }
+        }
+      }
+
+      res.json(results)
+      return
+    }
+
+    // Fallback: manual walk for non-git repos
+    const results: { name: string; path: string; relativePath: string; isDirectory: boolean }[] = []
+    const MAX_DEPTH = 6
+
+    async function walk(dir: string, depth: number) {
+      if (depth > MAX_DEPTH || results.length >= limit) return
+      let entries
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (results.length >= limit) break
+        if (e.name.startsWith('.')) continue
+        const fullPath = path.join(dir, e.name)
+        const relativePath = path.relative(resolved, fullPath)
+        if (e.isDirectory()) {
+          if (SKIP_DIRS.has(e.name)) continue
+          if (!query || e.name.toLowerCase().includes(query) || relativePath.toLowerCase().includes(query)) {
+            results.push({ name: e.name, path: fullPath, relativePath, isDirectory: true })
+          }
+          await walk(fullPath, depth + 1)
+        } else {
+          if (!query || e.name.toLowerCase().includes(query) || relativePath.toLowerCase().includes(query)) {
+            results.push({ name: e.name, path: fullPath, relativePath, isDirectory: false })
+          }
+        }
+      }
+    }
+
+    await walk(resolved, 0)
+    res.json(results)
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
+})
+
+async function getGitFiles(root: string): Promise<string[] | null> {
+  try {
+    // Get tracked + untracked-but-not-ignored files (respects .gitignore)
+    const { stdout } = await execAsync(
+      'git ls-files --cached --others --exclude-standard',
+      { cwd: root, maxBuffer: 10 * 1024 * 1024 },
+    )
+    return stdout.split('\n').filter(Boolean)
+  } catch {
+    return null // not a git repo or git not available
+  }
+}
 
 // Create new folder
 router.post('/mkdir', async (req, res) => {
