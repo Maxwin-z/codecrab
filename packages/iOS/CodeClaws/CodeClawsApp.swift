@@ -1,7 +1,23 @@
 import SwiftUI
+import UIKit
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Task { @MainActor in
+            PushNotificationService.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+        }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        Task { @MainActor in
+            PushNotificationService.shared.didFailToRegisterForRemoteNotifications(error: error)
+        }
+    }
+}
 
 @main
 struct CodeClawsApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject var authService = AuthService()
     @StateObject var webSocketService = WebSocketService()
 
@@ -27,6 +43,9 @@ struct RootView: View {
             LoginView()
         } else {
             HomeView()
+                .onAppear {
+                    PushNotificationService.shared.requestPermissionAndRegister()
+                }
         }
     }
 }
