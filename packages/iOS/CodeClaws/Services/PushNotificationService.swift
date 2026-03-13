@@ -3,6 +3,13 @@ import Combine
 import UIKit
 import UserNotifications
 
+struct PushDeepLink: Equatable {
+    let projectId: String
+    let sessionId: String
+    let title: String
+    let body: String
+}
+
 @MainActor
 class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = PushNotificationService()
@@ -10,9 +17,28 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
     @Published var deviceToken: String?
     @Published var isRegistered: Bool = false
 
+    /// Published when user taps a notification (background) or notification arrives (foreground)
+    @Published var pendingDeepLink: PushDeepLink? = nil
+
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
+    }
+
+    // MARK: - Parse Deep Link from Notification
+
+    private nonisolated func parseDeepLink(from content: UNNotificationContent) -> PushDeepLink? {
+        let userInfo = content.userInfo
+        guard let projectId = userInfo["projectId"] as? String,
+              let sessionId = userInfo["sessionId"] as? String else {
+            return nil
+        }
+        return PushDeepLink(
+            projectId: projectId,
+            sessionId: sessionId,
+            title: content.title,
+            body: content.body
+        )
     }
 
     // MARK: - Foreground Notification Display
@@ -24,8 +50,20 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
     ) {
         let content = notification.request.content
         print("[Push] Received in foreground — title: \(content.title), body: \(content.body), userInfo: \(content.userInfo)")
-        completionHandler([.banner, .sound, .badge])
+
+        if let deepLink = parseDeepLink(from: content) {
+            // Show custom toast instead of system banner
+            Task { @MainActor in
+                self.pendingDeepLink = deepLink
+            }
+            completionHandler([.sound])
+        } else {
+            // No deep link data — show system banner
+            completionHandler([.banner, .sound, .badge])
+        }
     }
+
+    // MARK: - Notification Tap (Background/Foreground)
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -34,7 +72,20 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
     ) {
         let content = response.notification.request.content
         print("[Push] User tapped notification — title: \(content.title), body: \(content.body), userInfo: \(content.userInfo)")
+
+        if let deepLink = parseDeepLink(from: content) {
+            Task { @MainActor in
+                self.pendingDeepLink = deepLink
+            }
+        }
+
         completionHandler()
+    }
+
+    // MARK: - Consume Deep Link
+
+    func consumeDeepLink() {
+        pendingDeepLink = nil
     }
 
     // MARK: - Request Permission & Register
@@ -68,7 +119,7 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
-        print("[Push] ❌ Failed to register for remote notifications: \(error.localizedDescription)")
+        print("[Push] Failed to register for remote notifications: \(error.localizedDescription)")
     }
 
     // MARK: - Server Registration
@@ -91,10 +142,10 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
                 method: "POST",
                 body: RegisterBody(token: token, label: label)
             )
-            print("[Push] ✅ Token registered with server successfully")
+            print("[Push] Token registered with server successfully")
             self.isRegistered = true
         } catch {
-            print("[Push] ❌ Failed to register token with server: \(error)")
+            print("[Push] Failed to register token with server: \(error)")
         }
     }
 

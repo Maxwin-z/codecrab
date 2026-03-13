@@ -47,7 +47,10 @@ export function initApns(): boolean {
   const keyId = process.env.APNS_KEY_ID
   const teamId = process.env.APNS_TEAM_ID
   const bundleId = process.env.APNS_BUNDLE_ID
-  const environment = process.env.APNS_ENVIRONMENT || 'production'
+  // Support both APNS_ENVIRONMENT=development and APNS_PRODUCTION=false
+  const isProduction = process.env.APNS_PRODUCTION === 'false'
+    ? false
+    : (process.env.APNS_ENVIRONMENT || 'production') === 'production'
 
   if ((!keyContent && !keyPath) || !keyId || !teamId || !bundleId) {
     console.log('[APNs] Not configured (missing APNS_KEY/APNS_KEY_PATH, APNS_KEY_ID, APNS_TEAM_ID, or APNS_BUNDLE_ID)')
@@ -79,10 +82,10 @@ export function initApns(): boolean {
     keyId,
     teamId,
     bundleId,
-    production: environment === 'production',
+    production: isProduction,
   }
 
-  console.log(`[APNs] Initialized (${environment}, bundle: ${bundleId})`)
+  console.log(`[APNs] Initialized (${isProduction ? 'production' : 'sandbox'}, bundle: ${bundleId})`)
   return true
 }
 
@@ -159,6 +162,7 @@ export async function sendPushNotification(
   }
 
   const payloadStr = JSON.stringify(apnsPayload)
+  console.log(`[APNs] Sending push to ${deviceToken.slice(0, 8)}... — title="${title}" payload=${payloadStr.length}B env=${apnsConfig.production ? 'production' : 'sandbox'}`)
 
   return new Promise((resolve) => {
     try {
@@ -188,6 +192,7 @@ export async function sendPushNotification(
 
       req.on('end', () => {
         if (statusCode === 200) {
+          console.log(`[APNs] ✅ Push sent to ${deviceToken.slice(0, 8)}...`)
           resolve({ token: deviceToken, success: true, status: 200 })
         } else {
           let reason = `HTTP ${statusCode}`
@@ -195,6 +200,8 @@ export async function sendPushNotification(
             const parsed = JSON.parse(responseData)
             reason = parsed.reason || reason
           } catch {}
+
+          console.error(`[APNs] ❌ Push failed for ${deviceToken.slice(0, 8)}... — status=${statusCode} reason=${reason} env=${apnsConfig?.production ? 'production' : 'sandbox'} bundle=${apnsConfig?.bundleId}`)
 
           // Auto-remove invalid tokens
           if (statusCode === 410 || reason === 'BadDeviceToken' || reason === 'Unregistered') {

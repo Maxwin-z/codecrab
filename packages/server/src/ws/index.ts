@@ -1099,7 +1099,7 @@ async function executeUserQuery(
           sessionId: session.sessionId,
         })
         // Send push notification (best-effort, never throws)
-        sendQueryCompletionPush(session.summary, projectId)
+        sendQueryCompletionPush(session.summary, projectId, session.sessionId)
       } else {
         console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
       }
