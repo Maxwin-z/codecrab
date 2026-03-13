@@ -331,6 +331,13 @@ async function executeCronQuery(
   })
   broadcastProjectStatuses()
 
+  // Send push notification to all devices with parent sessionId
+  const summaryMatch = finalText.match(/\[SUMMARY:\s*(.+?)\]/)
+  const pushSummary = summaryMatch
+    ? summaryMatch[1].trim()
+    : `${cronJobName || 'Scheduled Task'}: ${resultSummary}`
+  sendQueryCompletionPush(pushSummary, projectId, parentSession.sessionId)
+
   if (isSuccess) {
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
   } else {
