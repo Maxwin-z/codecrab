@@ -527,6 +527,7 @@ export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[]
       cwd: session.cwd,
       status: session.status,
       isActive,
+      projectId: session.projectId,
     })
   }
 

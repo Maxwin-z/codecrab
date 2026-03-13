@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router'
-import { Settings, Plus } from 'lucide-react'
+import { Settings, Plus, Bug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProjectList } from '@/components/ProjectList'
 import type { Project } from '@codeclaws/shared'
@@ -25,6 +25,9 @@ export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
           <Button variant="ghost" size="sm" onClick={() => navigate('/projects/new')}>
             <Plus className="h-4 w-4" />
             New Project
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => navigate('/debug')} aria-label="Debug">
+            <Bug className="h-5 w-5" />
           </Button>
           <Button variant="ghost" size="icon" onClick={onOpenSetup} aria-label="Settings">
             <Settings className="h-5 w-5" />

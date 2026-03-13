@@ -398,6 +398,7 @@ export interface SessionInfo {
   cwd?: string
   status?: 'idle' | 'processing' | 'error'
   isActive?: boolean
+  projectId?: string
 }
 
 export interface McpInfo {

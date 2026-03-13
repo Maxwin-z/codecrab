@@ -17,6 +17,7 @@ import { chromeRouter } from './mcp/chrome/index.js'
 import { cronRouter, initCronSystem } from './mcp/cron/index.js'
 import { pushRouter, initPush } from './mcp/push/index.js'
 import { getAvailableMcps } from './mcp/index.js'
+import debugRouter from './api/debug.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
 import { setupWebSocket, executePromptInSession } from './ws/index.js'
 import os from 'os'
@@ -61,6 +62,9 @@ app.get('/api/setup/detect/probe', async (_req, res) => {
   const { probeHandler } = await import('./api/setup-detect.js')
   probeHandler(_req, res)
 })
+
+// Public debug endpoints (no auth required, for troubleshooting)
+app.use('/api/debug', debugRouter)
 
 // Auth middleware — validates token on all subsequent routes
 app.use(authMiddleware)

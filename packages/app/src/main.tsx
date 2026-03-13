@@ -7,6 +7,7 @@ import { HomePage } from '@/components/HomePage'
 import { CreateProjectPage } from '@/components/CreateProjectPage'
 import { LoginPage } from '@/components/LoginPage'
 import { ChatPage } from '@/components/ChatPage'
+import { DebugPage } from '@/components/DebugPage'
 import { WebSocketProvider } from '@/hooks/WebSocketContext'
 import { checkAuthStatus, authFetch, clearToken } from '@/lib/auth'
 import './index.css'
@@ -123,6 +124,7 @@ function AppRoutes() {
           ? <ChatPage onUnauthorized={handleUnauthorized} />
           : <Navigate to="/setup" replace />
       } />
+      <Route path="/debug" element={<DebugPage />} />
       <Route path="/" element={
         setupStatus === 'initialized'
           ? <HomePage onOpenSetup={() => navigate('/setup')} onUnauthorized={handleUnauthorized} />
