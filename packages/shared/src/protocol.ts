@@ -222,6 +222,11 @@ export interface ActivityHeartbeatMessage extends ServerProjectContext {
   paused?: boolean
 }
 
+export interface SdkEventMessage extends ServerProjectContext {
+  type: 'sdk_event'
+  event: DebugEvent
+}
+
 export interface SessionStatusChangedMessage extends ServerProjectContext {
   type: 'session_status_changed'
   status: 'idle' | 'processing' | 'error'
@@ -336,6 +341,7 @@ export type ServerMessage =
   | QueryQueuedMessage
   | CronTaskCompletedMessage
   | ActivityHeartbeatMessage
+  | SdkEventMessage
 
 // ============ Image Attachments ============
 
@@ -383,7 +389,7 @@ export interface ChatMessage {
 
 export interface DebugEvent {
   ts: number
-  type: 'query_start' | 'sdk_spawn' | 'sdk_init' | 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'result' | 'error' | 'permission_request' | 'permission_response' | 'ask_question' | 'usage'
+  type: 'query_start' | 'sdk_spawn' | 'sdk_init' | 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'result' | 'error' | 'permission_request' | 'permission_response' | 'ask_question' | 'usage' | 'message_start' | 'message_done' | 'content_block_start' | 'content_block_stop' | 'rate_limit' | 'assistant'
   detail?: string
   data?: Record<string, unknown>
 }

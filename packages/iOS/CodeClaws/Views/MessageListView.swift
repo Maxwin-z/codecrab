@@ -5,40 +5,31 @@ struct MessageListView: View {
     let streamingText: String
     let streamingThinking: String
     let isRunning: Bool
+    let sdkEvents: [SdkEvent]
+
+    /// Merge user messages and SDK events into a single timeline sorted by timestamp
+    private var timeline: [ChatItem] {
+        // Only include user messages — assistant/system/tool content now comes from SDK events
+        let userMsgItems = messages.filter { $0.role == "user" }.map { ChatItem.message($0) }
+        let evtItems = sdkEvents.map { ChatItem.sdkEvent($0) }
+        return (userMsgItems + evtItems).sorted { $0.timestamp < $1.timestamp }
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            if !messages.isEmpty || !streamingText.isEmpty || !streamingThinking.isEmpty || isRunning {
-                ForEach(messages) { msg in
-                    MessageBubbleView(message: msg, isRunning: isRunning)
-                }
-
-                // Streaming thinking
-                if !streamingThinking.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Thinking:")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                        Text(streamingThinking)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+        VStack(spacing: 4) {
+            if !messages.isEmpty || !sdkEvents.isEmpty || isRunning {
+                ForEach(timeline) { item in
+                    switch item {
+                    case .message(let msg):
+                        MessageBubbleView(message: msg, isRunning: isRunning)
+                            .padding(.vertical, 6)
+                    case .sdkEvent(let event):
+                        SdkEventInlineView(event: event)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Streaming text
-                if !streamingText.isEmpty {
-                    Text(streamingText)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // Running indicator
-                if isRunning && streamingText.isEmpty && streamingThinking.isEmpty {
+                // Running indicator (when no SDK events are flowing yet)
+                if isRunning && sdkEvents.isEmpty {
                     HStack(spacing: 8) {
                         Circle()
                             .fill(Color.orange)

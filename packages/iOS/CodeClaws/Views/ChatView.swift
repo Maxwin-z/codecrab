@@ -81,13 +81,15 @@ struct ChatView: View {
                                 messages: wsService.messages,
                                 streamingText: wsService.displayStreamingText,
                                 streamingThinking: wsService.streamingThinking,
-                                isRunning: wsService.isRunning
+                                isRunning: wsService.isRunning,
+                                sdkEvents: wsService.sdkEvents
                             )
                             .padding()
                             .id("Bottom")
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
+                        .onChange(of: wsService.sdkEvents.count) { scrollToBottom(proxy) }
                         .onChange(of: wsService.displayStreamingText) { scrollToBottom(proxy) }
                         .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
                         .onChange(of: isInputFocused) { scrollToBottom(proxy) }

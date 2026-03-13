@@ -461,6 +461,163 @@ function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
   }
 }
 
+// Emit structured SDK log events for each raw SDK message
+// These go through logEvent → broadcastToProject → iOS client
+function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record<string, unknown>) => void): void {
+  const type = msg.type
+
+  switch (type) {
+    case 'system': {
+      if (msg.subtype === 'init') {
+        const mcps = (msg.mcp_servers || []).map((s: any) => `${s.status === 'connected' ? '✓' : '✗'}${s.name}`).join('  ')
+        log('sdk_init', `model: ${msg.model}`, {
+          model: msg.model,
+          session: msg.session_id,
+          permission: msg.permissionMode,
+          toolCount: msg.tools?.length || 0,
+          tools: (msg.tools || []).slice(0, 20).join(', ') + (msg.tools?.length > 20 ? ` …+${msg.tools.length - 20}` : ''),
+          mcps,
+          skills: (msg.skills || []).join(', '),
+          agents: (msg.agents || []).join(', '),
+          plugins: (msg.plugins || []).map((p: any) => p.name).join(', '),
+          version: msg.claude_code_version,
+        })
+      }
+      break
+    }
+
+    case 'stream_event': {
+      const evt = msg.event
+      if (!evt) break
+
+      switch (evt.type) {
+        case 'message_start': {
+          const m = evt.message
+          const u = m?.usage
+          log('message_start', `id=${m?.id}  model=${m?.model}`, {
+            messageId: m?.id,
+            model: m?.model,
+            inputTokens: u?.input_tokens,
+            outputTokens: u?.output_tokens,
+            cacheReadTokens: u?.cache_read_input_tokens,
+            cacheCreateTokens: u?.cache_creation_input_tokens,
+            serviceTier: u?.service_tier,
+          })
+          break
+        }
+        case 'content_block_start': {
+          const block = evt.content_block
+          if (block?.type === 'tool_use') {
+            log('content_block_start', `tool_use: ${block.name}`, {
+              blockType: 'tool_use',
+              index: evt.index,
+              toolName: block.name,
+              toolId: block.id,
+              caller: block.caller?.type,
+            })
+          } else if (block?.type === 'text') {
+            log('content_block_start', 'text', { blockType: 'text', index: evt.index })
+          } else if (block?.type === 'thinking') {
+            log('content_block_start', 'thinking', { blockType: 'thinking', index: evt.index })
+          }
+          break
+        }
+        case 'content_block_stop': {
+          log('content_block_stop', `block[${evt.index}]`, { index: evt.index })
+          break
+        }
+        case 'message_delta': {
+          const stop = evt.delta?.stop_reason
+          const outTokens = evt.usage?.output_tokens
+          const edits = evt.context_management?.applied_edits?.length
+          log('message_done', `stop=${stop || 'none'}  out_tokens=${outTokens || '?'}`, {
+            stopReason: stop,
+            outputTokens: outTokens,
+            contextEdits: edits,
+          })
+          break
+        }
+      }
+      break
+    }
+
+    case 'assistant': {
+      const m = msg.message
+      const content = m?.content
+      if (!content) break
+      const usage = m?.usage
+      // Emit per-block events with full content
+      for (const block of content) {
+        if (block.type === 'tool_use') {
+          const inputStr = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2)
+          log('tool_use', `${block.name}`, {
+            toolName: block.name,
+            toolId: block.id,
+            input: inputStr,
+          })
+        } else if (block.type === 'text' && block.text) {
+          log('text', block.text.length > 200 ? block.text.slice(0, 200) + '…' : block.text, {
+            content: block.text,
+            length: block.text.length,
+          })
+        } else if (block.type === 'thinking' && block.thinking) {
+          log('thinking', block.thinking.length > 200 ? block.thinking.slice(0, 200) + '…' : block.thinking, {
+            content: block.thinking,
+            length: block.thinking.length,
+          })
+        }
+      }
+      // Also emit the overall assistant summary with token usage
+      const blockSummary: string[] = []
+      for (const block of content) {
+        if (block.type === 'tool_use') blockSummary.push(`🔧 ${block.name}`)
+        else if (block.type === 'text') blockSummary.push(`📝 text(${(block.text || '').length})`)
+        else if (block.type === 'thinking') blockSummary.push(`💭 thinking(${(block.thinking || '').length})`)
+      }
+      log('assistant', `id=${m.id}  ${blockSummary.join('  ')}`, {
+        messageId: m.id,
+        blocks: blockSummary.join(', '),
+        inputTokens: usage?.input_tokens,
+        outputTokens: usage?.output_tokens,
+        cacheReadTokens: usage?.cache_read_input_tokens,
+        cacheCreateTokens: usage?.cache_creation_input_tokens,
+      })
+      break
+    }
+
+    case 'user': {
+      const content = msg.message?.content
+      if (!Array.isArray(content)) break
+      for (const block of content) {
+        if (block.type === 'tool_result') {
+          const resultStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+          log('tool_result', block.is_error ? `Error: ${resultStr.slice(0, 200)}` : resultStr.slice(0, 200), {
+            toolUseId: block.tool_use_id,
+            content: resultStr,
+            isError: block.is_error || false,
+            length: resultStr.length,
+          })
+        }
+      }
+      break
+    }
+
+    case 'rate_limit_event': {
+      const info = msg.rate_limit_info
+      if (!info) break
+      const status = info.status === 'allowed' ? '✓ allowed' : `✗ ${info.status}`
+      const resets = info.resetsAt ? new Date(info.resetsAt * 1000).toLocaleTimeString() : '?'
+      log('rate_limit', `${status}  type=${info.rateLimitType || '?'}  resets=${resets}`, {
+        status: info.status,
+        rateLimitType: info.rateLimitType,
+        resetsAt: info.resetsAt,
+        isUsingOverage: info.isUsingOverage,
+      })
+      break
+    }
+  }
+}
+
 // Read models.json to get default model configuration
 function readModelsConfig(): { models: ModelConfig[]; defaultModelId?: string } {
   try {
@@ -925,6 +1082,7 @@ export async function* executeQuery(
     onSessionInit: (sessionId: string) => void
     onPermissionRequest: (requestId: string, toolName: string, input: unknown, reason: string) => void
     onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }) => void
+    onSdkLog?: (type: string, detail?: string, data?: Record<string, unknown>) => void
   },
   images?: ImageAttachment[],
   enabledMcps?: string[],
@@ -1076,8 +1234,10 @@ export async function* executeQuery(
     let messageCount = 0
     let gotResult = false
     const streamLog = createStreamLogState()
+    const sdkLog = callbacks.onSdkLog || (() => {})
     for await (const message of stream) {
       logSdkMessage(tag, message, streamLog)
+      emitSdkLog(message, sdkLog)
       messageCount++
       // Capture sessionId from init
       if (

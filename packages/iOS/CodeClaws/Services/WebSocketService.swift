@@ -26,6 +26,8 @@ struct ProjectChatState {
     var sdkTools: [String] = []
     // Activity heartbeat
     var activityHeartbeat: ActivityHeartbeat? = nil
+    // SDK execution events
+    var sdkEvents: [SdkEvent] = []
 }
 
 struct ActivityHeartbeat: Equatable {
@@ -73,6 +75,7 @@ class WebSocketService: ObservableObject {
     @Published var sdkSkills: [SdkSkill] = []
     @Published var sdkTools: [String] = []
     @Published var activityHeartbeat: ActivityHeartbeat? = nil
+    @Published var sdkEvents: [SdkEvent] = []
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
@@ -202,6 +205,7 @@ class WebSocketService: ObservableObject {
                 self.latestSummary = nil
                 self.suggestions = []
                 self.activityHeartbeat = nil
+                self.sdkEvents = []
             }
         case "query_end":
             if let pid = projectId {
@@ -439,6 +443,22 @@ class WebSocketService: ObservableObject {
                     lastToolName: lastToolName,
                     paused: paused
                 )
+            }
+        case "sdk_event":
+            if isCurrentProject, let eventDict = json["event"] as? [String: Any] {
+                let ts = eventDict["ts"] as? Double ?? 0
+                let eventType = eventDict["type"] as? String ?? "unknown"
+                let detail = eventDict["detail"] as? String
+                var eventData: [String: JSONValue]? = nil
+                if let dataDict = eventDict["data"] as? [String: Any] {
+                    var parsed: [String: JSONValue] = [:]
+                    for (k, v) in dataDict {
+                        parsed[k] = parseJSONValue(v)
+                    }
+                    eventData = parsed
+                }
+                let event = SdkEvent(ts: ts, type: eventType, detail: detail, data: eventData)
+                self.sdkEvents.append(event)
             }
         default:
             break
@@ -688,6 +708,7 @@ class WebSocketService: ObservableObject {
             state.sdkSkills = sdkSkills
             state.sdkTools = sdkTools
             state.activityHeartbeat = activityHeartbeat
+            state.sdkEvents = sdkEvents
             projectStates[current] = state
         }
 
@@ -708,6 +729,7 @@ class WebSocketService: ObservableObject {
             sdkSkills = state.sdkSkills
             sdkTools = state.sdkTools
             activityHeartbeat = state.activityHeartbeat
+            sdkEvents = state.sdkEvents
         } else {
             messages = []
             streamingText = ""
@@ -723,6 +745,7 @@ class WebSocketService: ObservableObject {
             sdkSkills = []
             sdkTools = []
             activityHeartbeat = nil
+            sdkEvents = []
         }
 
         // Always clear summary/suggestions on project switch

@@ -978,7 +978,14 @@ async function executeUserQuery(
 
   // Debug event logger for this query
   const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
-    session.debugEvents.push({ ts: Date.now(), type, detail, data })
+    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data }
+    session.debugEvents.push(event)
+    broadcastToProject(projectId, {
+      type: 'sdk_event',
+      event,
+      projectId,
+      sessionId: session.sessionId,
+    })
   }
   let thinkingStarted = false
   let textStarted = false
@@ -989,7 +996,6 @@ async function executeUserQuery(
     const stream = executeQuery(clientState, prompt, {
       onTextDelta: (text) => {
         if (!textStarted) {
-          logEvent('text', 'Started generating text')
           textStarted = true
         }
         broadcastToProject(projectId, {
@@ -1004,7 +1010,6 @@ async function executeUserQuery(
       },
       onThinkingDelta: (thinking) => {
         if (!thinkingStarted) {
-          logEvent('thinking', 'Started thinking')
           thinkingStarted = true
         }
         broadcastToProject(projectId, {
@@ -1021,8 +1026,6 @@ async function executeUserQuery(
         // Reset text/thinking flags for next turn
         thinkingStarted = false
         textStarted = false
-        const inputSummary = summarizeToolInput(toolName, input)
-        logEvent('tool_use', `${toolName}: ${inputSummary}`, { toolName, toolId })
         broadcastToProject(projectId, {
           type: 'tool_use',
           toolName,
@@ -1035,8 +1038,6 @@ async function executeUserQuery(
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
-        const resultPreview = content.length > 100 ? content.slice(0, 100) + '...' : content
-        logEvent('tool_result', isError ? `Error: ${resultPreview}` : resultPreview, { toolId, isError, length: content.length })
         broadcastToProject(projectId, {
           type: 'tool_result',
           toolId,
@@ -1049,7 +1050,6 @@ async function executeUserQuery(
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onSessionInit: (sdkSessionId) => {
-        logEvent('sdk_init', `SDK session: ${sdkSessionId}`, { sdkSessionId })
         session.sdkSessionId = sdkSessionId
         persistSession(session)
         const ps = getOrCreateProjectState(projectId)
@@ -1084,6 +1084,9 @@ async function executeUserQuery(
         queryQueue.touchActivity(queuedQuery.id, 'usage')
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
+      onSdkLog: (type, detail, data) => {
+        logEvent(type as any, detail, data)
+      },
     }, images, enabledMcps, disabledSdkServers, disabledSkills)
 
     let finalText = ''
@@ -1092,12 +1095,6 @@ async function executeUserQuery(
         case 'system_init': {
           // Forward SDK MCP servers and skills to clients
           const initData = event.data as any
-          logEvent('sdk_init', `model: ${initData.model || 'unknown'}, tools: ${initData.tools?.length || 0}`, {
-            model: initData.model,
-            toolCount: initData.tools?.length,
-            mcpServerCount: initData.sdkMcpServers?.length,
-            skillCount: initData.sdkSkills?.length,
-          })
           if (initData.sdkMcpServers || initData.sdkSkills) {
             broadcastToProject(projectId, {
               type: 'system',
