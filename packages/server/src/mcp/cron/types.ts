@@ -72,6 +72,19 @@ export interface CronDeleteParams {
   jobId: string
 }
 
+export interface CronUpdateParams {
+  jobId: string
+  name?: string
+  prompt?: string
+  description?: string
+  when?: string
+  recurring?: boolean
+  cronExpression?: string
+  timezone?: string
+  deleteAfterRun?: boolean
+  maxRuns?: number
+}
+
 export interface CronExecutionRequest {
   jobId: string
   runId: string

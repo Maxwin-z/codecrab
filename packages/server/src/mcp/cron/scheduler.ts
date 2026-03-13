@@ -119,6 +119,10 @@ export class CronScheduler {
     return true
   }
 
+  triggerNow(job: CronJob): void {
+    this.triggerJob(job)
+  }
+
   cancelSchedule(jobId: string): void {
     const scheduled = this.scheduledTasks.get(jobId)
     if (scheduled) {

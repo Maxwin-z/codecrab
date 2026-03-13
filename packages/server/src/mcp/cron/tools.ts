@@ -4,7 +4,7 @@
 import { z } from 'zod/v4'
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { CronScheduler } from './scheduler.js'
-import { saveJob, deleteJob, getJob, listJobs, generateJobId, getRuns } from './store.js'
+import { saveJob, deleteJob, getJob, listJobs, generateJobId, generateRunId, getRuns } from './store.js'
 import type { CronJob } from './types.js'
 
 // Reference to the scheduler instance (set by initializeCronTools)
@@ -311,6 +311,288 @@ ${
 
       return {
         content: [{ type: 'text' as const, text: details }],
+      }
+    },
+  ),
+
+  tool(
+    'cron_pause',
+    'Pause (disable) a scheduled task. The task will stop executing but can be resumed later.',
+    {
+      jobId: z.string().describe('The ID of the task to pause'),
+    },
+    async (input) => {
+      if (!scheduler) {
+        return {
+          content: [{ type: 'text' as const, text: 'Cron scheduler not initialized' }],
+          isError: true,
+        }
+      }
+
+      const job = getJob(input.jobId)
+      if (!job) {
+        return {
+          content: [{ type: 'text' as const, text: `Task not found: ${input.jobId}` }],
+          isError: true,
+        }
+      }
+
+      if (job.status === 'disabled') {
+        return {
+          content: [{ type: 'text' as const, text: `Task "${job.name}" is already paused.` }],
+        }
+      }
+
+      if (job.status === 'completed' || job.status === 'failed') {
+        return {
+          content: [
+            { type: 'text' as const, text: `Cannot pause a task with status "${job.status}". Only pending or running tasks can be paused.` },
+          ],
+          isError: true,
+        }
+      }
+
+      scheduler.cancelSchedule(job.id)
+      job.status = 'disabled'
+      job.updatedAt = new Date().toISOString()
+      saveJob(job)
+
+      return {
+        content: [
+          { type: 'text' as const, text: `Paused task "${job.name}" (${job.id}). Use cron_resume to re-enable it.` },
+        ],
+      }
+    },
+  ),
+
+  tool(
+    'cron_resume',
+    'Resume a paused (disabled) scheduled task. The task will be rescheduled according to its original schedule.',
+    {
+      jobId: z.string().describe('The ID of the task to resume'),
+    },
+    async (input) => {
+      if (!scheduler) {
+        return {
+          content: [{ type: 'text' as const, text: 'Cron scheduler not initialized' }],
+          isError: true,
+        }
+      }
+
+      const job = getJob(input.jobId)
+      if (!job) {
+        return {
+          content: [{ type: 'text' as const, text: `Task not found: ${input.jobId}` }],
+          isError: true,
+        }
+      }
+
+      if (job.status !== 'disabled' && job.status !== 'failed') {
+        return {
+          content: [
+            { type: 'text' as const, text: `Task "${job.name}" is not paused or failed (current status: ${job.status}).` },
+          ],
+          isError: true,
+        }
+      }
+
+      job.status = 'pending'
+      job.updatedAt = new Date().toISOString()
+      saveJob(job)
+
+      const scheduled = scheduler.scheduleJob(job)
+      if (!scheduled) {
+        return {
+          content: [
+            { type: 'text' as const, text: `Resumed task "${job.name}" but failed to reschedule. The schedule may have expired.` },
+          ],
+          isError: true,
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Resumed task "${job.name}" (${job.id}).\nSchedule: ${formatSchedule(job.schedule)}\nNext run: ${job.nextRunAt ? new Date(job.nextRunAt).toLocaleString() : 'N/A'}`,
+          },
+        ],
+      }
+    },
+  ),
+
+  tool(
+    'cron_update',
+    `Update an existing scheduled task. You can modify the name, prompt, description, schedule, and other properties. Only provide the fields you want to change.`,
+    {
+      jobId: z.string().describe('The ID of the task to update'),
+      name: z.string().optional().describe('New name for the task'),
+      prompt: z.string().optional().describe('New prompt/instruction for the task'),
+      description: z.string().optional().describe('New description'),
+      when: z
+        .string()
+        .optional()
+        .describe('New schedule: natural language like "10 minutes later", "every 2 hours", or cron expression'),
+      recurring: z.boolean().optional().describe('Whether this is a recurring task'),
+      cronExpression: z.string().optional().describe('New cron expression (e.g., "0 9 * * *")'),
+      timezone: z.string().optional().describe('New timezone (e.g., "Asia/Shanghai")'),
+      deleteAfterRun: z.boolean().optional().describe('Auto-delete after execution'),
+      maxRuns: z.number().optional().describe('Maximum number of runs (0 to remove limit)'),
+    },
+    async (input) => {
+      if (!scheduler) {
+        return {
+          content: [{ type: 'text' as const, text: 'Cron scheduler not initialized' }],
+          isError: true,
+        }
+      }
+
+      const job = getJob(input.jobId)
+      if (!job) {
+        return {
+          content: [{ type: 'text' as const, text: `Task not found: ${input.jobId}` }],
+          isError: true,
+        }
+      }
+
+      const changes: string[] = []
+
+      if (input.name !== undefined) {
+        job.name = input.name
+        changes.push(`name → "${input.name}"`)
+      }
+      if (input.prompt !== undefined) {
+        job.prompt = input.prompt
+        changes.push('prompt updated')
+      }
+      if (input.description !== undefined) {
+        job.description = input.description
+        changes.push('description updated')
+      }
+      if (input.deleteAfterRun !== undefined) {
+        job.deleteAfterRun = input.deleteAfterRun
+        changes.push(`deleteAfterRun → ${input.deleteAfterRun}`)
+      }
+      if (input.maxRuns !== undefined) {
+        job.maxRuns = input.maxRuns === 0 ? undefined : input.maxRuns
+        changes.push(`maxRuns → ${input.maxRuns === 0 ? 'unlimited' : input.maxRuns}`)
+      }
+
+      // Handle schedule change
+      let scheduleChanged = false
+      if (input.when || input.cronExpression) {
+        const isRecurring = input.recurring ?? (job.schedule.kind === 'cron' || job.schedule.kind === 'every')
+        const scheduleInput = input.cronExpression || input.when!
+        const parsed = CronScheduler.parseSchedule(scheduleInput, isRecurring)
+
+        if (!parsed.isValid) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Could not parse schedule: "${input.when || input.cronExpression}". Try formats like "10 minutes later", "every 2 hours", or cron expression "0 9 * * *"`,
+              },
+            ],
+            isError: true,
+          }
+        }
+
+        if (parsed.schedule.kind === 'at') {
+          const runTime = new Date(parsed.schedule.at)
+          if (runTime.getTime() <= Date.now()) {
+            return {
+              content: [
+                { type: 'text' as const, text: `Scheduled time is in the past. Please specify a future time.` },
+              ],
+              isError: true,
+            }
+          }
+        }
+
+        if (input.timezone && parsed.schedule.kind === 'cron') {
+          parsed.schedule.tz = input.timezone
+        }
+
+        job.schedule = parsed.schedule
+        scheduleChanged = true
+        changes.push(`schedule → ${formatSchedule(job.schedule)}`)
+      } else if (input.timezone && job.schedule.kind === 'cron') {
+        job.schedule.tz = input.timezone
+        scheduleChanged = true
+        changes.push(`timezone → ${input.timezone}`)
+      }
+
+      if (changes.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'No changes specified.' }],
+          isError: true,
+        }
+      }
+
+      job.updatedAt = new Date().toISOString()
+      saveJob(job)
+
+      // Reschedule if schedule changed and job is active
+      if (scheduleChanged && (job.status === 'pending' || job.status === 'running')) {
+        scheduler.cancelSchedule(job.id)
+        scheduler.scheduleJob(job)
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Updated task "${job.name}" (${job.id}):\n${changes.map((c) => `  • ${c}`).join('\n')}${
+              scheduleChanged && job.nextRunAt
+                ? `\nNext run: ${new Date(job.nextRunAt).toLocaleString()}`
+                : ''
+            }`,
+          },
+        ],
+      }
+    },
+  ),
+
+  tool(
+    'cron_trigger',
+    'Manually trigger a scheduled task to run immediately, regardless of its schedule. The task remains scheduled as before.',
+    {
+      jobId: z.string().describe('The ID of the task to trigger'),
+    },
+    async (input) => {
+      if (!scheduler) {
+        return {
+          content: [{ type: 'text' as const, text: 'Cron scheduler not initialized' }],
+          isError: true,
+        }
+      }
+
+      const job = getJob(input.jobId)
+      if (!job) {
+        return {
+          content: [{ type: 'text' as const, text: `Task not found: ${input.jobId}` }],
+          isError: true,
+        }
+      }
+
+      if (job.status === 'running') {
+        return {
+          content: [
+            { type: 'text' as const, text: `Task "${job.name}" is already running. Wait for it to complete.` },
+          ],
+          isError: true,
+        }
+      }
+
+      scheduler.triggerNow(job)
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Triggered task "${job.name}" (${job.id}) for immediate execution.`,
+          },
+        ],
       }
     },
   ),
