@@ -44,6 +44,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() })
 })
 
+// Service discovery endpoint (no auth required, used by LAN scanner)
+app.get('/api/discovery', (_req, res) => {
+  res.json({ service: 'CodeClaws', version: '0.1.0' })
+})
+
 // Public routes (no token required)
 app.use('/api/auth', authRouter)
 

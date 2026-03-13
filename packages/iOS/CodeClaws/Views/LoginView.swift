@@ -1,93 +1,440 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 struct LoginView: View {
     @EnvironmentObject var auth: AuthService
-    
-    @State private var serverURL: String = "http://192.168.1.35:4200"
-    @State private var token: String = "8f871be9c9d0b2df492961876af247d51c29016ccd6b01ba672b835793ed2d66"
+    @StateObject private var scanner = LANScanner()
+
+    @State private var port: String = "4200"
+    @State private var selectedServer: DiscoveredServer? = nil
+    @State private var manualURL: String = ""
+    @State private var showManualInput: Bool = false
+    @State private var token: String = ""
+    @State private var showToken: Bool = false
     @State private var isLoading: Bool = false
     @State private var errorMsg: String? = nil
-    
+    @State private var isChangingServer: Bool = false
+    /// nil = not checked yet, true = reachable, false = unreachable
+    @State private var serverReachable: Bool? = nil
+    @State private var isCheckingServer: Bool = false
+
+    private var cachedServerURL: String? {
+        auth.getServerURL()
+    }
+
+    private var showScanUI: Bool {
+        isChangingServer || cachedServerURL == nil || cachedServerURL == ""
+    }
+
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            
-            Text("Welcome to CodeClaws")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            
-            Text("Enter your access token to continue")
-                .foregroundColor(.secondary)
-            
-            if auth.getServerURL() == nil {
-                TextField("Server URL (e.g. http://192.168.1.10:4200)", text: $serverURL)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-            }
-            
-            SecureField("Access Token", text: $token)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-            
-            if let errorMsg = errorMsg {
-                Text(errorMsg)
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.red.cornerRadius(8))
-            }
-            
-            Button(action: login) {
-                if isLoading {
-                    ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
-                } else {
-                    Text("Log In")
+        ScrollView {
+            VStack(spacing: 0) {
+                // Header
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: 48, weight: .thin))
+                    .foregroundStyle(.linearGradient(
+                        colors: [.blue, .purple],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .padding(.top, 60)
+                    .padding(.bottom, 20)
+
+                Text("CodeClaws")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .padding(.bottom, 8)
+
+                Text("Connect to your server")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 32)
+
+                // === Server Discovery Section ===
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Server", systemImage: "server.rack")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    // Show cached server if available
+                    if let cached = cachedServerURL, !cached.isEmpty, !isChangingServer {
+                        HStack(spacing: 10) {
+                            // Reachability indicator
+                            Group {
+                                if isCheckingServer {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                } else if serverReachable == true {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                } else if serverReachable == false {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                } else {
+                                    Image(systemName: "circle")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(width: 20)
+
+                            Text(cached)
+                                .font(.system(.subheadline, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            Spacer()
+
+                            Button {
+                                isChangingServer = true
+                                serverReachable = nil
+                            } label: {
+                                Text("Change")
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(10)
+
+                        // Unreachable hint
+                        if serverReachable == false {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.caption2)
+                                Text("Server is unreachable. Check the address or scan for a new server.")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.orange)
+                        }
+                    }
+
+                    // Show scan UI when no cached server or user wants to change
+                    if showScanUI {
+                        // Port input + Scan button
+                        HStack(spacing: 12) {
+                            HStack(spacing: 0) {
+                                Image(systemName: "number")
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 30)
+                                TextField("Port", text: $port)
+                                    .keyboardType(.numberPad)
+                                    .frame(width: 70)
+                            }
+                            .padding(10)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
+
+                            Button(action: startScan) {
+                                HStack(spacing: 6) {
+                                    if scanner.isScanning {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "antenna.radiowaves.left.and.right")
+                                    }
+                                    Text(scanner.isScanning ? "Scanning..." : "Scan LAN")
+                                        .fontWeight(.medium)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(scanner.isScanning || port.isEmpty)
+
+                            if scanner.isScanning {
+                                Button {
+                                    scanner.cancel()
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        // Scan progress
+                        if scanner.isScanning {
+                            ProgressView(value: scanner.progress)
+                                .tint(.accentColor)
+                        }
+
+                        // Discovered servers list
+                        if !scanner.discoveredServers.isEmpty {
+                            VStack(spacing: 8) {
+                                ForEach(scanner.discoveredServers) { server in
+                                    Button {
+                                        selectServer(server)
+                                    } label: {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: selectedServer?.id == server.id ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(selectedServer?.id == server.id ? .green : .secondary)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(server.ip)
+                                                    .font(.system(.body, design: .monospaced))
+                                                    .foregroundColor(.primary)
+                                                Text("v\(server.version)")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                            Text(":\(server.port)")
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .padding(10)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(selectedServer?.id == server.id
+                                                      ? Color.accentColor.opacity(0.08)
+                                                      : Color(.systemGray6))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(selectedServer?.id == server.id
+                                                        ? Color.accentColor.opacity(0.3)
+                                                        : Color.clear, lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        // No results after scan
+                        if !scanner.isScanning && scanner.progress >= 1 && scanner.discoveredServers.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundColor(.orange)
+                                Text("No servers found on port \(port)")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(10)
+                        }
+
+                        // Manual input toggle
+                        Button {
+                            showManualInput.toggle()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: showManualInput ? "chevron.up" : "keyboard")
+                                Text(showManualInput ? "Hide manual input" : "Enter address manually")
+                                    .font(.footnote)
+                            }
+                            .foregroundColor(.accentColor)
+                        }
+                        .padding(.top, 4)
+
+                        if showManualInput {
+                            HStack(spacing: 0) {
+                                Image(systemName: "link")
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 30)
+                                TextField("http://192.168.1.x:4200", text: $manualURL)
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                                if !manualURL.isEmpty {
+                                    Button {
+                                        auth.setServerURL(manualURL)
+                                        selectedServer = nil
+                                        isChangingServer = false
+                                        checkServerReachability()
+                                    } label: {
+                                        Text("Use")
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.accentColor)
+                                    }
+                                    .padding(.trailing, 4)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
+                        }
+                    }
                 }
+                .frame(maxWidth: 360)
+                .padding(.bottom, 28)
+
+                // Divider
+                Rectangle()
+                    .fill(Color(.separator))
+                    .frame(height: 0.5)
+                    .frame(maxWidth: 360)
+                    .padding(.bottom, 28)
+
+                // === Token Section ===
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Access Token", systemImage: "key")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    HStack(spacing: 0) {
+                        Group {
+                            if showToken {
+                                TextField("Paste your token", text: $token)
+                            } else {
+                                SecureField("Paste your token", text: $token)
+                            }
+                        }
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+
+                        Button {
+                            showToken.toggle()
+                        } label: {
+                            Image(systemName: showToken ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
+                                .frame(width: 32)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            #if canImport(UIKit)
+                            if let clipboardString = UIPasteboard.general.string {
+                                token = clipboardString.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                            #elseif canImport(AppKit)
+                            if let clipboardString = NSPasteboard.general.string(forType: .string) {
+                                token = clipboardString.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                            #endif
+                        } label: {
+                            Image(systemName: "doc.on.clipboard")
+                                .foregroundColor(.accentColor)
+                                .frame(width: 32)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(12)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(10)
+                }
+                .frame(maxWidth: 360)
+
+                // Error message
+                if let errorMsg = errorMsg {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(errorMsg)
+                            .font(.footnote)
+                    }
+                    .foregroundColor(.red)
+                    .padding(.top, 12)
+                    .frame(maxWidth: 360)
+                }
+
+                // Login button
+                Button(action: login) {
+                    Group {
+                        if isLoading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Text("Log In")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 22)
+                }
+                .frame(maxWidth: 360)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isLoginDisabled ? Color.accentColor.opacity(0.4) : Color.accentColor)
+                )
+                .foregroundColor(.white)
+                .disabled(isLoginDisabled)
+                .padding(.top, 24)
+
+                Spacer().frame(height: 60)
             }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.accentColor)
-            .foregroundColor(.white)
-            .cornerRadius(8)
-            .disabled(isLoading || token.isEmpty || (auth.getServerURL() == nil && serverURL.isEmpty))
-            
-            Spacer()
+            .padding(.horizontal, 24)
         }
-        .padding()
         .onAppear {
-            let existing = auth.getServerURL()
-            print("[LoginView] onAppear, existing server URL: \(existing ?? "nil")")
-            if existing == nil || existing == "" {
-                 auth.setServerURL(serverURL)
-            } else {
-                 serverURL = existing!
+            if let savedToken = auth.getToken(), !savedToken.isEmpty {
+                token = savedToken
+            }
+            if cachedServerURL != nil && cachedServerURL != "" {
+                checkServerReachability()
+            }
+        }
+        .onChange(of: scanner.isScanning) { scanning in
+            if !scanning && !scanner.discoveredServers.isEmpty {
+                // Auto-select the first discovered server
+                selectServer(scanner.discoveredServers[0])
             }
         }
     }
-    
-    private func login() {
-        print("[LoginView] Login button pressed")
-        if auth.getServerURL() == nil && !serverURL.isEmpty {
-            print("[LoginView] Setting server URL: \(serverURL)")
-            auth.setServerURL(serverURL)
+
+    private var hasServerConfigured: Bool {
+        if selectedServer != nil { return true }
+        if let cached = cachedServerURL, !cached.isEmpty { return true }
+        return false
+    }
+
+    private var isLoginDisabled: Bool {
+        isLoading || token.isEmpty || !hasServerConfigured
+    }
+
+    private func selectServer(_ server: DiscoveredServer) {
+        selectedServer = server
+        auth.setServerURL(server.url)
+        isChangingServer = false
+        serverReachable = true
+    }
+
+    private func startScan() {
+        guard let portNum = Int(port), portNum > 0, portNum <= 65535 else { return }
+        scanner.scan(port: portNum)
+    }
+
+    private func checkServerReachability() {
+        guard let serverURL = cachedServerURL, !serverURL.isEmpty else { return }
+        guard let url = URL(string: "\(serverURL)/api/discovery") else {
+            serverReachable = false
+            return
         }
-        
-        isLoading = true
-        errorMsg = nil
-        
+
+        isCheckingServer = true
+        serverReachable = nil
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 3
+
         Task {
             do {
-                print("[LoginView] Calling verifyToken...")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    serverReachable = true
+                } else {
+                    serverReachable = false
+                }
+            } catch {
+                serverReachable = false
+            }
+            isCheckingServer = false
+        }
+    }
+
+    private func login() {
+        isLoading = true
+        errorMsg = nil
+
+        Task {
+            do {
                 let success = try await auth.verifyToken(token)
-                print("[LoginView] verifyToken result: \(success)")
                 if !success {
                     errorMsg = "Invalid token. Please check and try again."
                 }
             } catch {
-                print("[LoginView] verifyToken error: \(error.localizedDescription)")
                 errorMsg = error.localizedDescription
             }
             isLoading = false
-            print("[LoginView] isLoading set to false")
         }
     }
 }

@@ -30,6 +30,10 @@ class AuthService: ObservableObject {
         let finalUrl = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
         UserDefaults.standard.set(finalUrl, forKey: serverURLKey)
     }
+
+    func clearServerURL() {
+        UserDefaults.standard.removeObject(forKey: serverURLKey)
+    }
     
     func verifyToken(_ token: String) async throws -> Bool {
         print("[AuthService] Starting verifyToken")
