@@ -59,6 +59,21 @@ struct MessageBubbleView: View {
     @State private var expandThinking = false
     @State private var selectableText: SelectableTextItem?
 
+    private func formatMessageTime(_ timestamp: Double) -> String {
+        let date = Date(timeIntervalSince1970: timestamp / 1000)
+        let calendar = Calendar.current
+
+        if calendar.isDateInToday(date) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "M月d日 HH:mm"
+            return formatter.string(from: date)
+        }
+    }
+
     var body: some View {
         Group {
             if message.role == "user" {
@@ -83,7 +98,7 @@ struct MessageBubbleView: View {
     private var userBubble: some View {
         HStack {
             Spacer()
-            VStack(alignment: .trailing, spacing: 8) {
+            VStack(alignment: .trailing, spacing: 4) {
                 if let images = message.images, !images.isEmpty {
                     ScrollView(.horizontal) {
                         HStack {
@@ -102,14 +117,30 @@ struct MessageBubbleView: View {
                 }
                 Text(message.content)
                     .font(.body)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.blue)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue, Color.blue.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
                     .onLongPressGesture {
                         selectableText = SelectableTextItem(content: message.content)
                     }
+                Text(formatMessageTime(message.timestamp))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 4)
             }
             .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
         }
@@ -174,6 +205,12 @@ struct MessageBubbleView: View {
                         selectableText = SelectableTextItem(content: message.content)
                     }
             }
+
+            // Timestamp
+            Text(formatMessageTime(message.timestamp))
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .padding(.leading, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {

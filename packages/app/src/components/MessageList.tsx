@@ -53,24 +53,38 @@ export function MessageList({ messages, streamingText, streamingThinking, isRunn
   )
 }
 
+function formatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+
+  if (isToday) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end min-w-0">
-        <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-4 py-2 max-w-[85%] text-sm">
-          {message.images && message.images.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {message.images.map((img, i) => (
-                <img
-                  key={i}
-                  src={`data:${img.mediaType};base64,${img.data}`}
-                  alt={img.name || `Image ${i + 1}`}
-                  className="max-h-32 max-w-48 rounded-lg object-cover"
-                />
-              ))}
-            </div>
-          )}
-          <div className="whitespace-pre-wrap break-all">{message.content}</div>
+        <div className="flex flex-col items-end gap-1">
+          <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-4 py-2 max-w-[85%] text-sm">
+            {message.images && message.images.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {message.images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={`data:${img.mediaType};base64,${img.data}`}
+                    alt={img.name || `Image ${i + 1}`}
+                    className="max-h-32 max-w-48 rounded-lg object-cover"
+                  />
+                ))}
+              </div>
+            )}
+            <div className="whitespace-pre-wrap break-all">{message.content}</div>
+          </div>
+          <span className="text-[10px] text-muted-foreground px-1">{formatTimestamp(message.timestamp)}</span>
         </div>
       </div>
     )
@@ -118,6 +132,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <div className="text-sm whitespace-pre-wrap">{message.content}</div>
         </div>
       )}
+      <span className="text-[10px] text-muted-foreground px-1 mt-1 block">{formatTimestamp(message.timestamp)}</span>
     </div>
   )
 }

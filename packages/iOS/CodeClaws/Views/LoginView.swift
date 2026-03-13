@@ -363,8 +363,8 @@ struct LoginView: View {
                 checkServerReachability()
             }
         }
-        .onChange(of: scanner.isScanning) { scanning in
-            if !scanning && !scanner.discoveredServers.isEmpty {
+        .onChange(of: scanner.isScanning) {
+            if !scanner.isScanning && !scanner.discoveredServers.isEmpty {
                 // Auto-select the first discovered server
                 selectServer(scanner.discoveredServers[0])
             }
@@ -389,6 +389,9 @@ struct LoginView: View {
     }
 
     private func startScan() {
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
         guard let portNum = Int(port), portNum > 0, portNum <= 65535 else { return }
         scanner.scan(port: portNum)
     }

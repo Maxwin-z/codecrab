@@ -3,13 +3,15 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var auth: AuthService
-    
+    @EnvironmentObject var wsService: WebSocketService
+
     @State private var models: [ModelConfig] = []
     @State private var defaultModelId: String? = nil
     @State private var cliStatus: String = "Checking..."
-    
+
     @State private var showAddModel = false
-    
+    @State private var showChangeServerConfirm = false
+
     var body: some View {
         Form {
             Section(header: Text("Server Info")) {
@@ -18,6 +20,8 @@ struct SettingsView: View {
                     Spacer()
                     Text(auth.getServerURL() ?? "Not set")
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
                 HStack {
                     Text("CLI Status")
@@ -25,7 +29,35 @@ struct SettingsView: View {
                     Text(cliStatus)
                         .foregroundColor(.secondary)
                 }
+            }
+
+            Section {
+                Button {
+                    showChangeServerConfirm = true
+                } label: {
+                    HStack {
+                        Image(systemName: "server.rack")
+                        Text("Change Server")
+                    }
+                }
+                .confirmationDialog(
+                    "Change Server",
+                    isPresented: $showChangeServerConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Change Server & Re-login") {
+                        wsService.disconnect()
+                        auth.clearServerURL()
+                        auth.isAuthenticated = false
+                        dismiss()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This will disconnect from the current server and return to the login screen to configure a new server address and token.")
+                }
+
                 Button("Log Out") {
+                    wsService.disconnect()
                     auth.logout()
                     dismiss()
                 }

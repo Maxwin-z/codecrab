@@ -303,13 +303,22 @@ class WebSocketService: ObservableObject {
                         toolCalls = tcArray.compactMap { tc in
                             guard let name = tc["name"] as? String,
                                   let tcId = tc["id"] as? String else { return nil }
-                            let inputSummary = tc["inputSummary"] as? String ?? ""
                             let resultPreview = tc["resultPreview"] as? String
                             let isError = tc["isError"] as? Bool
+
+                            // Parse input - prefer structured input object, fallback to inputSummary string
+                            let input: JSONValue
+                            if let inputObj = tc["input"] {
+                                input = parseJSONValue(inputObj)
+                            } else {
+                                let inputSummary = tc["inputSummary"] as? String ?? ""
+                                input = .string(inputSummary)
+                            }
+
                             return ToolCall(
                                 name: name,
                                 id: tcId,
-                                input: .string(inputSummary),
+                                input: input,
                                 result: resultPreview,
                                 isError: isError
                             )
@@ -444,7 +453,31 @@ class WebSocketService: ObservableObject {
             abs(existing.timestamp - message.timestamp) < 5000
         }
     }
-    
+
+    /// Parse Any JSON value to JSONValue enum
+    private func parseJSONValue(_ value: Any) -> JSONValue {
+        if let str = value as? String {
+            return .string(str)
+        } else if let num = value as? Double {
+            return .number(num)
+        } else if let num = value as? Int {
+            return .number(Double(num))
+        } else if let bool = value as? Bool {
+            return .bool(bool)
+        } else if let dict = value as? [String: Any] {
+            var result: [String: JSONValue] = [:]
+            for (k, v) in dict {
+                result[k] = parseJSONValue(v)
+            }
+            return .object(result)
+        } else if let arr = value as? [Any] {
+            return .array(arr.map { parseJSONValue($0) })
+        } else if value is NSNull {
+            return .null
+        }
+        return .null
+    }
+
     /// Strip trailing [SUMMARY: ...] / [SUGGESTIONS: ...] tags from streaming text
     /// so they never flash on screen during streaming (matches web behavior).
     private func getDisplayStreamingText(_ text: String) -> String {
@@ -454,8 +487,8 @@ class WebSocketService: ObservableObject {
 
         // Complete tag start found — hide from there onwards
         for prefix in hiddenPrefixes {
-            if let idx = text.lastIndex(of: prefix) {
-                return String(text[..<idx])
+            if let range = text.range(of: prefix, options: .backwards) {
+                return String(text[..<range.lowerBound])
             }
         }
 

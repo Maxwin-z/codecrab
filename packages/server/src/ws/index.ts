@@ -579,7 +579,7 @@ function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').Cha
   // For system with tool calls: content is usually empty, tool data is sent separately
   const isTruncated = false // We no longer truncate content text
 
-  // Build lightweight tool call summaries
+  // Build tool call summaries - preserve input object for structured display
   let toolCalls: import('@codeclaws/shared').ChatMessageSummary['toolCalls']
   if (message.toolCalls && message.toolCalls.length > 0) {
     toolCalls = message.toolCalls.map((tc) => {
@@ -587,6 +587,7 @@ function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').Cha
       return {
         name: tc.name,
         id: tc.id,
+        input: tc.input, // Send original structured input for iOS to parse
         inputSummary: inputStr.slice(0, MAX_TOOL_RESULT_PREVIEW_LENGTH),
         resultPreview: tc.result ? tc.result.slice(0, MAX_TOOL_RESULT_PREVIEW_LENGTH) : undefined,
         isError: tc.isError,
@@ -1479,6 +1480,67 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             models,
           })
         }
+
+        // Send active query status (if a query is running on this project)
+        const projectState = getProjectState(projectId)
+        if (projectState?.activeQuery || queryQueue.isProjectBusy(projectId)) {
+          sendToClient(client, {
+            type: 'query_start',
+            projectId,
+            sessionId: resumedSession.sessionId,
+          })
+        }
+
+        // Resend pending interactive state (ask_user_question / permission_request)
+        const pendingQ = projectState?.pendingQuestion || resumedSession.pendingQuestion
+        const pendingP = projectState?.pendingPermissionRequest || resumedSession.pendingPermissionRequest
+        if (pendingQ) {
+          sendToClient(client, {
+            type: 'ask_user_question',
+            toolId: pendingQ.toolId,
+            questions: pendingQ.questions,
+            projectId,
+            sessionId: resumedSession.sessionId,
+          })
+        }
+        if (pendingP) {
+          sendToClient(client, {
+            type: 'permission_request',
+            ...pendingP,
+            projectId,
+            sessionId: resumedSession.sessionId,
+          })
+        }
+
+        // Re-send last summary and suggestions from session history
+        if (resumedSession.summary) {
+          sendToClient(client, {
+            type: 'query_summary',
+            summary: resumedSession.summary,
+            projectId,
+            sessionId: resumedSession.sessionId,
+          })
+        }
+        // Re-extract suggestions from the last assistant message
+        const lastAssistantMsg = [...resumedSession.messages].reverse().find(m => m.role === 'assistant')
+        if (lastAssistantMsg) {
+          const sugMatch = lastAssistantMsg.content.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+          if (sugMatch) {
+            const suggestions = sugMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+            sendToClient(client, {
+              type: 'query_suggestions',
+              suggestions,
+              projectId,
+              sessionId: resumedSession.sessionId,
+            })
+          }
+        }
+
+        // Send updated project statuses
+        sendToClient(client, {
+          type: 'project_statuses',
+          statuses: getProjectStatuses(),
+        })
       } else {
         sendToClient(client, {
           type: 'error',

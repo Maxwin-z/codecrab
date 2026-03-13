@@ -276,7 +276,7 @@ export interface ChatMessageSummary {
   hasImages: boolean
   timestamp: number
   // Lightweight tool call info for history display
-  toolCalls?: { name: string; id: string; inputSummary: string; resultPreview?: string; isError?: boolean }[]
+  toolCalls?: { name: string; id: string; input?: unknown; inputSummary: string; resultPreview?: string; isError?: boolean }[]
   costUsd?: number
   durationMs?: number
 }

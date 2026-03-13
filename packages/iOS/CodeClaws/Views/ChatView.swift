@@ -79,7 +79,7 @@ struct ChatView: View {
                         ScrollView {
                             MessageListView(
                                 messages: wsService.messages,
-                                streamingText: wsService.streamingText,
+                                streamingText: wsService.displayStreamingText,
                                 streamingThinking: wsService.streamingThinking,
                                 isRunning: wsService.isRunning
                             )
@@ -88,9 +88,21 @@ struct ChatView: View {
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
-                        .onChange(of: wsService.streamingText) { scrollToBottom(proxy) }
+                        .onChange(of: wsService.displayStreamingText) { scrollToBottom(proxy) }
                         .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
                         .onChange(of: isInputFocused) { scrollToBottom(proxy) }
+                        .onAppear {
+                            // Auto-scroll to bottom when entering the session
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                scrollToBottom(proxy)
+                            }
+                        }
+                        .onChange(of: wsService.sessionId) {
+                            // Auto-scroll to bottom when switching sessions
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                scrollToBottom(proxy)
+                            }
+                        }
                     }
                 }
             }
@@ -261,8 +273,8 @@ struct ChatView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            // Last session card
-            if let session = lastSession {
+            // Last session card — hide when input is focused to prevent accidental taps
+            if let session = lastSession, !isInputFocused {
                 Button(action: {
                     wsService.resumeSession(session.sessionId)
                 }) {
@@ -293,6 +305,7 @@ struct ChatView: View {
                 .buttonStyle(PlainButtonStyle())
                 .padding(.horizontal, 32)
                 .padding(.top, 28)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
 
             // Down arrow indicator
@@ -310,6 +323,7 @@ struct ChatView: View {
             .onAppear { arrowBounce = true }
         }
         .padding(.horizontal)
+        .animation(.easeInOut(duration: 0.25), value: isInputFocused)
     }
 
     private func fetchLastSession() {
