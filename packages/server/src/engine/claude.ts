@@ -132,15 +132,332 @@ const CODECLAWS_DIR = path.join(os.homedir(), '.codeclaws')
 const MODELS_FILE = path.join(CODECLAWS_DIR, 'models.json')
 const PROJECTS_FILE = path.join(CODECLAWS_DIR, 'projects.json')
 
-// Look up project path from projects.json
-function getProjectPath(projectId: string): string | null {
+// Look up project from projects.json
+interface ProjectInfo {
+  id: string
+  name: string
+  path: string
+  icon: string
+}
+
+function getProjectInfo(projectId: string): ProjectInfo | null {
   try {
     const data = fs.readFileSync(PROJECTS_FILE, 'utf-8')
-    const projects: { id: string; path: string }[] = JSON.parse(data)
-    const project = projects.find((p) => p.id === projectId)
-    return project?.path || null
+    const projects: ProjectInfo[] = JSON.parse(data)
+    return projects.find((p) => p.id === projectId) || null
   } catch {
     return null
+  }
+}
+
+function getProjectPath(projectId: string): string | null {
+  return getProjectInfo(projectId)?.path || null
+}
+
+// Build log prefix: [emoji name] or [ClaudeAdapter] as fallback
+function logPrefix(projectId?: string): string {
+  if (!projectId) return '[ClaudeAdapter]'
+  const info = getProjectInfo(projectId)
+  if (info?.icon && info?.name) return `[${info.icon} ${info.name}]`
+  return `[ClaudeAdapter]`
+}
+
+// ── ANSI colors for terminal output ──────────────────────────
+const C = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  yellow: '\x1b[33m',
+  green: '\x1b[32m',
+  magenta: '\x1b[35m',
+  blue: '\x1b[34m',
+  red: '\x1b[31m',
+  gray: '\x1b[90m',
+  white: '\x1b[37m',
+  bgCyan: '\x1b[46m',
+  bgMagenta: '\x1b[45m',
+}
+
+// Formatted SDK message logger
+// Accumulates content_block_delta partials and prints condensed output
+interface StreamLogState {
+  /** Accumulating input_json_delta partials per content block index */
+  inputJsonAccum: Map<number, string>
+  /** Track current tool being streamed */
+  currentToolName?: string
+  /** Track text_delta accumulation */
+  textAccum: string
+  /** Track thinking_delta accumulation */
+  thinkingAccum: string
+}
+
+function createStreamLogState(): StreamLogState {
+  return {
+    inputJsonAccum: new Map(),
+    textAccum: '',
+    thinkingAccum: '',
+  }
+}
+
+function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
+  const type = msg.type
+
+  switch (type) {
+    case 'system': {
+      if (msg.subtype === 'init') {
+        const toolCount = msg.tools?.length || 0
+        const mcps = msg.mcp_servers || []
+        const mcpList = mcps.map((s: any) => {
+          const st = s.status === 'connected' ? `${C.green}✓${C.reset}` : `${C.red}✗${C.reset}`
+          return `${st}${s.name}`
+        }).join('  ')
+        const skillList = (msg.skills || []).join(', ')
+        const agents = (msg.agents || []).join(', ')
+        const plugins = (msg.plugins || []).map((p: any) => p.name).join(', ')
+        console.log(`${tag} ${C.green}${C.bold}⚡ init${C.reset}`)
+        console.log(`${tag}   ${C.dim}model:${C.reset}       ${C.bold}${msg.model}${C.reset}`)
+        console.log(`${tag}   ${C.dim}session:${C.reset}     ${msg.session_id}`)
+        console.log(`${tag}   ${C.dim}permission:${C.reset}  ${msg.permissionMode}`)
+        console.log(`${tag}   ${C.dim}tools (${toolCount}):${C.reset}  ${C.dim}${(msg.tools || []).slice(0, 20).join(', ')}${toolCount > 20 ? ` …+${toolCount - 20}` : ''}${C.reset}`)
+        console.log(`${tag}   ${C.dim}mcps:${C.reset}        ${mcpList || 'none'}`)
+        if (skillList) console.log(`${tag}   ${C.dim}skills:${C.reset}      ${skillList}`)
+        if (agents) console.log(`${tag}   ${C.dim}agents:${C.reset}      ${agents}`)
+        if (plugins) console.log(`${tag}   ${C.dim}plugins:${C.reset}     ${plugins}`)
+        console.log(`${tag}   ${C.dim}version:${C.reset}     ${msg.claude_code_version || '?'}`)
+      } else if (msg.subtype === 'compact_boundary') {
+        console.log(`${tag} ${C.dim}── compact boundary ──${C.reset}`)
+      } else {
+        console.log(`${tag} ${C.dim}system: ${msg.subtype || 'unknown'}${C.reset}`)
+      }
+      break
+    }
+
+    case 'stream_event': {
+      const evt = msg.event
+      if (!evt) break
+
+      switch (evt.type) {
+        case 'message_start': {
+          const m = evt.message
+          const u = m?.usage
+          if (u) {
+            const cacheEph = u.cache_creation
+            const ephParts: string[] = []
+            if (cacheEph?.ephemeral_5m_input_tokens) ephParts.push(`5m=${cacheEph.ephemeral_5m_input_tokens}`)
+            if (cacheEph?.ephemeral_1h_input_tokens) ephParts.push(`1h=${cacheEph.ephemeral_1h_input_tokens}`)
+            const ephStr = ephParts.length > 0 ? `  eph=[${ephParts.join(' ')}]` : ''
+            console.log(`${tag} ${C.blue}▶ message_start${C.reset}  ${C.dim}id=${m.id}  model=${m.model}${C.reset}`)
+            console.log(`${tag}   ${C.dim}tokens: in=${u.input_tokens || 0}  out=${u.output_tokens || 0}  cache_read=${u.cache_read_input_tokens || 0}  cache_create=${u.cache_creation_input_tokens || 0}${ephStr}${C.reset}`)
+            if (u.service_tier) console.log(`${tag}   ${C.dim}tier=${u.service_tier}${C.reset}`)
+          } else {
+            console.log(`${tag} ${C.blue}▶ message_start${C.reset}  ${C.dim}id=${m?.id}${C.reset}`)
+          }
+          break
+        }
+        case 'content_block_start': {
+          const block = evt.content_block
+          if (block?.type === 'tool_use') {
+            state.currentToolName = block.name
+            state.inputJsonAccum.set(evt.index, '')
+            const caller = block.caller?.type ? `  caller=${block.caller.type}` : ''
+            console.log(`${tag} ${C.yellow}🔧 tool_use[${evt.index}]${C.reset} ${C.bold}${block.name}${C.reset}  ${C.dim}id=${block.id}${caller}${C.reset}`)
+          } else if (block?.type === 'text') {
+            state.textAccum = ''
+            console.log(`${tag} ${C.cyan}📝 text[${evt.index}]${C.reset}`)
+          } else if (block?.type === 'thinking') {
+            state.thinkingAccum = ''
+            console.log(`${tag} ${C.magenta}💭 thinking[${evt.index}]${C.reset}`)
+          } else {
+            console.log(`${tag} ${C.dim}block_start[${evt.index}] type=${block?.type}${C.reset}`)
+          }
+          break
+        }
+        case 'content_block_delta': {
+          const delta = evt.delta
+          if (!delta) break
+          if (delta.type === 'input_json_delta') {
+            const prev = state.inputJsonAccum.get(evt.index) || ''
+            state.inputJsonAccum.set(evt.index, prev + (delta.partial_json || ''))
+          } else if (delta.type === 'text_delta') {
+            state.textAccum += delta.text || ''
+          } else if (delta.type === 'thinking_delta') {
+            state.thinkingAccum += delta.thinking || ''
+          }
+          // Accumulate silently — printed on content_block_stop
+          break
+        }
+        case 'content_block_stop': {
+          // Print accumulated tool input
+          const accum = state.inputJsonAccum.get(evt.index)
+          if (accum !== undefined) {
+            try {
+              const parsed = JSON.parse(accum)
+              for (const [k, v] of Object.entries(parsed)) {
+                const val = typeof v === 'string' ? v : JSON.stringify(v)
+                // Multi-line values: indent each line
+                if (typeof val === 'string' && val.includes('\n')) {
+                  console.log(`${tag}   ${C.yellow}${k}:${C.reset}`)
+                  for (const line of val.split('\n').slice(0, 15)) {
+                    console.log(`${tag}     ${C.dim}${line}${C.reset}`)
+                  }
+                  if (val.split('\n').length > 15) {
+                    console.log(`${tag}     ${C.dim}…(${val.split('\n').length - 15} more lines)${C.reset}`)
+                  }
+                } else {
+                  const display = val.length > 200 ? val.slice(0, 200) + '…' : val
+                  console.log(`${tag}   ${C.yellow}${k}:${C.reset} ${C.dim}${display}${C.reset}`)
+                }
+              }
+            } catch {
+              console.log(`${tag}   ${C.dim}raw: ${accum.slice(0, 300)}${C.reset}`)
+            }
+            state.inputJsonAccum.delete(evt.index)
+          }
+          // Print accumulated text
+          if (state.textAccum) {
+            const lines = state.textAccum.split('\n')
+            const preview = lines.slice(0, 8).join('\n')
+            const suffix = lines.length > 8 ? `\n${tag}     ${C.dim}…(${lines.length - 8} more lines, ${state.textAccum.length} chars total)${C.reset}` : ''
+            console.log(`${tag}   ${C.cyan}text (${state.textAccum.length} chars):${C.reset}`)
+            for (const line of preview.split('\n')) {
+              console.log(`${tag}     ${C.dim}${line}${C.reset}`)
+            }
+            if (suffix) console.log(suffix)
+            state.textAccum = ''
+          }
+          // Print accumulated thinking
+          if (state.thinkingAccum) {
+            const lines = state.thinkingAccum.split('\n')
+            const preview = lines.slice(0, 5).join('\n')
+            const suffix = lines.length > 5 ? `\n${tag}     ${C.dim}…(${lines.length - 5} more lines, ${state.thinkingAccum.length} chars total)${C.reset}` : ''
+            console.log(`${tag}   ${C.magenta}thinking (${state.thinkingAccum.length} chars):${C.reset}`)
+            for (const line of preview.split('\n')) {
+              console.log(`${tag}     ${C.magenta}${line}${C.reset}`)
+            }
+            if (suffix) console.log(suffix)
+            state.thinkingAccum = ''
+          }
+          break
+        }
+        case 'message_delta': {
+          const stop = evt.delta?.stop_reason
+          const outTokens = evt.usage?.output_tokens
+          const cm = evt.context_management
+          const edits = cm?.applied_edits?.length ? `  context_edits=${cm.applied_edits.length}` : ''
+          console.log(`${tag} ${C.blue}■ message_done${C.reset}  stop=${C.bold}${stop || 'none'}${C.reset}  out_tokens=${outTokens || '?'}${edits}`)
+          break
+        }
+        case 'message_stop': {
+          // Silent — message_delta already covers it
+          break
+        }
+        default: {
+          console.log(`${tag} ${C.dim}stream: ${evt.type}${C.reset}`)
+        }
+      }
+      break
+    }
+
+    case 'assistant': {
+      const m = msg.message
+      const content = m?.content
+      if (!content) break
+      const usage = m?.usage
+      const cm = m?.context_management
+      console.log(`${tag} ${C.green}${C.bold}◀ assistant${C.reset}  ${C.dim}id=${m.id}${C.reset}`)
+      for (const block of content) {
+        if (block.type === 'tool_use') {
+          const inputPreview = JSON.stringify(block.input)
+          const display = inputPreview.length > 200 ? inputPreview.slice(0, 200) + '…' : inputPreview
+          console.log(`${tag}   ${C.yellow}🔧 ${block.name}${C.reset}  ${C.dim}id=${block.id}${C.reset}`)
+          console.log(`${tag}     ${C.dim}${display}${C.reset}`)
+        } else if (block.type === 'text') {
+          const lines = (block.text || '').split('\n')
+          const preview = lines.slice(0, 6)
+          console.log(`${tag}   ${C.cyan}📝 text (${(block.text || '').length} chars):${C.reset}`)
+          for (const line of preview) {
+            console.log(`${tag}     ${C.dim}${line}${C.reset}`)
+          }
+          if (lines.length > 6) console.log(`${tag}     ${C.dim}…(${lines.length - 6} more lines)${C.reset}`)
+        } else if (block.type === 'thinking') {
+          const lines = (block.thinking || '').split('\n')
+          const preview = lines.slice(0, 4)
+          console.log(`${tag}   ${C.magenta}💭 thinking (${(block.thinking || '').length} chars):${C.reset}`)
+          for (const line of preview) {
+            console.log(`${tag}     ${C.magenta}${line}${C.reset}`)
+          }
+          if (lines.length > 4) console.log(`${tag}     ${C.magenta}…(${lines.length - 4} more lines)${C.reset}`)
+        }
+      }
+      if (usage) {
+        console.log(`${tag}   ${C.dim}tokens: in=${usage.input_tokens || 0}  out=${usage.output_tokens || 0}  cache_read=${usage.cache_read_input_tokens || 0}  cache_create=${usage.cache_creation_input_tokens || 0}${C.reset}`)
+      }
+      if (cm?.applied_edits?.length) {
+        console.log(`${tag}   ${C.dim}context_edits: ${cm.applied_edits.length}${C.reset}`)
+      }
+      break
+    }
+
+    case 'user': {
+      const content = msg.message?.content
+      if (!Array.isArray(content)) break
+      for (const block of content) {
+        if (block.type === 'tool_result') {
+          const toolResult = msg.tool_use_result
+          const resultStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+          const lines = resultStr.split('\n')
+          const errTag = block.is_error ? `${C.red} ERROR${C.reset}` : ''
+          console.log(`${tag} ${C.yellow}◀ tool_result${C.reset}${errTag}  ${C.dim}tool_use_id=${block.tool_use_id}${C.reset}`)
+          // Show output lines (up to 12)
+          const preview = lines.slice(0, 12)
+          for (const line of preview) {
+            console.log(`${tag}   ${C.dim}${line}${C.reset}`)
+          }
+          if (lines.length > 12) {
+            console.log(`${tag}   ${C.dim}…(${lines.length - 12} more lines, ${resultStr.length} chars total)${C.reset}`)
+          }
+          // Show stderr if present
+          if (toolResult?.stderr) {
+            console.log(`${tag}   ${C.red}stderr: ${toolResult.stderr.slice(0, 200)}${C.reset}`)
+          }
+          if (toolResult?.interrupted) {
+            console.log(`${tag}   ${C.red}⚠ interrupted${C.reset}`)
+          }
+        }
+      }
+      break
+    }
+
+    case 'result': {
+      const cost = msg.total_cost_usd != null ? `$${msg.total_cost_usd.toFixed(4)}` : '?'
+      const dur = msg.duration_ms != null ? `${(msg.duration_ms / 1000).toFixed(1)}s` : '?'
+      const err = msg.is_error ? `  ${C.red}ERROR${C.reset}` : ''
+      const sub = msg.subtype ? `  subtype=${msg.subtype}` : ''
+      console.log(`${tag} ${C.green}${C.bold}✅ result${C.reset}  cost=${C.bold}${cost}${C.reset}  duration=${C.bold}${dur}${C.reset}${sub}${err}`)
+      if (msg.result) {
+        const resultStr = typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result)
+        const lines = resultStr.split('\n').slice(0, 5)
+        for (const line of lines) {
+          console.log(`${tag}   ${C.dim}${line.slice(0, 200)}${C.reset}`)
+        }
+      }
+      break
+    }
+
+    case 'rate_limit_event': {
+      const info = msg.rate_limit_info
+      if (!info) break
+      const status = info.status === 'allowed' ? `${C.green}✓ allowed${C.reset}` : `${C.red}✗ ${info.status}${C.reset}`
+      const resets = info.resetsAt ? new Date(info.resetsAt * 1000).toLocaleTimeString() : '?'
+      const overage = info.isUsingOverage ? `${C.yellow}overage=on${C.reset}` : ''
+      console.log(`${tag} ${C.dim}⏱ rate_limit${C.reset}  ${status}  type=${info.rateLimitType || '?'}  resets=${resets}  ${overage}`)
+      break
+    }
+
+    default: {
+      console.log(`${tag} ${C.dim}${type}: ${JSON.stringify(msg).slice(0, 300)}${C.reset}`)
+    }
   }
 }
 
@@ -710,7 +1027,7 @@ export async function* executeQuery(
 
   // Capture stderr from Claude Code process
   options.stderr = (data: string) => {
-    console.error(`[ClaudeAdapter:stderr] ${data.trimEnd()}`)
+    console.error(`${tag} stderr: ${data.trimEnd()}`)
   }
 
   // Set model: prefer client override, then modelId from config, then name for custom providers
@@ -724,9 +1041,10 @@ export async function* executeQuery(
   }
 
   const isResuming = !!options.resume
+  const tag = logPrefix(client.projectId)
 
   try {
-    console.log(`[ClaudeAdapter] Starting query for project ${client.projectId || 'unknown'}...`)
+    console.log(`${tag} Starting query...`)
     console.log(`  CWD: ${client.cwd}`)
     console.log(`  Session: ${client.sessionId || 'new'}`)
     console.log(`  Using model: ${modelConfig.name} (${modelConfig.provider})`)
@@ -735,6 +1053,7 @@ export async function* executeQuery(
     console.log(`  CLAUDE_CONFIG_DIR: ${queryEnv.CLAUDE_CONFIG_DIR || '(default ~/.claude)'}`)
     console.log(`  Auth: ${queryEnv.ANTHROPIC_API_KEY ? 'API key (' + queryEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...)' : 'CLI OAuth (default keychain)'}`)
     console.log(`  ANTHROPIC_BASE_URL: ${queryEnv.ANTHROPIC_BASE_URL || 'default'}`)
+    console.log(`${tag} ${C.bgCyan}${C.bold} PROMPT ${C.reset} ${C.cyan}${prompt}${C.reset}`)
 
     // Set cron query context so cron_create can reliably access project/session info
     // (fallback for when canUseTool's updateToolInput is unavailable)
@@ -744,10 +1063,10 @@ export async function* executeQuery(
       sessionId: client.sessionId,
     })
 
-    console.log(`[ClaudeAdapter] Spawning SDK query for project ${client.projectId}...`)
+    console.log(`${tag} Spawning SDK query...`)
     const sdkPrompt = buildPrompt(prompt, images, client.sessionId)
     const stream = query({ prompt: sdkPrompt, options: options as any })
-    console.log(`[ClaudeAdapter] SDK query spawned for project ${client.projectId}`)
+    console.log(`${tag} SDK query spawned`)
 
     // Store the Query object for forceful close on abort
     if (client.activeQuery) {
@@ -756,10 +1075,9 @@ export async function* executeQuery(
 
     let messageCount = 0
     let gotResult = false
+    const streamLog = createStreamLogState()
     for await (const message of stream) {
-      if (messageCount === 0) {
-        console.log(`[ClaudeAdapter] First message received for project ${client.projectId}: ${message.type}`)
-      }
+      logSdkMessage(tag, message, streamLog)
       messageCount++
       // Capture sessionId from init
       if (
@@ -849,13 +1167,13 @@ export async function* executeQuery(
       // holds stdout open, which would keep the stream alive indefinitely.
       if (message.type === 'result') {
         gotResult = true
-        console.log(`[ClaudeAdapter] Result received, closing stream for project ${client.projectId}`)
+        console.log(`${tag} Result received, closing stream`)
         // Forcefully close the SDK subprocess so it doesn't block
         try { stream.close() } catch { /* already closing */ }
         break
       }
     }
-    console.log(`[ClaudeAdapter] Stream completed for project ${client.projectId}, ${messageCount} messages (gotResult: ${gotResult})`)
+    console.log(`${tag} Stream completed, ${messageCount} messages (gotResult: ${gotResult})`)
   } catch (err: any) {
     const isAbort =
       err.name === 'AbortError' ||
@@ -867,7 +1185,7 @@ export async function* executeQuery(
         isResuming &&
         err.message?.includes('exited with code 1')
       ) {
-        console.warn(`[ClaudeAdapter] Resume failed for session ${client.sessionId}, retrying without resume...`)
+        console.warn(`${tag} Resume failed for session ${client.sessionId}, retrying without resume...`)
         client.sessionId = undefined
         // Clear project state session too
         if (client.projectId) {
@@ -878,13 +1196,13 @@ export async function* executeQuery(
         yield* executeQuery(client, prompt, callbacks, images)
         return
       }
-      console.error(`[ClaudeAdapter] Query error for project ${client.projectId}:`, err)
+      console.error(`${tag} Query error:`, err)
       throw err
     } else {
-      console.log(`[ClaudeAdapter] Query aborted for project ${client.projectId}`)
+      console.log(`${tag} Query aborted`)
     }
   } finally {
-    console.log(`[ClaudeAdapter] Cleaning up query for project ${client.projectId}`)
+    console.log(`${tag} Cleaning up query`)
     // Clear active query
     client.activeQuery = null
     if (client.projectId) {
@@ -1020,12 +1338,6 @@ async function* processMessage(
 
     case 'result': {
       const result = message as any
-      console.log(`[ClaudeAdapter] Result message:`, JSON.stringify({
-        subtype: result.subtype,
-        is_error: result.is_error,
-        result: result.result,
-        duration_ms: result.duration_ms,
-      }))
       client.currentCostUsd = result.total_cost_usd
       client.currentDurationMs = result.duration_ms
 
