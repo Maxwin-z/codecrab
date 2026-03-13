@@ -54,6 +54,12 @@ class WebSocketService: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var streamingText: String = ""
     @Published var streamingThinking: String = ""
+
+    /// Filtered streaming text that hides SUMMARY/SUGGESTIONS tags during streaming
+    var displayStreamingText: String {
+        getDisplayStreamingText(streamingText)
+    }
+
     @Published var isAborting: Bool = false
     @Published var pendingQuestion: PendingQuestion? = nil
     @Published var pendingPermission: PendingPermission? = nil
@@ -321,7 +327,17 @@ class WebSocketService: ObservableObject {
                     )
                     loadedMessages.append(msg)
                 }
-                self.messages = loadedMessages
+                // Preserve locally-added user messages not yet in server history.
+                // Fixes race: sendPrompt adds user message locally, then a stale
+                // message_history (from switch_project) arrives and would wipe it.
+                let localOnlyUserMessages = self.messages.filter { local in
+                    local.role == "user" && !loadedMessages.contains { server in
+                        server.role == "user" &&
+                        server.content == local.content &&
+                        abs(server.timestamp - local.timestamp) < 5000
+                    }
+                }
+                self.messages = loadedMessages + localOnlyUserMessages
             }
         case "user_message":
             if isCurrentProject {
@@ -429,6 +445,33 @@ class WebSocketService: ObservableObject {
         }
     }
     
+    /// Strip trailing [SUMMARY: ...] / [SUGGESTIONS: ...] tags from streaming text
+    /// so they never flash on screen during streaming (matches web behavior).
+    private func getDisplayStreamingText(_ text: String) -> String {
+        if text.isEmpty { return text }
+
+        let hiddenPrefixes = ["\n[SUMMARY:", "\n[SUGGESTIONS:"]
+
+        // Complete tag start found — hide from there onwards
+        for prefix in hiddenPrefixes {
+            if let idx = text.lastIndex(of: prefix) {
+                return String(text[..<idx])
+            }
+        }
+
+        // Partial prefix at the very end (e.g. "\n[S" arriving char-by-char) — buffer it
+        for prefix in hiddenPrefixes {
+            for len in (2..<prefix.count).reversed() {
+                let partial = String(prefix.prefix(len))
+                if text.hasSuffix(partial) {
+                    return String(text.prefix(text.count - len))
+                }
+            }
+        }
+
+        return text
+    }
+
     private func cleanStreamingText(_ text: String) -> String {
         return text
             .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:.*?\\]\\s*$", with: "", options: .regularExpression)
