@@ -381,6 +381,13 @@ export interface ChatMessage {
   timestamp: number
 }
 
+export interface DebugEvent {
+  ts: number
+  type: 'query_start' | 'sdk_spawn' | 'sdk_init' | 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'result' | 'error' | 'permission_request' | 'permission_response' | 'ask_question' | 'usage'
+  detail?: string
+  data?: Record<string, unknown>
+}
+
 export interface PendingPermission {
   requestId: string
   toolName: string

@@ -129,6 +129,7 @@ export async function executePromptInSession(
       projectId,
       cwd: projState.cwd,
       messages: [],
+      debugEvents: [],
       status: 'idle',
       lastModified: Date.now(),
       summary: cronJobName ? `Parent Session for: ${cronJobName}` : 'Parent Session for Scheduled Tasks',
@@ -183,6 +184,7 @@ async function executeCronQuery(
     projectId,
     cwd: parentSession.cwd || projState.cwd,
     messages: [],
+    debugEvents: [],
     status: 'processing',
     lastModified: Date.now(),
     summary: cronJobName ? `Scheduled Task: ${cronJobName}` : 'Scheduled Task',
@@ -352,6 +354,13 @@ export function getSessionMessages(sessionId: string): ChatMessage[] | null {
   return session.messages
 }
 
+// Get debug events for a session
+export function getSessionDebugEvents(sessionId: string): import('@codeclaws/shared').DebugEvent[] | null {
+  const session = sessions.get(sessionId)
+  if (!session) return null
+  return session.debugEvents || []
+}
+
 // --- Session persistence ---
 const SESSIONS_DIR = path.join(os.homedir(), '.codeclaws', 'sessions')
 
@@ -412,6 +421,7 @@ async function loadPersistedSessions() {
             projectId: data.projectId,
             cwd: data.cwd,
             messages: data.messages || [],
+            debugEvents: data.debugEvents || [],
             status: 'idle', // Always start as idle on reload
             lastModified: data.lastModified || Date.now(),
             summary: data.summary,
@@ -456,6 +466,7 @@ interface Session {
   projectId?: string
   cwd?: string
   messages: ChatMessage[]
+  debugEvents: import('@codeclaws/shared').DebugEvent[]
   status: 'idle' | 'processing' | 'error'
   lastModified: number
   summary?: string
@@ -470,6 +481,25 @@ const sessions = new Map<string, Session>()
 let messageIdCounter = 0
 function genId(): string {
   return `msg-${Date.now()}-${++messageIdCounter}`
+}
+
+function summarizeToolInput(toolName: string, input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+  const obj = input as Record<string, unknown>
+  switch (toolName) {
+    case 'Read': case 'ReadFile': case 'Write': case 'WriteFile': case 'Edit': case 'EditFile':
+      return String(obj.file_path || obj.path || '').slice(0, 120)
+    case 'Bash': case 'bash':
+      return String(obj.command || '').slice(0, 120)
+    case 'Glob': case 'Grep':
+      return String(obj.pattern || '').slice(0, 120)
+    case 'ToolSearch':
+      return String(obj.query || '').slice(0, 120)
+    default: {
+      const firstStr = Object.values(obj).find((v) => typeof v === 'string')
+      return firstStr ? String(firstStr).slice(0, 80) : ''
+    }
+  }
 }
 
 function generateSessionIdLocal(): string {
@@ -866,6 +896,7 @@ function getOrCreateSessionForProject(
     sessionId,
     projectId,
     messages: [],
+    debugEvents: [],
     status: 'idle',
     lastModified: Date.now(),
   }
@@ -945,9 +976,22 @@ async function executeUserQuery(
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
   broadcastProjectStatuses()
 
+  // Debug event logger for this query
+  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
+    session.debugEvents.push({ ts: Date.now(), type, detail, data })
+  }
+  let thinkingStarted = false
+  let textStarted = false
+
+  logEvent('query_start', prompt.slice(0, 200))
+
   try {
     const stream = executeQuery(clientState, prompt, {
       onTextDelta: (text) => {
+        if (!textStarted) {
+          logEvent('text', 'Started generating text')
+          textStarted = true
+        }
         broadcastToProject(projectId, {
           type: 'stream_delta',
           deltaType: 'text',
@@ -959,6 +1003,10 @@ async function executeUserQuery(
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onThinkingDelta: (thinking) => {
+        if (!thinkingStarted) {
+          logEvent('thinking', 'Started thinking')
+          thinkingStarted = true
+        }
         broadcastToProject(projectId, {
           type: 'stream_delta',
           deltaType: 'thinking',
@@ -970,6 +1018,11 @@ async function executeUserQuery(
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onToolUse: (toolName, toolId, input) => {
+        // Reset text/thinking flags for next turn
+        thinkingStarted = false
+        textStarted = false
+        const inputSummary = summarizeToolInput(toolName, input)
+        logEvent('tool_use', `${toolName}: ${inputSummary}`, { toolName, toolId })
         broadcastToProject(projectId, {
           type: 'tool_use',
           toolName,
@@ -982,6 +1035,8 @@ async function executeUserQuery(
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
+        const resultPreview = content.length > 100 ? content.slice(0, 100) + '...' : content
+        logEvent('tool_result', isError ? `Error: ${resultPreview}` : resultPreview, { toolId, isError, length: content.length })
         broadcastToProject(projectId, {
           type: 'tool_result',
           toolId,
@@ -994,6 +1049,7 @@ async function executeUserQuery(
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onSessionInit: (sdkSessionId) => {
+        logEvent('sdk_init', `SDK session: ${sdkSessionId}`, { sdkSessionId })
         session.sdkSessionId = sdkSessionId
         persistSession(session)
         const ps = getOrCreateProjectState(projectId)
@@ -1005,6 +1061,7 @@ async function executeUserQuery(
         })
       },
       onPermissionRequest: (requestId, toolName, input, reason) => {
+        logEvent('permission_request', `${toolName}: ${reason || ''}`, { toolName, requestId })
         const projStateForP = getOrCreateProjectState(projectId)
         const permData = { requestId, toolName, input, reason }
         projStateForP.pendingPermissionRequest = permData
@@ -1022,7 +1079,8 @@ async function executeUserQuery(
         queryQueue.pauseTimeout(queuedQuery.id)
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
-      onUsage: (_usage) => {
+      onUsage: (usage) => {
+        logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
         queryQueue.touchActivity(queuedQuery.id, 'usage')
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
@@ -1034,6 +1092,12 @@ async function executeUserQuery(
         case 'system_init': {
           // Forward SDK MCP servers and skills to clients
           const initData = event.data as any
+          logEvent('sdk_init', `model: ${initData.model || 'unknown'}, tools: ${initData.tools?.length || 0}`, {
+            model: initData.model,
+            toolCount: initData.tools?.length,
+            mcpServerCount: initData.sdkMcpServers?.length,
+            skillCount: initData.sdkSkills?.length,
+          })
           if (initData.sdkMcpServers || initData.sdkSkills) {
             broadcastToProject(projectId, {
               type: 'system',
@@ -1058,6 +1122,12 @@ async function executeUserQuery(
           break
         case 'result': {
           const resultData = event.data as any
+          logEvent('result', `${resultData.subtype || 'end_turn'} | $${resultData.costUsd?.toFixed(4) || '?'} | ${((resultData.durationMs || 0) / 1000).toFixed(1)}s`, {
+            subtype: resultData.subtype,
+            costUsd: resultData.costUsd,
+            durationMs: resultData.durationMs,
+            isError: resultData.isError,
+          })
           broadcastToProject(projectId, {
             type: 'result',
             subtype: resultData.subtype,
@@ -1139,6 +1209,7 @@ async function executeUserQuery(
 
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
   } catch (err: any) {
+    logEvent('error', err.message || 'Query failed')
     console.error('[ws] Query error:', err)
     broadcastToProject(projectId, {
       type: 'error',
@@ -1147,6 +1218,7 @@ async function executeUserQuery(
       sessionId: session.sessionId,
     })
     session.status = 'error'
+    persistSession(session)
     return { success: false, error: err.message || 'Query failed', queryId: queuedQuery.id }
   } finally {
     session.status = 'idle'
@@ -1384,6 +1456,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           projectId,
           cwd: session?.cwd,
           messages: [],
+          debugEvents: [],
           status: 'idle',
           lastModified: Date.now(),
         }

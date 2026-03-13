@@ -4,7 +4,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import type { Project } from '@codeclaws/shared'
-import { getSessionsList } from '../ws/index.js'
+import { getSessionsList, getSessionMessages, getSessionDebugEvents } from '../ws/index.js'
 
 const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
 const PROJECTS_FILE = path.join(CONFIG_DIR, 'projects.json')
@@ -66,6 +66,20 @@ router.get('/sessions', async (_req, res) => {
   }
 
   res.json(result)
+})
+
+// Get session messages (public, for debug page)
+router.get('/sessions/:id/messages', (req, res) => {
+  const sessionId = req.params.id
+  const messages = getSessionMessages(sessionId)
+
+  if (messages === null) {
+    res.status(404).json({ error: 'Session not found' })
+    return
+  }
+
+  const debugEvents = getSessionDebugEvents(sessionId) || []
+  res.json({ sessionId, messages, debugEvents })
 })
 
 export default router
