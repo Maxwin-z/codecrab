@@ -246,19 +246,22 @@ private struct CodeContentView: View {
     }
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                    CodeLineView(
-                        lineNumber: index + 1,
-                        text: line,
-                        gutterWidth: gutterWidth,
-                        showLineNumbers: showLineNumbers
-                    )
+        GeometryReader { geo in
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        CodeLineView(
+                            lineNumber: index + 1,
+                            text: line,
+                            gutterWidth: gutterWidth,
+                            showLineNumbers: showLineNumbers
+                        )
+                    }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(minWidth: geo.size.width, alignment: .leading)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
         .background(Color(UIColor.systemBackground))
     }
@@ -283,6 +286,7 @@ private struct CodeLineView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(.primary)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.vertical, 0.5)
     }
