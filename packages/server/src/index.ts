@@ -1,3 +1,11 @@
+import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+// Load .env from project root (two levels up from packages/server/src)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: path.resolve(__dirname, '../../..', '.env') })
+
 import express from 'express'
 import { createServer } from 'http'
 import setupRouter from './api/setup.js'
@@ -11,7 +19,6 @@ import { pushRouter, initPush } from './mcp/push/index.js'
 import { getAvailableMcps } from './mcp/index.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
 import { setupWebSocket, executePromptInSession } from './ws/index.js'
-import path from 'path'
 import os from 'os'
 
 const app = express()

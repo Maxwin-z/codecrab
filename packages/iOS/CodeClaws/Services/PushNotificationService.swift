@@ -40,6 +40,7 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
     // MARK: - Request Permission & Register
 
     func requestPermissionAndRegister() {
+        print("[Push] requestPermissionAndRegister called")
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if let error = error {
                 print("[Push] Authorization error: \(error.localizedDescription)")
@@ -48,6 +49,7 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
             print("[Push] Authorization granted: \(granted)")
             if granted {
                 DispatchQueue.main.async {
+                    print("[Push] Calling registerForRemoteNotifications...")
                     UIApplication.shared.registerForRemoteNotifications()
                 }
             }
@@ -58,7 +60,7 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
 
     func didRegisterForRemoteNotifications(deviceToken token: Data) {
         let tokenString = token.map { String(format: "%02x", $0) }.joined()
-        print("[Push] Device token: \(tokenString)")
+        print("[Push] Device token received: \(tokenString)")
         self.deviceToken = tokenString
         Task {
             await uploadToken(tokenString)
@@ -66,7 +68,7 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
-        print("[Push] Failed to register: \(error.localizedDescription)")
+        print("[Push] ❌ Failed to register for remote notifications: \(error.localizedDescription)")
     }
 
     // MARK: - Server Registration
@@ -81,6 +83,7 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
         }
 
         let label = UIDevice.current.name
+        print("[Push] Uploading token to server (label: \(label))...")
 
         do {
             let _: RegisterResponse = try await APIClient.shared.fetch(
@@ -88,10 +91,10 @@ class PushNotificationService: NSObject, ObservableObject, UNUserNotificationCen
                 method: "POST",
                 body: RegisterBody(token: token, label: label)
             )
-            print("[Push] Token registered with server")
+            print("[Push] ✅ Token registered with server successfully")
             self.isRegistered = true
         } catch {
-            print("[Push] Failed to register token with server: \(error.localizedDescription)")
+            print("[Push] ❌ Failed to register token with server: \(error)")
         }
     }
 

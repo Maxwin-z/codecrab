@@ -56,7 +56,7 @@ export function initApns(): boolean {
 
   // Load key: prefer APNS_KEY (inline content), fall back to APNS_KEY_PATH (file)
   if (keyContent) {
-    p8Key = keyContent
+    p8Key = keyContent.replace(/\\n/g, '\n')
   } else if (keyPath) {
     const resolvedPath = keyPath.startsWith('~')
       ? path.join(process.env.HOME || '', keyPath.slice(1))
