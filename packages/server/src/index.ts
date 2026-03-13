@@ -23,7 +23,7 @@ import os from 'os'
 
 const app = express()
 const server = createServer(app)
-const PORT = 4200
+const PORT = Number(process.env.PORT) || 4200
 
 app.use(express.json())
 
