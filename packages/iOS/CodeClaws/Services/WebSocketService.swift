@@ -24,6 +24,15 @@ struct ProjectChatState {
     var sdkMcpServers: [SdkMcpServer] = []
     var sdkSkills: [SdkSkill] = []
     var sdkTools: [String] = []
+    // Activity heartbeat
+    var activityHeartbeat: ActivityHeartbeat? = nil
+}
+
+struct ActivityHeartbeat: Equatable {
+    var elapsedMs: Double
+    var lastActivityType: String
+    var lastToolName: String?
+    var paused: Bool
 }
 
 @MainActor
@@ -57,6 +66,7 @@ class WebSocketService: ObservableObject {
     @Published var sdkMcpServers: [SdkMcpServer] = []
     @Published var sdkSkills: [SdkSkill] = []
     @Published var sdkTools: [String] = []
+    @Published var activityHeartbeat: ActivityHeartbeat? = nil
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
@@ -185,6 +195,7 @@ class WebSocketService: ObservableObject {
             if isCurrentProject {
                 self.latestSummary = nil
                 self.suggestions = []
+                self.activityHeartbeat = nil
             }
         case "query_end":
             if let pid = projectId {
@@ -193,6 +204,7 @@ class WebSocketService: ObservableObject {
             }
             if isCurrentProject {
                 self.isAborting = false
+                self.activityHeartbeat = nil
                 // Save message if there's text or thinking content
                 if !self.streamingText.isEmpty || !self.streamingThinking.isEmpty {
                     let cleanText = self.cleanStreamingText(self.streamingText)
@@ -390,6 +402,19 @@ class WebSocketService: ObservableObject {
                     }
                 }
             }
+        case "activity_heartbeat":
+            if isCurrentProject {
+                let elapsedMs = json["elapsedMs"] as? Double ?? 0
+                let lastActivityType = json["lastActivityType"] as? String ?? "working"
+                let lastToolName = json["lastToolName"] as? String
+                let paused = json["paused"] as? Bool ?? false
+                self.activityHeartbeat = ActivityHeartbeat(
+                    elapsedMs: elapsedMs,
+                    lastActivityType: lastActivityType,
+                    lastToolName: lastToolName,
+                    paused: paused
+                )
+            }
         default:
             break
         }
@@ -586,6 +611,7 @@ class WebSocketService: ObservableObject {
             state.sdkMcpServers = sdkMcpServers
             state.sdkSkills = sdkSkills
             state.sdkTools = sdkTools
+            state.activityHeartbeat = activityHeartbeat
             projectStates[current] = state
         }
 
@@ -605,6 +631,7 @@ class WebSocketService: ObservableObject {
             sdkMcpServers = state.sdkMcpServers
             sdkSkills = state.sdkSkills
             sdkTools = state.sdkTools
+            activityHeartbeat = state.activityHeartbeat
         } else {
             messages = []
             streamingText = ""
@@ -619,6 +646,7 @@ class WebSocketService: ObservableObject {
             sdkMcpServers = []
             sdkSkills = []
             sdkTools = []
+            activityHeartbeat = nil
         }
 
         // Always clear summary/suggestions on project switch

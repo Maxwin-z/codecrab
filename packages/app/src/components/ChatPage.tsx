@@ -249,12 +249,40 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
       {/* Connection status */}
       <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground border-b shrink-0">
-        <span className={`w-1.5 h-1.5 rounded-full ${ws.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className={`w-1.5 h-1.5 rounded-full ${
+          ws.activityHeartbeat
+            ? ws.activityHeartbeat.paused
+              ? 'bg-yellow-500'
+              : 'bg-green-500 animate-pulse'
+            : ws.connected ? 'bg-green-500' : 'bg-red-500'
+        }`} />
         <span>{ws.connected ? 'Connected' : 'Disconnected'}</span>
         {ws.sessionId && (
           <>
             <span className="text-muted-foreground/50">·</span>
             <span className="text-muted-foreground font-mono">{ws.sessionId.slice(-6)}</span>
+          </>
+        )}
+        {ws.activityHeartbeat && (
+          <>
+            <span className="text-muted-foreground/50">·</span>
+            <span className="text-muted-foreground">
+              {ws.activityHeartbeat.paused
+                ? 'Waiting for input'
+                : ws.activityHeartbeat.lastActivityType === 'text_delta'
+                  ? 'Streaming'
+                  : ws.activityHeartbeat.lastActivityType === 'thinking_delta'
+                    ? 'Thinking'
+                    : ws.activityHeartbeat.lastActivityType === 'tool_use'
+                      ? `Tool: ${ws.activityHeartbeat.lastToolName || 'unknown'}`
+                      : ws.activityHeartbeat.lastActivityType === 'tool_result'
+                        ? 'Processing result'
+                        : 'Working'}
+            </span>
+            <span className="text-muted-foreground/50">·</span>
+            <span className="text-muted-foreground font-mono">
+              {Math.floor(ws.activityHeartbeat.elapsedMs / 60000)}m {Math.floor((ws.activityHeartbeat.elapsedMs % 60000) / 1000)}s
+            </span>
           </>
         )}
       </div>

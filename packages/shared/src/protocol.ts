@@ -213,6 +213,15 @@ export interface CronTaskCompletedMessage extends ServerProjectContext {
   success: boolean
 }
 
+export interface ActivityHeartbeatMessage extends ServerProjectContext {
+  type: 'activity_heartbeat'
+  queryId: string
+  elapsedMs: number
+  lastActivityType: string
+  lastToolName?: string
+  paused?: boolean
+}
+
 export interface SessionStatusChangedMessage extends ServerProjectContext {
   type: 'session_status_changed'
   status: 'idle' | 'processing' | 'error'
@@ -326,6 +335,7 @@ export type ServerMessage =
   | QueryQueueStatusMessage
   | QueryQueuedMessage
   | CronTaskCompletedMessage
+  | ActivityHeartbeatMessage
 
 // ============ Image Attachments ============
 

@@ -107,6 +107,13 @@ interface ProjectChatState {
   sdkMcpServers: SdkMcpServer[]
   sdkSkills: SdkSkill[]
   sdkTools: string[]
+  // Activity heartbeat from server
+  activityHeartbeat: {
+    elapsedMs: number
+    lastActivityType: string
+    lastToolName?: string
+    paused?: boolean
+  } | null
 }
 
 function createEmptyProjectState(): ProjectChatState {
@@ -127,6 +134,7 @@ function createEmptyProjectState(): ProjectChatState {
     sdkMcpServers: [],
     sdkSkills: [],
     sdkTools: [],
+    activityHeartbeat: null,
   }
 }
 
@@ -150,6 +158,7 @@ export interface UseWebSocketReturn {
   sdkMcpServers: SdkMcpServer[]
   sdkSkills: SdkSkill[]
   sdkTools: string[]
+  activityHeartbeat: ProjectChatState['activityHeartbeat']
   sdkLoaded: boolean
   probeSdk: () => void
   sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => void
@@ -263,12 +272,14 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.isRunning = true
           pState.latestSummary = null
           pState.suggestions = []
+          pState.activityHeartbeat = null
           if (isActiveProject) emitQueryStateChange(true)
           break
 
         case 'query_end':
           pState.isRunning = false
           pState.isAborting = false
+          pState.activityHeartbeat = null
           if (isActiveProject) emitQueryStateChange(false)
 
           // Flush remaining streaming text into a message
@@ -499,6 +510,15 @@ export function useWebSocket(): UseWebSocketReturn {
             if (msg.sdkMcpServers) pState.sdkMcpServers = msg.sdkMcpServers
             if (msg.sdkSkills) pState.sdkSkills = msg.sdkSkills
             if (msg.tools) pState.sdkTools = msg.tools
+          }
+          break
+
+        case 'activity_heartbeat':
+          pState.activityHeartbeat = {
+            elapsedMs: msg.elapsedMs,
+            lastActivityType: msg.lastActivityType,
+            lastToolName: msg.lastToolName,
+            paused: msg.paused,
           }
           break
       }
@@ -740,6 +760,7 @@ export function useWebSocket(): UseWebSocketReturn {
     permissionMode: activeState.permissionMode,
     sessionId: activeState.sessionId,
     projectStatuses,
+    activityHeartbeat: activeState.activityHeartbeat,
     sdkMcpServers: activeState.sdkMcpServers,
     sdkSkills: activeState.sdkSkills,
     sdkTools: activeState.sdkTools,

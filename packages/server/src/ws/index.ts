@@ -34,7 +34,7 @@ import {
   probeSdkInit,
 } from '../engine/claude.js'
 import { QueryQueue } from '../engine/query-queue.js'
-import type { QueuedQuery, QueryResult } from '../engine/query-queue.js'
+import type { QueuedQuery, QueryResult, QueryTimerState } from '../engine/query-queue.js'
 
 // Export for API use
 export { getSessionStatuses as getSessions }
@@ -52,6 +52,40 @@ const queryQueue = new QueryQueue((event) => {
   })
 })
 export { queryQueue }
+
+// Activity heartbeat — throttle to one broadcast per 30s per query
+const HEARTBEAT_THROTTLE_MS = 30_000
+const lastHeartbeatSentAt = new Map<string, number>()
+
+function maybeSendActivityHeartbeat(projectId: string, sessionId: string, queryId: string): void {
+  const now = Date.now()
+  const lastSent = lastHeartbeatSentAt.get(queryId) || 0
+  if (now - lastSent < HEARTBEAT_THROTTLE_MS) return
+
+  const timerState = queryQueue.getTimerState(queryId)
+  if (!timerState) return
+
+  const runningQuery = queryQueue.getRunningQuery(projectId)
+  if (!runningQuery) return
+
+  const elapsedMs = now - (runningQuery.startedAt || now)
+
+  lastHeartbeatSentAt.set(queryId, now)
+  broadcastToProject(projectId, {
+    type: 'activity_heartbeat',
+    projectId,
+    sessionId,
+    queryId,
+    elapsedMs,
+    lastActivityType: timerState.lastActivityType,
+    lastToolName: timerState.lastToolName,
+    paused: timerState.paused || undefined,
+  })
+}
+
+function cleanupHeartbeat(queryId: string): void {
+  lastHeartbeatSentAt.delete(queryId)
+}
 
 // Execute a prompt in a specific session (used by cron jobs)
 // Now enqueues through the query queue instead of executing directly
@@ -198,15 +232,19 @@ async function executeCronQuery(
     const stream = executeQuery(clientState, prompt, {
       onTextDelta: (text) => {
         finalText += text
+        queryQueue.touchActivity(queuedQuery.id, 'text_delta')
       },
       onThinkingDelta: () => {
         // Cron execution doesn't broadcast thinking to parent
+        queryQueue.touchActivity(queuedQuery.id, 'thinking_delta')
       },
-      onToolUse: () => {
+      onToolUse: (_toolName) => {
         // Cron execution doesn't broadcast tool use to parent
+        queryQueue.touchActivity(queuedQuery.id, 'tool_use', _toolName)
       },
       onToolResult: () => {
         // Cron execution doesn't broadcast tool result to parent
+        queryQueue.touchActivity(queuedQuery.id, 'tool_result')
       },
       onSessionInit: (sdkSessionId) => {
         execSession.sdkSessionId = sdkSessionId
@@ -215,7 +253,9 @@ async function executeCronQuery(
       onPermissionRequest: () => {
         // Cron jobs bypass permissions
       },
-      onUsage: () => {},
+      onUsage: () => {
+        queryQueue.touchActivity(queuedQuery.id, 'usage')
+      },
     })
 
     for await (const event of stream) {
@@ -905,6 +945,8 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
+        queryQueue.touchActivity(queuedQuery.id, 'text_delta')
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onThinkingDelta: (thinking) => {
         broadcastToProject(projectId, {
@@ -914,6 +956,8 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
+        queryQueue.touchActivity(queuedQuery.id, 'thinking_delta')
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onToolUse: (toolName, toolId, input) => {
         broadcastToProject(projectId, {
@@ -924,6 +968,8 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
+        queryQueue.touchActivity(queuedQuery.id, 'tool_use', toolName)
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
         broadcastToProject(projectId, {
@@ -934,6 +980,8 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
+        queryQueue.touchActivity(queuedQuery.id, 'tool_result')
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
       onSessionInit: (sdkSessionId) => {
         session.sdkSessionId = sdkSessionId
@@ -961,8 +1009,13 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
+        queryQueue.pauseTimeout(queuedQuery.id)
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
-      onUsage: (_usage) => {},
+      onUsage: (_usage) => {
+        queryQueue.touchActivity(queuedQuery.id, 'usage')
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+      },
     }, images, enabledMcps, disabledSdkServers, disabledSkills)
 
     let finalText = ''
@@ -1022,6 +1075,8 @@ async function executeUserQuery(
             projectId,
             sessionId: session.sessionId,
           })
+          queryQueue.pauseTimeout(queuedQuery.id)
+          maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
           break
         }
       }
@@ -1088,6 +1143,7 @@ async function executeUserQuery(
     projStateForEnd.pendingPermissionRequest = null
     session.pendingQuestion = null
     session.pendingPermissionRequest = null
+    cleanupHeartbeat(queuedQuery.id)
     broadcastToProject(projectId, {
       type: 'query_end',
       projectId,
@@ -1432,6 +1488,12 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       session.pendingQuestion = null
       persistSession(session)
 
+      // Resume idle timeout for the running query
+      const runningQueryForQ = queryQueue.getRunningQuery(projectId)
+      if (runningQueryForQ) {
+        queryQueue.resumeTimeout(runningQueryForQ.id)
+      }
+
       const answerText = Object.entries(msg.answers)
         .map(([key, value]) => {
           if (Array.isArray(value)) {
@@ -1458,6 +1520,13 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         session.pendingPermissionRequest = null
         persistSession(session)
       }
+
+      // Resume idle timeout for the running query
+      const runningQueryForP = queryQueue.getRunningQuery(projectId)
+      if (runningQueryForP) {
+        queryQueue.resumeTimeout(runningQueryForP.id)
+      }
+
       const handled = handlePermissionResponse(clientState, msg.requestId, msg.allow)
       if (!handled) {
         // Try other client states for this project

@@ -1,7 +1,9 @@
-// QueryQueue — per-project FIFO query queue with timeout support
+// QueryQueue — per-project FIFO query queue with activity-based idle timeout
 //
 // Ensures only one query runs per project at a time.
 // Both user prompts and cron jobs are enqueued here.
+// Timeout resets on every activity signal (text, thinking, tool use, etc.)
+// and pauses when waiting for user input (permission request, ask_user_question).
 
 export type QueryType = 'user' | 'cron'
 export type QueryStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'
@@ -48,6 +50,14 @@ export interface QueryStatusEvent {
   queueLength?: number
 }
 
+export interface QueryTimerState {
+  timerId: NodeJS.Timeout | null
+  lastActivityAt: number
+  paused: boolean
+  lastActivityType: string
+  lastToolName?: string
+}
+
 export type StatusChangeCallback = (event: QueryStatusEvent) => void
 
 function getTimeoutMs(): number {
@@ -66,7 +76,7 @@ function generateQueryId(): string {
 export class QueryQueue {
   private queues = new Map<string, QueuedQuery[]>()
   private running = new Map<string, QueuedQuery>()
-  private timeoutTimers = new Map<string, NodeJS.Timeout>()
+  private timerStates = new Map<string, QueryTimerState>()
   private onStatusChange: StatusChangeCallback
 
   constructor(onStatusChange: StatusChangeCallback) {
@@ -168,18 +178,24 @@ export class QueryQueue {
       })
     })
 
-    // Set timeout
+    // Set idle timeout with timer state
     const timeoutMs = getTimeoutMs()
-    const timer = setTimeout(() => {
+    const now = Date.now()
+    const timerId = setTimeout(() => {
       this.handleTimeout(projectId, query)
     }, timeoutMs)
-    this.timeoutTimers.set(query.id, timer)
+    this.timerStates.set(query.id, {
+      timerId,
+      lastActivityAt: now,
+      paused: false,
+      lastActivityType: 'started',
+    })
 
-    console.log(`[QueryQueue] Running query ${query.id} for project ${projectId} (timeout: ${timeoutMs}ms)`)
+    console.log(`[QueryQueue] Running query ${query.id} for project ${projectId} (idle timeout: ${timeoutMs}ms)`)
 
     try {
       const result = await query._executor(query)
-      this.clearTimeout(query.id)
+      this.clearTimerState(query.id)
 
       // Timeout handler may have changed status asynchronously
       if ((query.status as QueryStatus) === 'timeout') {
@@ -193,7 +209,7 @@ export class QueryQueue {
 
       console.log(`[QueryQueue] Query ${query.id} completed in ${query.completedAt - query.startedAt!}ms`)
     } catch (err: any) {
-      this.clearTimeout(query.id)
+      this.clearTimerState(query.id)
 
       if ((query.status as QueryStatus) === 'timeout') {
         return
@@ -213,27 +229,103 @@ export class QueryQueue {
   }
 
   private handleTimeout(projectId: string, query: QueuedQuery): void {
-    console.warn(`[QueryQueue] Query ${query.id} timed out after ${getTimeoutMs()}ms`)
+    console.warn(`[QueryQueue] Query ${query.id} idle timeout after ${getTimeoutMs()}ms of no activity`)
     query.status = 'timeout'
     query.completedAt = Date.now()
 
     // Abort the running query
     query.abortController.abort()
 
+    this.timerStates.delete(query.id)
+
     this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'timeout' })
-    query._resolve({ success: false, error: 'Query timed out', queryId: query.id })
+    query._resolve({ success: false, error: 'Query timed out (idle)', queryId: query.id })
 
     // Remove from running so next can proceed
     this.running.delete(projectId)
     this.processNext(projectId)
   }
 
-  private clearTimeout(queryId: string): void {
-    const timer = this.timeoutTimers.get(queryId)
-    if (timer) {
-      clearTimeout(timer)
-      this.timeoutTimers.delete(queryId)
+  private clearTimerState(queryId: string): void {
+    const state = this.timerStates.get(queryId)
+    if (state) {
+      if (state.timerId) clearTimeout(state.timerId)
+      this.timerStates.delete(queryId)
     }
+  }
+
+  /**
+   * Signal activity on a running query, resetting the idle timer.
+   */
+  touchActivity(queryId: string, activityType: string, toolName?: string): void {
+    const state = this.timerStates.get(queryId)
+    if (!state) return
+
+    state.lastActivityAt = Date.now()
+    state.lastActivityType = activityType
+    state.lastToolName = toolName
+
+    // If paused (waiting for user input), only update metadata — timer restarts on resume
+    if (state.paused) return
+
+    // Reset idle timer
+    if (state.timerId) clearTimeout(state.timerId)
+    const timeoutMs = getTimeoutMs()
+    const query = this.findQueryById(queryId)
+    if (query) {
+      state.timerId = setTimeout(() => {
+        this.handleTimeout(query.projectId, query)
+      }, timeoutMs)
+    }
+  }
+
+  /**
+   * Pause the idle timeout (e.g. when waiting for user permission or question response).
+   */
+  pauseTimeout(queryId: string): void {
+    const state = this.timerStates.get(queryId)
+    if (!state || state.paused) return
+
+    if (state.timerId) {
+      clearTimeout(state.timerId)
+      state.timerId = null
+    }
+    state.paused = true
+    console.log(`[QueryQueue] Paused idle timeout for query ${queryId}`)
+  }
+
+  /**
+   * Resume the idle timeout after user responds.
+   */
+  resumeTimeout(queryId: string): void {
+    const state = this.timerStates.get(queryId)
+    if (!state || !state.paused) return
+
+    state.paused = false
+    state.lastActivityAt = Date.now()
+
+    const timeoutMs = getTimeoutMs()
+    const query = this.findQueryById(queryId)
+    if (query) {
+      state.timerId = setTimeout(() => {
+        this.handleTimeout(query.projectId, query)
+      }, timeoutMs)
+    }
+    console.log(`[QueryQueue] Resumed idle timeout for query ${queryId}`)
+  }
+
+  /**
+   * Get the timer state for a query (used by heartbeat broadcaster).
+   */
+  getTimerState(queryId: string): QueryTimerState | undefined {
+    return this.timerStates.get(queryId)
+  }
+
+  private findQueryById(queryId: string): QueuedQuery | undefined {
+    for (const query of this.running.values()) {
+      if (query.id === queryId) return query
+    }
+    return undefined
   }
 
   /**
@@ -263,7 +355,7 @@ export class QueryQueue {
     const query = this.running.get(projectId)
     if (query) {
       query.abortController.abort()
-      this.clearTimeout(query.id)
+      this.clearTimerState(query.id)
       console.log(`[QueryQueue] Aborted running query ${query.id} for project ${projectId}`)
     }
     return query

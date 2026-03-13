@@ -166,17 +166,31 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    Text("\(project.icon) \(project.name)")
-                        .font(.headline)
-                    Circle()
-                        .fill(wsService.connected ? Color.green : Color.red)
-                        .frame(width: 6, height: 6)
-                    if !wsService.sessionId.isEmpty {
-                        Text(String(wsService.sessionId.suffix(6)))
-                            .font(.caption2)
-                            .fontDesign(.monospaced)
-                            .foregroundStyle(.secondary)
+                VStack(spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("\(project.icon) \(project.name)")
+                            .font(.headline)
+                        Circle()
+                            .fill(heartbeatDotColor)
+                            .frame(width: 6, height: 6)
+                            .opacity(wsService.activityHeartbeat != nil && !(wsService.activityHeartbeat?.paused ?? false) ? 0.6 : 1.0)
+                            .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: wsService.activityHeartbeat != nil)
+                        if !wsService.sessionId.isEmpty {
+                            Text(String(wsService.sessionId.suffix(6)))
+                                .font(.caption2)
+                                .fontDesign(.monospaced)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let hb = wsService.activityHeartbeat {
+                        HStack(spacing: 4) {
+                            Text(activityLabel(hb))
+                            Text("·")
+                            Text(formatElapsed(hb.elapsedMs))
+                                .fontDesign(.monospaced)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -254,5 +268,30 @@ struct ChatView: View {
         for entry in allNew {
             enabledIds.insert(entry.id)
         }
+    }
+
+    private var heartbeatDotColor: Color {
+        if let hb = wsService.activityHeartbeat {
+            return hb.paused ? .yellow : .green
+        }
+        return wsService.connected ? .green : .red
+    }
+
+    private func activityLabel(_ hb: ActivityHeartbeat) -> String {
+        if hb.paused { return "Waiting for input" }
+        switch hb.lastActivityType {
+        case "text_delta": return "Streaming"
+        case "thinking_delta": return "Thinking"
+        case "tool_use": return "Tool: \(hb.lastToolName ?? "unknown")"
+        case "tool_result": return "Processing result"
+        default: return "Working"
+        }
+    }
+
+    private func formatElapsed(_ ms: Double) -> String {
+        let totalSeconds = Int(ms / 1000)
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return "\(minutes)m \(seconds)s"
     }
 }
