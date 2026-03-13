@@ -77,13 +77,6 @@ struct InputBarView: View {
                 .onSubmit {
                     send()
                 }
-                .onChange(of: isRunning) { _, running in
-                    if !running {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            isFocused = true
-                        }
-                    }
-                }
                 .onChange(of: isFocused) { _, focused in
                     isInputFocused = focused
                 }
