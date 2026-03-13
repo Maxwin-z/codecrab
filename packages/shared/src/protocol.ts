@@ -227,6 +227,11 @@ export interface SdkEventMessage extends ServerProjectContext {
   event: DebugEvent
 }
 
+export interface SdkEventHistoryMessage extends ServerProjectContext {
+  type: 'sdk_event_history'
+  events: DebugEvent[]
+}
+
 export interface SessionStatusChangedMessage extends ServerProjectContext {
   type: 'session_status_changed'
   status: 'idle' | 'processing' | 'error'
@@ -342,6 +347,7 @@ export type ServerMessage =
   | CronTaskCompletedMessage
   | ActivityHeartbeatMessage
   | SdkEventMessage
+  | SdkEventHistoryMessage
 
 // ============ Image Attachments ============
 

@@ -383,6 +383,7 @@ async function persistSession(session: Session) {
       projectId: session.projectId,
       cwd: session.cwd,
       messages: session.messages,
+      debugEvents: session.debugEvents,
       status: session.status,
       lastModified: session.lastModified,
       summary: session.summary,
@@ -1285,6 +1286,15 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     if (session && session.messages.length > 0) {
       sendMessageHistoryInChunks(client, projectId, session.sessionId, session.messages)
     }
+    // Send SDK event history for timeline rendering
+    if (session && session.debugEvents.length > 0) {
+      sendToClient(client, {
+        type: 'sdk_event_history',
+        projectId,
+        sessionId: session.sessionId,
+        events: session.debugEvents,
+      })
+    }
 
     // If a query is running on this project, tell the client
     const projectState = getProjectState(projectId)
@@ -1544,6 +1554,15 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         })
         // Send message history in chunks to avoid exceeding WebSocket limits
         sendMessageHistoryInChunks(client, projectId, resumedSession.sessionId, resumedSession.messages)
+        // Send SDK event history for timeline rendering
+        if (resumedSession.debugEvents.length > 0) {
+          sendToClient(client, {
+            type: 'sdk_event_history',
+            projectId,
+            sessionId: resumedSession.sessionId,
+            events: resumedSession.debugEvents,
+          })
+        }
         const models = getCachedModels()
         if (models && models.length > 0) {
           sendToClient(client, {

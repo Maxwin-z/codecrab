@@ -383,6 +383,7 @@ class WebSocketService: ObservableObject {
         case "cleared":
             if isCurrentProject {
                 self.messages = []
+                self.sdkEvents = []
                 self.streamingText = ""
                 self.streamingThinking = ""
                 self.pendingQuestion = nil
@@ -446,19 +447,13 @@ class WebSocketService: ObservableObject {
             }
         case "sdk_event":
             if isCurrentProject, let eventDict = json["event"] as? [String: Any] {
-                let ts = eventDict["ts"] as? Double ?? 0
-                let eventType = eventDict["type"] as? String ?? "unknown"
-                let detail = eventDict["detail"] as? String
-                var eventData: [String: JSONValue]? = nil
-                if let dataDict = eventDict["data"] as? [String: Any] {
-                    var parsed: [String: JSONValue] = [:]
-                    for (k, v) in dataDict {
-                        parsed[k] = parseJSONValue(v)
-                    }
-                    eventData = parsed
+                if let event = parseSdkEvent(eventDict) {
+                    self.sdkEvents.append(event)
                 }
-                let event = SdkEvent(ts: ts, type: eventType, detail: detail, data: eventData)
-                self.sdkEvents.append(event)
+            }
+        case "sdk_event_history":
+            if isCurrentProject, let eventsArray = json["events"] as? [[String: Any]] {
+                self.sdkEvents = eventsArray.compactMap { parseSdkEvent($0) }
             }
         default:
             break
@@ -496,6 +491,22 @@ class WebSocketService: ObservableObject {
             return .null
         }
         return .null
+    }
+
+    /// Parse a single SDK event dictionary into an SdkEvent
+    private func parseSdkEvent(_ eventDict: [String: Any]) -> SdkEvent? {
+        let ts = eventDict["ts"] as? Double ?? 0
+        let eventType = eventDict["type"] as? String ?? "unknown"
+        let detail = eventDict["detail"] as? String
+        var eventData: [String: JSONValue]? = nil
+        if let dataDict = eventDict["data"] as? [String: Any] {
+            var parsed: [String: JSONValue] = [:]
+            for (k, v) in dataDict {
+                parsed[k] = parseJSONValue(v)
+            }
+            eventData = parsed
+        }
+        return SdkEvent(ts: ts, type: eventType, detail: detail, data: eventData)
     }
 
     /// Strip trailing [SUMMARY: ...] / [SUGGESTIONS: ...] tags from streaming text
