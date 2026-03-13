@@ -4,6 +4,7 @@ struct ChatView: View {
     let project: Project
     @EnvironmentObject var wsService: WebSocketService
     @State private var showSidebar = false
+    @State private var showFileBrowser = false
     @State private var customMcps: [McpInfo] = []
     @State private var enabledIds: Set<String> = []
     @State private var isInputFocused: Bool = false
@@ -210,13 +211,21 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: { showSidebar = true }) {
-                    Image(systemName: "list.bullet")
+                HStack(spacing: 12) {
+                    Button(action: { showFileBrowser = true }) {
+                        Image(systemName: "folder")
+                    }
+                    Button(action: { showSidebar = true }) {
+                        Image(systemName: "list.bullet")
+                    }
                 }
             }
         }
         .sheet(isPresented: $showSidebar) {
             SessionSidebarView(projectId: project.id)
+        }
+        .sheet(isPresented: $showFileBrowser) {
+            FileBrowserView(projectPath: project.path)
         }
         .onAppear {
             wsService.switchProject(projectId: project.id, cwd: project.path)
