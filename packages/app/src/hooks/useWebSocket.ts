@@ -109,6 +109,7 @@ interface SessionChatState {
   sdkEvents: DebugEvent[]
   latestSummary: string | null
   suggestions: string[]
+  pendingQuestion: { toolId: string; questions: Question[] } | null
 }
 
 function createEmptySessionState(): SessionChatState {
@@ -119,6 +120,7 @@ function createEmptySessionState(): SessionChatState {
     sdkEvents: [],
     latestSummary: null,
     suggestions: [],
+    pendingQuestion: null,
   }
 }
 
@@ -141,7 +143,6 @@ interface ProjectChatState {
   // overwriting the viewing session.
   awaitingSessionSwitch: boolean
   // Per-project state
-  pendingQuestion: { toolId: string; questions: Question[] } | null
   pendingPermission: PendingPermission | null
   isRunning: boolean
   isAborting: boolean
@@ -168,7 +169,6 @@ function createEmptyProjectState(): ProjectChatState {
     sessionId: '',
     sessionStates: new Map(),
     awaitingSessionSwitch: false,
-    pendingQuestion: null,
     pendingPermission: null,
     isRunning: false,
     isAborting: false,
@@ -350,6 +350,14 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.activityHeartbeat = null
           needsRender = true
           if (isActiveProject) emitQueryStateChange(false)
+
+          // Defensively remove the completed query from the queue.
+          // query_queue_status(completed) should handle this, but query_end
+          // serves as a backup to prevent stale queue items.
+          const endQueryId = (msg as any).queryId
+          if (endQueryId) {
+            pState.queryQueue = pState.queryQueue.filter((q) => q.queryId !== endQueryId)
+          }
 
           // Flush remaining streaming text into the correct session's messages
           const target = getTargetSession()
@@ -612,13 +620,17 @@ export function useWebSocket(): UseWebSocketReturn {
           break
         }
 
-        case 'ask_user_question':
-          pState.pendingQuestion = {
-            toolId: msg.toolId,
-            questions: msg.questions,
+        case 'ask_user_question': {
+          const target = getTargetSession()
+          if (target) {
+            target.sState.pendingQuestion = {
+              toolId: msg.toolId,
+              questions: msg.questions,
+            }
+            if (target.isViewing) needsRender = true
           }
-          needsRender = true
           break
+        }
 
         case 'session_status_changed':
           if (msg.sessionId) {
@@ -917,7 +929,10 @@ export function useWebSocket(): UseWebSocketReturn {
       const pid = activeProjectIdRef.current
       if (pid) {
         const pState = getProjectState(pid)
-        pState.pendingQuestion = null
+        const sid = pState.sessionId
+        if (sid) {
+          getSessionState(pState, sid).pendingQuestion = null
+        }
         triggerRender()
       }
     },
@@ -928,7 +943,10 @@ export function useWebSocket(): UseWebSocketReturn {
     const pid = activeProjectIdRef.current
     if (pid) {
       const pState = getProjectState(pid)
-      pState.pendingQuestion = null
+      const sid = pState.sessionId
+      if (sid) {
+        getSessionState(pState, sid).pendingQuestion = null
+      }
       triggerRender()
     }
   }, [getProjectState, triggerRender])
@@ -1004,7 +1022,7 @@ export function useWebSocket(): UseWebSocketReturn {
     streamingThinking: viewingSessionState.streamingThinking,
     latestSummary: viewingSessionState.latestSummary,
     suggestions: viewingSessionState.suggestions,
-    pendingQuestion: activeState.pendingQuestion,
+    pendingQuestion: viewingSessionState.pendingQuestion,
     pendingPermission: activeState.pendingPermission,
     cwd: activeState.cwd,
     availableModels,
