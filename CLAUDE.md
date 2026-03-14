@@ -19,7 +19,14 @@ pnpm build                # TypeScript build all packages (pnpm -r build)
 pnpm start                # Start server in production mode
 ```
 
-No test or lint commands are configured yet.
+**Testing (server only):**
+```bash
+cd packages/server
+pnpm test                 # Run tests once (vitest)
+pnpm test:watch           # Watch mode
+```
+
+No lint commands are configured yet.
 
 ## Architecture
 
@@ -36,12 +43,13 @@ web → (standalone)
 shared → (no internal deps)
 ```
 
-**Server (`packages/server`)** — Express 5 + WebSocket on port 4200. Key subsystems:
+**Server (`packages/server`)** — Express 5 + WebSocket on port 4200, uses `@anthropic-ai/claude-agent-sdk` for Claude interactions. Key subsystems:
 - `src/engine/` — EngineAdapter interface with ClaudeAdapter implementation. Streaming events: text_delta, thinking_delta, tool_use, tool_result.
 - `src/ws/` — WebSocket connection & message routing (bidirectional protocol defined in shared/protocol.ts).
 - `src/api/` — REST routes for projects, models, sessions, files.
 - `src/auth/` — Token-based auth (middleware + WS upgrade hook).
-- `src/mcp/` — MCP extensions: cron (scheduled tasks), push (web push notifications), chrome (DevTools Protocol automation).
+- `src/mcp/` — MCP extensions: cron (scheduled tasks with pause/resume/trigger), push (web push notifications), chrome (DevTools Protocol automation).
+- `src/skills/` — Skills registry for managing SDK-provided skills.
 
 **App (`packages/app`)** — React 19 chat UI. Vite proxies `/api` and `/ws` to the server. Components: ChatPage, InputBar, MessageList, ModelSelector, SessionSidebar, SetupWizard, FileBrowser, ProjectList. State via hooks (useWebSocket, WebSocketContext).
 
@@ -57,8 +65,8 @@ shared → (no internal deps)
 
 ## WebSocket Protocol
 
-Client→Server: prompt, command, set_cwd, abort, resume_session, respond_question, respond_permission
-Server→Client: stream_delta, assistant_text, thinking, tool_use, tool_result, result, permission_request
+Client→Server: prompt, command, set_cwd, abort, resume_session, respond_question, respond_permission, set_model, set_permission_mode, switch_project, probe_sdk
+Server→Client: system, stream_delta, assistant_text, thinking, tool_use, tool_result, result, query_start, query_end, query_summary, query_suggestions, query_queue_status, query_queued, cleared, aborted, cwd_changed, error, session_resumed, session_created, session_status_changed, ask_user_question, model_changed, permission_mode_changed, permission_request, message_history, message_history_chunk, user_message, available_models, project_statuses, cron_task_completed, activity_heartbeat, sdk_event, sdk_event_history
 
 ## Authentication
 
@@ -81,9 +89,11 @@ const ws = new WebSocket(`ws://host/ws?token=${getToken()}`)
 
 **Public Endpoints (no token required):**
 - `GET /api/auth/status` — check auth configuration
-- `POST /api/auth/login` — authenticate and get token
+- `POST /api/auth/verify` — verify a token (for login page)
+- `POST /api/auth/refresh` — generate a new token (requires current valid token in body)
 - `GET /api/setup/detect` — check if Claude Code is installed
 - `GET /api/setup/detect/probe` — full probe of CLI availability
+- `GET /api/discovery` — service discovery (returns service name and version)
 - `GET /api/health` — health check
 
 ## Configuration Files
