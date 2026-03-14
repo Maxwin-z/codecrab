@@ -1155,6 +1155,23 @@ export async function* executeQuery(
       })
     }
 
+    // Auto-disable sandbox for Bash commands that require full system access
+    // (e.g. xcodebuild install to real devices needs Keychain & USB access)
+    if (toolName === 'Bash' && typeof input.command === 'string') {
+      const cmd = input.command
+      const needsFullAccess =
+        cmd.includes('xcodebuild') ||
+        cmd.includes('ios-deploy') ||
+        cmd.includes('ideviceinstaller') ||
+        cmd.includes('xcrun devicectl') ||
+        cmd.includes('xcrun simctl install') ||
+        cmd.includes('codesign')
+      if (needsFullAccess && !input.dangerouslyDisableSandbox) {
+        opts.updateToolInput?.({ ...input, dangerouslyDisableSandbox: true })
+        console.log(`[canUseTool] Auto-disabled sandbox for Bash command: ${cmd.slice(0, 80)}`)
+      }
+    }
+
     // In bypass mode, auto-approve
     if (isYolo) {
       return { behavior: 'allow' }
