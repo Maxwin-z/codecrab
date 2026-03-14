@@ -87,6 +87,13 @@ struct HomeView: View {
         }
         .task {
             await fetchProjects()
+            // Handle shares that arrived before HomeView appeared (cold start via URL scheme)
+            if let projectId = shareHandler.pendingProjectId {
+                handleIncomingShare(projectId: projectId)
+            } else {
+                // Also check App Group for unconsumed shares (fallback if URL scheme didn't fire)
+                shareHandler.checkOnActivation()
+            }
         }
         .onChange(of: shareHandler.pendingProjectId) { _, projectId in
             guard let projectId = projectId else { return }

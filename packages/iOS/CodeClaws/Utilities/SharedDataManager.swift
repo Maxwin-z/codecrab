@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import AVFoundation
 
 struct PendingShareMetadata: Codable {
     let id: String
@@ -106,13 +107,39 @@ class SharedDataManager {
                     let base64 = file.data.base64EncodedString()
                     attachments.append(ImageAttachment(data: base64, mediaType: file.mimeType, name: file.name))
                 }
-            } else {
-                let base64 = file.data.base64EncodedString()
-                attachments.append(ImageAttachment(data: base64, mediaType: file.mimeType, name: file.name))
+            } else if file.mimeType.hasPrefix("video/") {
+                // Extract thumbnail from video
+                if let thumbnail = extractVideoThumbnail(from: file.data),
+                   let compressed = ImageCompressor.compressImage(thumbnail) {
+                    attachments.append(ImageAttachment(
+                        data: compressed.data,
+                        mediaType: compressed.mediaType,
+                        name: (file.name as NSString).deletingPathExtension + "_thumbnail.jpg"
+                    ))
+                }
             }
+            // Skip other non-image file types (not supported by Claude API)
         }
 
         clearPendingShare(id: metadata.id)
         return (metadata.projectId, metadata.sessionId, attachments)
+    }
+
+    /// Extract a thumbnail frame from video data
+    private func extractVideoThumbnail(from videoData: Data) -> UIImage? {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        do {
+            try videoData.write(to: tempURL)
+            let asset = AVURLAsset(url: tempURL)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 1568, height: 1568)
+            let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
+            return UIImage(cgImage: cgImage)
+        } catch {
+            return nil
+        }
     }
 }

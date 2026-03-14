@@ -808,17 +808,26 @@ export function buildPrompt(
   }
 
   // Build content blocks: images first, then text
+  const supportedImageTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
   const contentBlocks: unknown[] = []
 
   for (const img of images) {
-    contentBlocks.push({
-      type: 'image',
-      source: {
-        type: 'base64',
-        data: img.data,
-        media_type: img.mediaType,
-      },
-    })
+    if (supportedImageTypes.has(img.mediaType)) {
+      contentBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          data: img.data,
+          media_type: img.mediaType,
+        },
+      })
+    }
+    // Skip unsupported media types (video, etc.)
+  }
+
+  // If no supported images remain, return plain text
+  if (contentBlocks.length === 0) {
+    return enhancedPrompt
   }
 
   contentBlocks.push({

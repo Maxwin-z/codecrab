@@ -41,18 +41,7 @@ class ShareViewController: UIViewController {
     }
 
     private func openApp(url: URL) {
-        // Open main app URL via responder chain (standard Share Extension technique)
-        let selector = sel_registerName("openURL:")
-        var responder: UIResponder? = self
-        while let r = responder {
-            if r.responds(to: selector) {
-                r.perform(selector, with: url)
-                break
-            }
-            responder = r.next
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.complete()
-        }
+        // Open the containing app — do NOT call completeRequest, system handles dismissal
+        extensionContext?.open(url, completionHandler: nil)
     }
 }

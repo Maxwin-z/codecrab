@@ -112,6 +112,7 @@ struct ShareNavigationView: View {
     @State private var isLoadingProjects = true
     @State private var isLoadingSessions = false
     @State private var isSending = false
+    @State private var showSuccess = false
     @State private var errorMessage: String?
     @State private var fileNames: [String] = []
 
@@ -133,7 +134,20 @@ struct ShareNavigationView: View {
                     .background(Color.orange.opacity(0.08))
                 }
 
-                if isLoadingProjects {
+                if showSuccess {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 56))
+                            .foregroundColor(.green)
+                        Text("Shared successfully!")
+                            .font(.headline)
+                        Text("Switch to CodeClaws to continue")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                } else if isLoadingProjects {
                     Spacer()
                     ProgressView("Loading projects...")
                     Spacer()
@@ -414,8 +428,16 @@ struct ShareNavigationView: View {
 
             ShareDataManager.shared.savePendingShare(metadata: metadata, fileDataPairs: fileDataPairs)
 
+            isSending = false
+
             if let url = URL(string: "codeclaws://share?id=\(shareId)") {
                 onOpenApp(url)
+                // Give system time to open, then show fallback if still here
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                // If we're still here, open failed — show success and auto-dismiss
+                showSuccess = true
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                onComplete()
             } else {
                 onComplete()
             }
