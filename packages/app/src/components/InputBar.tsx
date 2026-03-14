@@ -311,8 +311,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onCompositionStart={() => { isComposingRef.current = true }}
           onCompositionEnd={() => { isComposingRef.current = false }}
           onPaste={handlePaste}
-          placeholder={isRunning ? 'Running...' : 'Cmd+Enter to send'}
-          disabled={disabled || isRunning}
+          placeholder="Cmd+Enter to send"
+          disabled={disabled}
           rows={1}
           className="w-full min-h-[44px] max-h-[150px] bg-transparent px-4 pt-3 pb-1 text-sm resize-none placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
         />
@@ -323,7 +323,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           <div className="flex items-center gap-1">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || isRunning}
+              disabled={disabled}
               className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:pointer-events-none"
               title="Attach images"
             >
@@ -346,7 +346,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       setMcpPopoverOpen((v) => !v)
                     }
                   }}
-                  disabled={disabled || isRunning || sdkProbing}
+                  disabled={disabled || sdkProbing}
                   className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none ${
                     sdkProbing
                       ? 'text-muted-foreground'
@@ -476,7 +476,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             {onPermissionModeChange && (
               <button
                 onClick={() => onPermissionModeChange(permissionMode === 'bypassPermissions' ? 'default' : 'bypassPermissions')}
-                disabled={disabled || isRunning}
+                disabled={disabled}
                 title={permissionMode === 'bypassPermissions' ? 'YOLO mode: all actions auto-approved' : 'Safe mode: dangerous actions require approval'}
                 className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 ${
                   permissionMode === 'bypassPermissions'
@@ -502,40 +502,21 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               </button>
             )}
             <span className="text-xs text-muted-foreground font-mono mr-1">{currentModel || 'Default'}</span>
-            {isRunning ? (
-              <button
-                onClick={onAbort}
-                disabled={isAborting}
-                className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/90 transition-colors disabled:opacity-50"
-                title={isAborting ? 'Stopping...' : 'Stop'}
-              >
-                {isAborting ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" className="animate-spin">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeDasharray="60" strokeDashoffset="20" />
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="1" />
-                  </svg>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={!canSend}
-                className={`h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
-                  canSend
-                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                    : 'bg-muted text-muted-foreground'
-                }`}
-                title="Send (Cmd+Enter)"
-              >
-                {/* Up arrow icon */}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              </button>
-            )}
+            <button
+              onClick={handleSubmit}
+              disabled={!canSend}
+              className={`h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
+                canSend
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                  : 'bg-muted text-muted-foreground'
+              }`}
+              title="Send (Cmd+Enter)"
+            >
+              {/* Up arrow icon */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { MessageList } from './MessageList'
 import { InputBar, type InputBarHandle } from './InputBar'
+import { QueryQueueBar } from './QueryQueueBar'
 import { UserQuestionForm } from './UserQuestionForm'
 import { SessionSidebar } from './SessionSidebar'
 import { ExecSessionSheet } from './ExecSessionSheet'
@@ -429,6 +430,15 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
           ))}
         </div>
       )}
+
+      {/* Query queue */}
+      <QueryQueueBar
+        items={ws.queryQueue}
+        currentSessionId={ws.sessionId}
+        onAbort={ws.abort}
+        onDequeue={ws.dequeueQuery}
+        isAborting={ws.isAborting}
+      />
 
       {/* Input */}
       <InputBar

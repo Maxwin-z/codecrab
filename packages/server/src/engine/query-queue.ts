@@ -48,6 +48,9 @@ export interface QueryStatusEvent {
   status: QueryStatus
   position?: number
   queueLength?: number
+  prompt?: string
+  queryType?: QueryType
+  cronJobName?: string
 }
 
 export interface QueryTimerState {
@@ -136,6 +139,9 @@ export class QueryQueue {
       status: 'queued',
       position: position + runningOffset,
       queueLength: queue.length + runningOffset,
+      prompt: query.prompt,
+      queryType: query.type,
+      cronJobName: query.metadata?.cronJobName,
     })
 
     console.log(`[QueryQueue] Enqueued ${params.type} query ${queryId} for project ${params.projectId}, position=${position + runningOffset}`)
@@ -164,6 +170,9 @@ export class QueryQueue {
       status: 'running',
       position: 0,
       queueLength: queue.length + 1,
+      prompt: query.prompt,
+      queryType: query.type,
+      cronJobName: query.metadata?.cronJobName,
     })
 
     // Broadcast updated positions for remaining queued items
@@ -175,6 +184,9 @@ export class QueryQueue {
         status: 'queued',
         position: idx + 1,
         queueLength: queue.length + 1,
+        prompt: q.prompt,
+        queryType: q.type,
+        cronJobName: q.metadata?.cronJobName,
       })
     })
 
@@ -204,7 +216,7 @@ export class QueryQueue {
 
       query.status = 'completed'
       query.completedAt = Date.now()
-      this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'completed' })
+      this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'completed', prompt: query.prompt, queryType: query.type, cronJobName: query.metadata?.cronJobName })
       query._resolve(result)
 
       console.log(`[QueryQueue] Query ${query.id} completed in ${query.completedAt - query.startedAt!}ms`)
@@ -218,7 +230,7 @@ export class QueryQueue {
       query.status = 'failed'
       query.completedAt = Date.now()
       query.error = err.message
-      this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'failed' })
+      this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'failed', prompt: query.prompt, queryType: query.type, cronJobName: query.metadata?.cronJobName })
       query._resolve({ success: false, error: err.message, queryId: query.id })
 
       console.error(`[QueryQueue] Query ${query.id} failed:`, err.message)
@@ -238,7 +250,7 @@ export class QueryQueue {
 
     this.timerStates.delete(query.id)
 
-    this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'timeout' })
+    this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'timeout', prompt: query.prompt, queryType: query.type, cronJobName: query.metadata?.cronJobName })
     query._resolve({ success: false, error: 'Query timed out (idle)', queryId: query.id })
 
     // Remove from running so next can proceed
@@ -339,7 +351,7 @@ export class QueryQueue {
         const removed = queue.splice(idx, 1)[0]
         removed.status = 'cancelled'
         removed.completedAt = Date.now()
-        this.onStatusChange({ queryId, projectId, sessionId: removed.sessionId, status: 'cancelled' })
+        this.onStatusChange({ queryId, projectId, sessionId: removed.sessionId, status: 'cancelled', prompt: removed.prompt, queryType: removed.type, cronJobName: removed.metadata?.cronJobName })
         removed._resolve({ success: false, error: 'Cancelled', queryId })
         console.log(`[QueryQueue] Cancelled queued query ${queryId}`)
         return true

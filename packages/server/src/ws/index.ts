@@ -50,6 +50,9 @@ const queryQueue = new QueryQueue((event) => {
     queueLength: event.queueLength,
     projectId: event.projectId,
     sessionId: event.sessionId,
+    prompt: event.prompt,
+    queryType: event.queryType,
+    cronJobName: event.cronJobName,
   })
 })
 export { queryQueue }
@@ -1589,6 +1592,40 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       })
     }
 
+    // Send queue snapshot so client knows current queue state
+    const queueState = queryQueue.getProjectQueue(projectId)
+    const snapshotItems: { queryId: string; status: 'queued' | 'running'; position: number; prompt: string; queryType: 'user' | 'cron'; sessionId?: string; cronJobName?: string }[] = []
+    if (queueState.running) {
+      snapshotItems.push({
+        queryId: queueState.running.id,
+        status: 'running',
+        position: 0,
+        prompt: queueState.running.prompt,
+        queryType: queueState.running.type,
+        sessionId: queueState.running.sessionId,
+        cronJobName: queueState.running.metadata?.cronJobName,
+      })
+    }
+    for (let i = 0; i < queueState.queued.length; i++) {
+      const q = queueState.queued[i]
+      snapshotItems.push({
+        queryId: q.id,
+        status: 'queued',
+        position: i + 1,
+        prompt: q.prompt,
+        queryType: q.type,
+        sessionId: q.sessionId,
+        cronJobName: q.metadata?.cronJobName,
+      })
+    }
+    if (snapshotItems.length > 0) {
+      sendToClient(client, {
+        type: 'query_queue_snapshot',
+        projectId,
+        items: snapshotItems,
+      })
+    }
+
     // Resend pending interactive state (ask_user_question / permission_request)
     // Check both in-memory ProjectState (server still running) and persisted Session (server restarted)
     const pendingQ = projectState?.pendingQuestion || session?.pendingQuestion
@@ -1828,6 +1865,16 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         console.log(`[ws] Abort completed for project ${projectId} (via clientState)`)
       } else {
         console.log(`[ws] Abort: no active query for project ${projectId}`)
+      }
+      break
+    }
+
+    case 'dequeue': {
+      const cancelled = queryQueue.cancel(msg.queryId)
+      if (cancelled) {
+        console.log(`[ws] Dequeued query ${msg.queryId} for project ${projectId}`)
+      } else {
+        console.log(`[ws] Dequeue failed: query ${msg.queryId} not found or already running`)
       }
       break
     }

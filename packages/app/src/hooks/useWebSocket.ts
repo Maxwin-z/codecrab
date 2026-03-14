@@ -12,6 +12,7 @@ import type {
   PermissionMode,
   ProjectStatus,
   Question,
+  QueryQueueSnapshotItem,
   SdkMcpServer,
   SdkSkill,
   ServerMessage,
@@ -89,6 +90,17 @@ function emitSessionStatusChanged(event: SessionStatusEvent) {
   for (const cb of sessionStatusListeners) cb(event)
 }
 
+// Queue item for display in the UI
+export interface QueueItem {
+  queryId: string
+  status: 'queued' | 'running'
+  position: number
+  prompt: string
+  queryType: 'user' | 'cron'
+  sessionId?: string
+  cronJobName?: string
+}
+
 // Per-project cached state
 interface ProjectChatState {
   messages: ChatMessage[]
@@ -117,6 +129,8 @@ interface ProjectChatState {
     lastToolName?: string
     paused?: boolean
   } | null
+  // Query queue for this project
+  queryQueue: QueueItem[]
 }
 
 function createEmptyProjectState(): ProjectChatState {
@@ -139,6 +153,7 @@ function createEmptyProjectState(): ProjectChatState {
     sdkTools: [],
     sdkEvents: [],
     activityHeartbeat: null,
+    queryQueue: [],
   }
 }
 
@@ -164,6 +179,7 @@ export interface UseWebSocketReturn {
   sdkTools: string[]
   sdkEvents: DebugEvent[]
   activityHeartbeat: ProjectChatState['activityHeartbeat']
+  queryQueue: QueueItem[]
   sdkLoaded: boolean
   probeSdk: () => void
   sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => void
@@ -179,6 +195,7 @@ export interface UseWebSocketReturn {
   setModel: (model: string) => void
   setPermissionMode: (mode: PermissionMode) => void
   respondToPermission: (requestId: string, allow: boolean) => void
+  dequeueQuery: (queryId: string) => void
   fetchSessions: () => Promise<import('@codeclaws/shared').SessionInfo[]>
 }
 
@@ -558,6 +575,51 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.sdkEvents = [...pState.sdkEvents, cronEvent]
           break
         }
+
+        case 'query_queue_status': {
+          const qs = msg as any
+          const terminalStatuses = ['completed', 'failed', 'timeout', 'cancelled']
+          if (terminalStatuses.includes(qs.status)) {
+            // Remove from queue
+            pState.queryQueue = pState.queryQueue.filter((q) => q.queryId !== qs.queryId)
+          } else {
+            // Add or update
+            const existing = pState.queryQueue.find((q) => q.queryId === qs.queryId)
+            if (existing) {
+              existing.status = qs.status
+              existing.position = qs.position ?? existing.position
+              if (qs.prompt) existing.prompt = qs.prompt
+              pState.queryQueue = [...pState.queryQueue]
+            } else if (qs.prompt) {
+              pState.queryQueue = [...pState.queryQueue, {
+                queryId: qs.queryId,
+                status: qs.status,
+                position: qs.position ?? 0,
+                prompt: qs.prompt,
+                queryType: qs.queryType || 'user',
+                sessionId: qs.sessionId,
+                cronJobName: qs.cronJobName,
+              }]
+            }
+            // Sort by position
+            pState.queryQueue.sort((a, b) => a.position - b.position)
+          }
+          break
+        }
+
+        case 'query_queue_snapshot': {
+          const snap = msg as any
+          pState.queryQueue = (snap.items || []).map((item: any) => ({
+            queryId: item.queryId,
+            status: item.status,
+            position: item.position,
+            prompt: item.prompt,
+            queryType: item.queryType || 'user',
+            sessionId: item.sessionId,
+            cronJobName: item.cronJobName,
+          }))
+          break
+        }
       }
 
       // Trigger re-render if this message is for the active project
@@ -755,6 +817,10 @@ export function useWebSocket(): UseWebSocketReturn {
     sendWithProject({ type: 'respond_permission', requestId, allow })
   }, [getProjectState, sendWithProject, triggerRender])
 
+  const dequeueQuery = useCallback((queryId: string) => {
+    sendWithProject({ type: 'dequeue', queryId })
+  }, [sendWithProject])
+
   const probeSdk = useCallback(() => {
     sendWithProject({ type: 'probe_sdk' })
   }, [sendWithProject])
@@ -798,6 +864,7 @@ export function useWebSocket(): UseWebSocketReturn {
     sessionId: activeState.sessionId,
     projectStatuses,
     activityHeartbeat: activeState.activityHeartbeat,
+    queryQueue: activeState.queryQueue,
     sdkMcpServers: activeState.sdkMcpServers,
     sdkSkills: activeState.sdkSkills,
     sdkTools: activeState.sdkTools,
@@ -817,6 +884,7 @@ export function useWebSocket(): UseWebSocketReturn {
     setModel,
     setPermissionMode,
     respondToPermission,
+    dequeueQuery,
     fetchSessions,
   }
 }

@@ -68,6 +68,11 @@ export interface ProbeSdkMessage extends ProjectContext {
   type: 'probe_sdk'
 }
 
+export interface DequeueMessage extends ProjectContext {
+  type: 'dequeue'
+  queryId: string
+}
+
 export type ClientMessage =
   | PromptMessage
   | CommandMessage
@@ -80,6 +85,7 @@ export type ClientMessage =
   | SetPermissionModeMessage
   | SwitchProjectMessage
   | ProbeSdkMessage
+  | DequeueMessage
 
 // ============ Server → Client Messages ============
 
@@ -156,6 +162,24 @@ export interface QueryQueueStatusMessage extends ServerProjectContext {
   status: QueryQueueItemStatus
   position?: number
   queueLength?: number
+  prompt?: string
+  queryType?: 'user' | 'cron'
+  cronJobName?: string
+}
+
+export interface QueryQueueSnapshotItem {
+  queryId: string
+  status: QueryQueueItemStatus
+  position: number
+  prompt: string
+  queryType: 'user' | 'cron'
+  sessionId?: string
+  cronJobName?: string
+}
+
+export interface QueryQueueSnapshotMessage extends ServerProjectContext {
+  type: 'query_queue_snapshot'
+  items: QueryQueueSnapshotItem[]
 }
 
 export interface QueryQueuedMessage extends ServerProjectContext {
@@ -344,6 +368,7 @@ export type ServerMessage =
   | ProjectStatusesMessage
   | QueryQueueStatusMessage
   | QueryQueuedMessage
+  | QueryQueueSnapshotMessage
   | CronTaskCompletedMessage
   | ActivityHeartbeatMessage
   | SdkEventMessage
