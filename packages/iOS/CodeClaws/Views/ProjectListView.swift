@@ -4,8 +4,15 @@ struct ProjectListView: View {
     @EnvironmentObject var wsService: WebSocketService
     @Binding var selectedProject: Project?
     @State private var projects: [Project] = []
+    @State private var cronJobs: [CronJob] = []
     @State private var isLoading = false
-    
+
+    /// Cron jobs grouped by projectId for quick lookup
+    private var cronJobsByProject: [String: [CronJob]] {
+        Dictionary(grouping: cronJobs.filter { $0.context.projectId != nil },
+                   by: { $0.context.projectId! })
+    }
+
     var body: some View {
         List(selection: $selectedProject) {
             if isLoading && projects.isEmpty {
@@ -33,7 +40,11 @@ struct ProjectListView: View {
                     Button {
                         selectedProject = project
                     } label: {
-                        ProjectCard(project: project, isSelected: selectedProject?.id == project.id)
+                        ProjectCard(
+                            project: project,
+                            isSelected: selectedProject?.id == project.id,
+                            cronJobs: cronJobsByProject[project.id] ?? []
+                        )
                     }
                     .buttonStyle(.plain)
                     .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
@@ -51,25 +62,40 @@ struct ProjectListView: View {
         }
         .listStyle(.plain)
         .refreshable {
-            await fetchProjects()
+            await fetchAll()
         }
         .task {
             wsService.connect()
-            await fetchProjects()
+            await fetchAll()
         }
     }
-    
-    private func fetchProjects() async {
+
+    private func fetchAll() async {
         isLoading = true
+        async let projectsTask: () = fetchProjects()
+        async let cronTask: () = fetchCronJobs()
+        _ = await (projectsTask, cronTask)
+        isLoading = false
+    }
+
+    private func fetchProjects() async {
         do {
             let fetched: [Project] = try await APIClient.shared.fetch(path: "/api/projects")
             self.projects = fetched
         } catch {
             print("Failed to fetch projects: \(error)")
         }
-        isLoading = false
     }
-    
+
+    private func fetchCronJobs() async {
+        do {
+            let fetched: [CronJob] = try await APIClient.shared.fetch(path: "/api/cron/jobs")
+            self.cronJobs = fetched
+        } catch {
+            print("Failed to fetch cron jobs: \(error)")
+        }
+    }
+
     private func deleteProject(_ project: Project) {
         Task {
             do {
@@ -88,6 +114,7 @@ struct ProjectListView: View {
 struct ProjectCard: View {
     let project: Project
     let isSelected: Bool
+    var cronJobs: [CronJob] = []
     @EnvironmentObject var wsService: WebSocketService
 
     var body: some View {
@@ -117,6 +144,11 @@ struct ProjectCard: View {
             // Live activity row
             if let activity = wsService.projectActivities[project.id] {
                 activityRow(activity)
+            }
+
+            // Cron jobs summary row
+            if !cronJobs.isEmpty {
+                cronRow
             }
         }
         .padding(.horizontal, 16)
@@ -155,7 +187,7 @@ struct ProjectCard: View {
             case "thinking":
                 Text("💭")
                     .font(.caption2)
-                Text("..." + (activity.textSnippet ?? "").suffix(30))
+                Text("..." + (activity.textSnippet ?? "").suffix(80))
                     .font(.caption2)
                     .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
@@ -172,7 +204,7 @@ struct ProjectCard: View {
             case "text":
                 Text("💬")
                     .font(.caption2)
-                Text("..." + (activity.textSnippet ?? "").suffix(30))
+                Text("..." + (activity.textSnippet ?? "").suffix(80))
                     .font(.caption2)
                     .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
@@ -180,6 +212,42 @@ struct ProjectCard: View {
                     .truncationMode(.head)
             default:
                 EmptyView()
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var cronRow: some View {
+        let activeJobs = cronJobs.filter { $0.status == "pending" || $0.status == "running" }
+        let nextJob = activeJobs
+            .compactMap { job -> (CronJob, Date)? in
+                guard let date = job.nextRunDate else { return nil }
+                return (job, date)
+            }
+            .min(by: { $0.1 < $1.1 })
+
+        HStack(spacing: 4) {
+            Image(systemName: "clock.arrow.2.circlepath")
+                .font(.caption2)
+                .foregroundStyle(.purple)
+            Text("\(activeJobs.count)")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.purple)
+            if let (job, date) = nextJob {
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(date.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(job.name)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
         }

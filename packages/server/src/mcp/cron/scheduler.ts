@@ -2,6 +2,7 @@
 
 import * as cron from 'node-cron'
 import * as chrono from 'chrono-node'
+import { CronExpressionParser } from 'cron-parser'
 import type { CronJob, CronSchedule } from './types.js'
 import { loadJobs, saveJob, deleteJob, generateRunId, appendRun } from './store.js'
 
@@ -225,7 +226,15 @@ export class CronScheduler {
         return new Date(now.getTime() + schedule.everyMs)
       }
       case 'cron': {
-        return new Date(now.getTime() + 60000)
+        try {
+          const interval = CronExpressionParser.parse(schedule.expr, {
+            currentDate: now,
+            tz: schedule.tz,
+          })
+          return interval.next().toDate()
+        } catch {
+          return null
+        }
       }
       default:
         return null

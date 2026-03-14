@@ -278,8 +278,8 @@ export class QueryQueue {
     state.lastActivityType = activityType
     state.lastToolName = toolName
     if (textSnippet !== undefined) {
-      // Accumulate and keep only the last 50 characters
-      state.textSnippet = ((state.textSnippet || '') + textSnippet).slice(-50)
+      // Accumulate and keep only the last 120 characters
+      state.textSnippet = ((state.textSnippet || '') + textSnippet).slice(-120)
     } else if (activityType === 'tool_use') {
       state.textSnippet = undefined
     }

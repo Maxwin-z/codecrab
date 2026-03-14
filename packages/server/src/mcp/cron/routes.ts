@@ -3,7 +3,7 @@
 import { Router } from 'express'
 import type { CronExecutionResult } from './types.js'
 import { getCronSystem } from './index.js'
-import { getJob } from './store.js'
+import { getJob, listJobs } from './store.js'
 
 const cronRouter: Router = Router()
 
@@ -68,6 +68,16 @@ cronRouter.post('/schedule/:jobId', (_req, res) => {
 
   const scheduled = cronSystem.scheduler.scheduleJob(job)
   res.json({ scheduled, jobId })
+})
+
+// GET /api/cron/jobs — list all cron jobs
+cronRouter.get('/jobs', (_req, res) => {
+  const projectId = _req.query.projectId as string | undefined
+  const status = _req.query.status as string | undefined
+  const limit = _req.query.limit ? parseInt(_req.query.limit as string, 10) : undefined
+
+  const jobs = listJobs({ projectId, status, limit })
+  res.json(jobs)
 })
 
 // GET /api/cron/health — health check
