@@ -400,6 +400,22 @@ export interface DebugEvent {
   data?: Record<string, unknown>
 }
 
+/** A single query turn: prompt + agent response */
+export interface SessionTurn {
+  prompt: {
+    type: 'user' | 'cron'
+    text: string
+    images?: ImageAttachment[]
+    cronJobId?: string
+    cronJobName?: string
+  }
+  agent: {
+    messages: DebugEvent[]     // filtered high-value events: thinking, text, tool_use
+    debugEvents: DebugEvent[]  // all SDK events for timeline/debug
+  }
+  timestamp: number
+}
+
 export interface PendingPermission {
   requestId: string
   toolName: string

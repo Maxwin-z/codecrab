@@ -128,8 +128,7 @@ export async function executePromptInSession(
       sessionId: newSessionId,
       projectId,
       cwd: projState.cwd,
-      messages: [],
-      debugEvents: [],
+      turns: [],
       status: 'idle',
       lastModified: Date.now(),
       summary: cronJobName ? `Parent Session for: ${cronJobName}` : 'Parent Session for Scheduled Tasks',
@@ -183,8 +182,7 @@ async function executeCronQuery(
     sessionId: execSessionId,
     projectId,
     cwd: parentSession.cwd || projState.cwd,
-    messages: [],
-    debugEvents: [],
+    turns: [],
     status: 'processing',
     lastModified: Date.now(),
     summary: cronJobName ? `Scheduled Task: ${cronJobName}` : 'Scheduled Task',
@@ -197,15 +195,18 @@ async function executeCronQuery(
   const clientState = createClientState(cronClientId, projectId, execSession.cwd || process.cwd())
   clientState.permissionMode = 'bypassPermissions' // Cron jobs run unattended
 
-  // Add user message to execution session
+  // Create cron turn in execution session
   const cronLabel = cronJobName ? `[Scheduled Task: ${cronJobName}]` : '[Scheduled Task]'
-  const userMsg: ChatMessage = {
-    id: genId(),
-    role: 'user',
-    content: `${cronLabel} ${prompt}`,
+  execSession.turns.push({
+    prompt: {
+      type: 'cron',
+      text: `${cronLabel} ${prompt}`,
+      cronJobId: metadata?.cronJobId,
+      cronJobName,
+    },
+    agent: { messages: [], debugEvents: [] },
     timestamp: Date.now(),
-  }
-  execSession.messages.push(userMsg)
+  })
   execSession.lastModified = Date.now()
   persistSession(execSession)
 
@@ -273,15 +274,13 @@ async function executeCronQuery(
       }
     }
 
-    // Store assistant message in execution session
+    // Reset engine accumulation state (we use turns now, not ChatMessage)
     const assistantMsg = storeAssistantMessage(clientState)
     if (assistantMsg) {
-      execSession.messages.push(assistantMsg)
-      execSession.lastModified = Date.now()
-      persistSession(execSession)
       finalText = assistantMsg.content
     }
 
+    execSession.lastModified = Date.now()
     execSession.status = 'idle'
     persistSession(execSession)
 
@@ -296,27 +295,27 @@ async function executeCronQuery(
     removeAllClientStates(cronClientId)
   }
 
-  // Insert result into parent session
+  // Insert cron result turn into parent session
   const resultSummary = isSuccess
     ? `Completed successfully in ${durationMs}ms`
     : `Failed: ${errorMessage}`
-  const resultMsg: ChatMessage = {
-    id: genId(),
-    role: 'assistant',
-    content: `[Scheduled Task Completed: ${cronJobName || 'Task'}]\nResult: ${resultSummary}\nOutput: ${finalText.slice(0, 1000)}${finalText.length > 1000 ? '...' : ''}`,
-    timestamp: Date.now(),
-    costUsd: clientState.currentCostUsd,
-    durationMs,
-  }
+  const resultText = `[Scheduled Task Completed: ${cronJobName || 'Task'}]\nResult: ${resultSummary}\nOutput: ${finalText.slice(0, 1000)}${finalText.length > 1000 ? '...' : ''}`
 
-  parentSession.messages.push(resultMsg)
+  parentSession.turns.push({
+    prompt: { type: 'cron', text: prompt, cronJobId: metadata?.cronJobId, cronJobName },
+    agent: {
+      messages: [{ ts: Date.now(), type: 'text', detail: resultText, data: { content: resultText } }],
+      debugEvents: [{ ts: Date.now(), type: 'result', detail: resultSummary, data: { costUsd: clientState.currentCostUsd, durationMs } }],
+    },
+    timestamp: Date.now(),
+  })
   parentSession.lastModified = Date.now()
   persistSession(parentSession)
 
   // Broadcast result to parent session
   broadcastToProject(projectId, {
     type: 'assistant_text',
-    text: resultMsg.content,
+    text: resultText,
     projectId,
     sessionId: parentSession.sessionId,
   })
@@ -347,18 +346,43 @@ async function executeCronQuery(
   }
 }
 
-// Get full session messages for HTTP API
+// Get full session messages for HTTP API (derived from turns)
 export function getSessionMessages(sessionId: string): ChatMessage[] | null {
   const session = sessions.get(sessionId)
   if (!session) return null
-  return session.messages
+  return turnsToMessages(session.turns)
 }
 
-// Get debug events for a session
+// Get debug events for a session (derived from turns)
 export function getSessionDebugEvents(sessionId: string): import('@codeclaws/shared').DebugEvent[] | null {
   const session = sessions.get(sessionId)
   if (!session) return null
-  return session.debugEvents || []
+  return turnsToDebugEvents(session.turns)
+}
+
+/** Derive flat ChatMessage[] from turns (for API/web compat) */
+function turnsToMessages(turns: import('@codeclaws/shared').SessionTurn[]): ChatMessage[] {
+  const messages: ChatMessage[] = []
+  for (const turn of turns) {
+    // User/cron prompt as a ChatMessage
+    messages.push({
+      id: `turn-${turn.timestamp}`,
+      role: 'user',
+      content: turn.prompt.text,
+      images: turn.prompt.images,
+      timestamp: turn.timestamp,
+    })
+  }
+  return messages
+}
+
+/** Derive flat DebugEvent[] from turns (for API/web compat) */
+function turnsToDebugEvents(turns: import('@codeclaws/shared').SessionTurn[]): import('@codeclaws/shared').DebugEvent[] {
+  const events: import('@codeclaws/shared').DebugEvent[] = []
+  for (const turn of turns) {
+    events.push(...turn.agent.debugEvents)
+  }
+  return events
 }
 
 // --- Session persistence ---
@@ -382,8 +406,7 @@ async function persistSession(session: Session) {
       sdkSessionId: session.sdkSessionId,
       projectId: session.projectId,
       cwd: session.cwd,
-      messages: session.messages,
-      debugEvents: session.debugEvents,
+      turns: session.turns,
       status: session.status,
       lastModified: session.lastModified,
       summary: session.summary,
@@ -416,13 +439,35 @@ async function loadPersistedSessions() {
         const content = await fs.readFile(path.join(SESSIONS_DIR, file), 'utf-8')
         const data = JSON.parse(content)
         if (data.sessionId && !sessions.has(data.sessionId)) {
+          // Migrate old format (messages + debugEvents) to turns
+          let turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
+          if (turns.length === 0 && data.messages?.length > 0) {
+            // Old format: convert user messages to turns
+            for (const msg of data.messages) {
+              if (msg.role === 'user') {
+                turns.push({
+                  prompt: { type: 'user', text: msg.content, images: msg.images },
+                  agent: { messages: [], debugEvents: [] },
+                  timestamp: msg.timestamp,
+                })
+              }
+            }
+            // Assign all old debugEvents to the last turn
+            if (turns.length > 0 && data.debugEvents?.length > 0) {
+              const lastTurn = turns[turns.length - 1]
+              lastTurn.agent.debugEvents = data.debugEvents
+              lastTurn.agent.messages = data.debugEvents.filter(
+                (e: any) => HIGH_VALUE_EVENT_TYPES.has(e.type)
+              )
+            }
+          }
+
           const session: Session = {
             sessionId: data.sessionId,
             sdkSessionId: data.sdkSessionId,
             projectId: data.projectId,
             cwd: data.cwd,
-            messages: data.messages || [],
-            debugEvents: data.debugEvents || [],
+            turns,
             status: 'idle', // Always start as idle on reload
             lastModified: data.lastModified || Date.now(),
             summary: data.summary,
@@ -466,8 +511,7 @@ interface Session {
   sdkSessionId?: string  // Claude SDK session ID (for resume)
   projectId?: string
   cwd?: string
-  messages: ChatMessage[]
-  debugEvents: import('@codeclaws/shared').DebugEvent[]
+  turns: import('@codeclaws/shared').SessionTurn[]
   status: 'idle' | 'processing' | 'error'
   lastModified: number
   summary?: string
@@ -475,6 +519,9 @@ interface Session {
   pendingQuestion?: { toolId: string; questions: any[] } | null
   pendingPermissionRequest?: { requestId: string; toolName: string; input: any; reason?: string } | null
 }
+
+/** Event types that are kept in turn.agent.messages (high-value) */
+const HIGH_VALUE_EVENT_TYPES = new Set(['thinking', 'text', 'tool_use'])
 
 const clients = new Map<string, Client>()
 const sessions = new Map<string, Session>()
@@ -533,8 +580,8 @@ export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[]
   const result: SessionInfo[] = []
 
   for (const session of sessions.values()) {
-    // Skip empty sessions (no messages = nothing to resume)
-    if (session.messages.length === 0) continue
+    // Skip empty sessions (no turns = nothing to resume)
+    if (session.turns.length === 0) continue
 
     // Filter by project if specified
     if (projectId && session.projectId !== projectId) continue
@@ -710,7 +757,7 @@ function getProjectStatuses(): ProjectStatus[] {
         firstPrompt = session.firstPrompt
         sessionProcessing = true
       }
-      if (session.messages.length > 0 && (!latestModified || session.lastModified > latestModified)) {
+      if (session.turns.length > 0 && (!latestModified || session.lastModified > latestModified)) {
         latestModified = session.lastModified
         if (!activeSessionId) {
           firstPrompt = session.firstPrompt
@@ -766,7 +813,7 @@ function autoResumeSessionForProject(client: Client, clientId: string, projectId
   if (!session) {
     let latestSession: Session | undefined
     for (const s of sessions.values()) {
-      if (s.projectId !== projectId || s.messages.length === 0) continue
+      if (s.projectId !== projectId || s.turns.length === 0) continue
       if (!latestSession || s.lastModified > latestSession.lastModified) {
         latestSession = s
       }
@@ -896,8 +943,7 @@ function getOrCreateSessionForProject(
   const session: Session = {
     sessionId,
     projectId,
-    messages: [],
-    debugEvents: [],
+    turns: [],
     status: 'idle',
     lastModified: Date.now(),
   }
@@ -906,11 +952,8 @@ function getOrCreateSessionForProject(
 
   console.log(`[ws] Created new session ${sessionId} for client ${clientId} project ${projectId}`)
 
-  // Sync with project state
+  // Sync CWD with project state
   const projectState = getOrCreateProjectState(projectId)
-  if (projectState.messages.length > 0) {
-    session.messages = [...projectState.messages]
-  }
   session.cwd = projectState.cwd
 
   persistSession(session)
@@ -977,10 +1020,16 @@ async function executeUserQuery(
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
   broadcastProjectStatuses()
 
-  // Debug event logger for this query
+  // Debug event logger for this query — pushes to the current (last) turn
+  const currentTurn = session.turns[session.turns.length - 1]
   const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
     const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data }
-    session.debugEvents.push(event)
+    if (currentTurn) {
+      currentTurn.agent.debugEvents.push(event)
+      if (HIGH_VALUE_EVENT_TYPES.has(type)) {
+        currentTurn.agent.messages.push(event)
+      }
+    }
     broadcastToProject(projectId, {
       type: 'sdk_event',
       event,
@@ -1160,9 +1209,9 @@ async function executeUserQuery(
       }
     }
 
+    // Reset engine accumulation state; extract summary/suggestions from final content
     const assistantMsg = storeAssistantMessage(clientState)
     if (assistantMsg) {
-      session.messages.push(assistantMsg)
       session.lastModified = Date.now()
 
       const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
@@ -1282,18 +1331,21 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       })
     }
 
-    // Send message history if resuming (chunked to avoid exceeding WebSocket limits)
-    if (session && session.messages.length > 0) {
-      sendMessageHistoryInChunks(client, projectId, session.sessionId, session.messages)
-    }
-    // Send SDK event history for timeline rendering
-    if (session && session.debugEvents.length > 0) {
-      sendToClient(client, {
-        type: 'sdk_event_history',
-        projectId,
-        sessionId: session.sessionId,
-        events: session.debugEvents,
-      })
+    // Send session history from turns
+    if (session && session.turns.length > 0) {
+      const derivedMessages = turnsToMessages(session.turns)
+      if (derivedMessages.length > 0) {
+        sendMessageHistoryInChunks(client, projectId, session.sessionId, derivedMessages)
+      }
+      const derivedEvents = turnsToDebugEvents(session.turns)
+      if (derivedEvents.length > 0) {
+        sendToClient(client, {
+          type: 'sdk_event_history',
+          projectId,
+          sessionId: session.sessionId,
+          events: derivedEvents,
+        })
+      }
     }
 
     // If a query is running on this project, tell the client
@@ -1364,17 +1416,18 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         session = getOrCreateSessionForProject(client, client.clientId, projectId, clientState)
       }
 
-      // Add user message to session immediately (visible even while queued)
-      const projState = getOrCreateProjectState(projectId)
-      const userMsg: ChatMessage = {
-        id: genId(),
-        role: 'user',
-        content: msg.prompt,
-        images: msg.images?.length ? msg.images : undefined,
-        timestamp: Date.now(),
-      }
-      session.messages.push(userMsg)
-      session.lastModified = Date.now()
+      // Create a new turn for this prompt
+      const turnTimestamp = Date.now()
+      session.turns.push({
+        prompt: {
+          type: 'user',
+          text: msg.prompt,
+          images: msg.images?.length ? msg.images : undefined,
+        },
+        agent: { messages: [], debugEvents: [] },
+        timestamp: turnTimestamp,
+      })
+      session.lastModified = turnTimestamp
 
       if (!session.firstPrompt) {
         session.firstPrompt = msg.prompt.slice(0, 100)
@@ -1382,9 +1435,17 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
       persistSession(session)
 
+      // Broadcast user message to other clients (compat: still send ChatMessage format)
+      const userMsg: ChatMessage = {
+        id: `turn-${turnTimestamp}`,
+        role: 'user',
+        content: msg.prompt,
+        images: msg.images?.length ? msg.images : undefined,
+        timestamp: turnTimestamp,
+      }
+      const projState = getOrCreateProjectState(projectId)
       projState.messages.push(userMsg)
 
-      // Broadcast to other clients subscribed to this project
       broadcastToProject(
         projectId,
         { type: 'user_message', message: userMsg, projectId, sessionId: session.sessionId },
@@ -1462,8 +1523,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           sessionId: newSessionId,
           projectId,
           cwd: session?.cwd,
-          messages: [],
-          debugEvents: [],
+          turns: [],
           status: 'idle',
           lastModified: Date.now(),
         }
@@ -1552,15 +1612,18 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           projectId,
           sessionId: resumedSession.sessionId,
         })
-        // Send message history in chunks to avoid exceeding WebSocket limits
-        sendMessageHistoryInChunks(client, projectId, resumedSession.sessionId, resumedSession.messages)
-        // Send SDK event history for timeline rendering
-        if (resumedSession.debugEvents.length > 0) {
+        // Send session history from turns
+        const derivedMessages = turnsToMessages(resumedSession.turns)
+        if (derivedMessages.length > 0) {
+          sendMessageHistoryInChunks(client, projectId, resumedSession.sessionId, derivedMessages)
+        }
+        const derivedEvents = turnsToDebugEvents(resumedSession.turns)
+        if (derivedEvents.length > 0) {
           sendToClient(client, {
             type: 'sdk_event_history',
             projectId,
             sessionId: resumedSession.sessionId,
-            events: resumedSession.debugEvents,
+            events: derivedEvents,
           })
         }
         const models = getCachedModels()
@@ -1611,10 +1674,12 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             sessionId: resumedSession.sessionId,
           })
         }
-        // Re-extract suggestions from the last assistant message
-        const lastAssistantMsg = [...resumedSession.messages].reverse().find(m => m.role === 'assistant')
-        if (lastAssistantMsg) {
-          const sugMatch = lastAssistantMsg.content.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+        // Re-extract suggestions from last text event in turns
+        const allEvents = turnsToDebugEvents(resumedSession.turns)
+        const lastTextEvent = [...allEvents].reverse().find(e => e.type === 'text' && e.data?.content)
+        if (lastTextEvent) {
+          const textContent = lastTextEvent.data?.content as string
+          const sugMatch = textContent.match(/\[SUGGESTIONS:\s*(.+?)\]/)
           if (sugMatch) {
             const suggestions = sugMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
             sendToClient(client, {
