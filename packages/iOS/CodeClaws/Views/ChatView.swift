@@ -173,6 +173,19 @@ struct ChatView: View {
                 .padding(.vertical, 4)
             }
 
+            // Query Queue
+            if !wsService.queryQueue.isEmpty {
+                QueryQueueBarView(
+                    items: wsService.queryQueue,
+                    currentSessionId: wsService.sessionId,
+                    onAbort: { wsService.abort() },
+                    onDequeue: { queryId in wsService.dequeueQuery(queryId) },
+                    isAborting: wsService.isAborting
+                )
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+
             // Input Bar
             InputBarView(
                 onSend: handleSend,

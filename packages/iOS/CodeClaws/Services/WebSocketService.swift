@@ -7,6 +7,18 @@ struct PendingQuestion: Equatable {
     let questions: [Question]
 }
 
+struct QueueItem: Identifiable, Equatable {
+    let queryId: String
+    var status: String  // "queued" | "running"
+    var position: Int
+    var prompt: String
+    var queryType: String  // "user" | "cron"
+    var sessionId: String?
+    var cronJobName: String?
+
+    var id: String { queryId }
+}
+
 struct ProjectChatState {
     var messages: [ChatMessage] = []
     var streamingText: String = ""
@@ -28,6 +40,8 @@ struct ProjectChatState {
     var activityHeartbeat: ActivityHeartbeat? = nil
     // SDK execution events
     var sdkEvents: [SdkEvent] = []
+    // Query queue
+    var queryQueue: [QueueItem] = []
 }
 
 struct ActivityHeartbeat: Equatable {
@@ -76,6 +90,7 @@ class WebSocketService: ObservableObject {
     @Published var sdkTools: [String] = []
     @Published var activityHeartbeat: ActivityHeartbeat? = nil
     @Published var sdkEvents: [SdkEvent] = []
+    @Published var queryQueue: [QueueItem] = []
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
@@ -465,6 +480,47 @@ class WebSocketService: ObservableObject {
             if isCurrentProject, let eventsArray = json["events"] as? [[String: Any]] {
                 self.sdkEvents = eventsArray.compactMap { parseSdkEvent($0) }
             }
+        case "query_queue_status":
+            if isCurrentProject {
+                let queryId = json["queryId"] as? String ?? ""
+                let status = json["status"] as? String ?? ""
+                let terminalStatuses = ["completed", "failed", "timeout", "cancelled"]
+                if terminalStatuses.contains(status) {
+                    self.queryQueue.removeAll { $0.queryId == queryId }
+                } else {
+                    if let idx = self.queryQueue.firstIndex(where: { $0.queryId == queryId }) {
+                        self.queryQueue[idx].status = status
+                        if let pos = json["position"] as? Int { self.queryQueue[idx].position = pos }
+                        if let prompt = json["prompt"] as? String { self.queryQueue[idx].prompt = prompt }
+                    } else if let prompt = json["prompt"] as? String {
+                        let item = QueueItem(
+                            queryId: queryId,
+                            status: status,
+                            position: (json["position"] as? Int) ?? 0,
+                            prompt: prompt,
+                            queryType: (json["queryType"] as? String) ?? "user",
+                            sessionId: json["sessionId"] as? String,
+                            cronJobName: json["cronJobName"] as? String
+                        )
+                        self.queryQueue.append(item)
+                    }
+                    self.queryQueue.sort { $0.position < $1.position }
+                }
+            }
+        case "query_queue_snapshot":
+            if isCurrentProject, let items = json["items"] as? [[String: Any]] {
+                self.queryQueue = items.map { item in
+                    QueueItem(
+                        queryId: item["queryId"] as? String ?? "",
+                        status: item["status"] as? String ?? "queued",
+                        position: item["position"] as? Int ?? 0,
+                        prompt: item["prompt"] as? String ?? "",
+                        queryType: (item["queryType"] as? String) ?? "user",
+                        sessionId: item["sessionId"] as? String,
+                        cronJobName: item["cronJobName"] as? String
+                    )
+                }
+            }
         default:
             break
         }
@@ -692,6 +748,16 @@ class WebSocketService: ObservableObject {
         ])
     }
 
+    func dequeueQuery(_ queryId: String) {
+        guard let projectId = activeProjectId else { return }
+        sendWebSocketMessage([
+            "type": "dequeue",
+            "queryId": queryId,
+            "projectId": projectId,
+            "sessionId": sessionId
+        ])
+    }
+
     func switchProject(projectId: String, cwd: String?) {
         if let current = activeProjectId {
             var state = ProjectChatState()
@@ -712,6 +778,7 @@ class WebSocketService: ObservableObject {
             state.sdkTools = sdkTools
             state.activityHeartbeat = activityHeartbeat
             state.sdkEvents = sdkEvents
+            state.queryQueue = queryQueue
             projectStates[current] = state
         }
 
@@ -733,6 +800,7 @@ class WebSocketService: ObservableObject {
             sdkTools = state.sdkTools
             activityHeartbeat = state.activityHeartbeat
             sdkEvents = state.sdkEvents
+            queryQueue = state.queryQueue
         } else {
             messages = []
             streamingText = ""
@@ -749,6 +817,7 @@ class WebSocketService: ObservableObject {
             sdkTools = []
             activityHeartbeat = nil
             sdkEvents = []
+            queryQueue = []
         }
 
         // Always clear summary/suggestions on project switch

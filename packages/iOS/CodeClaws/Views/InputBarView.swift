@@ -87,14 +87,13 @@ struct InputBarView: View {
 
             // Text input
             TextField(
-                isRunning ? "Running..." : (speechService.isRecording ? "Listening..." : "Send message to \(currentModel.isEmpty ? "Claude Code" : currentModel)"),
+                speechService.isRecording ? "Listening..." : "Send message to \(currentModel.isEmpty ? "Claude Code" : currentModel)",
                 text: $text,
                 axis: .vertical
             )
                 .lineLimit(1...5)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .disabled(isRunning)
                 .focused($isFocused)
                 .onSubmit {
                     send()
@@ -134,7 +133,6 @@ struct InputBarView: View {
                         .foregroundColor(isSafe ? .green : .orange)
                         .cornerRadius(8)
                     }
-                    .disabled(isRunning)
                     .buttonStyle(.plain)
 
                     // Attach images
@@ -144,7 +142,6 @@ struct InputBarView: View {
                             .foregroundColor(.secondary)
                             .frame(width: 34, height: 34)
                     }
-                    .disabled(isRunning)
                     .onChange(of: selectedItem) { _, newItem in
                         Task {
                             if let data = try? await newItem?.loadTransferable(type: Data.self),
@@ -180,7 +177,7 @@ struct InputBarView: View {
                                     .frame(width: 34, height: 34)
                             }
                         }
-                        .disabled(isRunning || sdkProbing)
+                        .disabled(sdkProbing)
                         .sheet(isPresented: $showMcpPopover) {
                             McpPanelView(
                                 mcps: availableMcps,
@@ -217,14 +214,14 @@ struct InputBarView: View {
 
                 Spacer()
 
-                // Right: voice + send/abort
+                // Right: voice + send (+ abort when running)
                 HStack(spacing: 8) {
                     // Voice input
                     if speechService.isRecording {
                         Button(action: { speechService.stopRecording() }) {
                             micButtonLabel
                         }
-                    } else if !isRunning {
+                    } else {
                         Menu {
                             let currentId = speechService.selectedLocale.identifier
                             Button {
@@ -250,32 +247,16 @@ struct InputBarView: View {
                         }
                     }
 
-                    // Send / Abort button
-                    if isRunning {
-                        Button(action: onAbort) {
-                            if isAborting {
-                                ProgressView()
-                                    .frame(width: 32, height: 32)
-                            } else {
-                                Image(systemName: "stop.fill")
-                                    .font(.system(size: 12))
-                                    .frame(width: 32, height: 32)
-                                    .background(Color.red)
-                                    .foregroundColor(.white)
-                                    .clipShape(Circle())
-                            }
-                        }
-                    } else {
-                        Button(action: send) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 14, weight: .semibold))
-                                .frame(width: 32, height: 32)
-                                .background(canSend ? Color.primary : Color.gray.opacity(0.3))
-                                .foregroundColor(canSend ? Color(UIColor.systemBackground) : .gray)
-                                .clipShape(Circle())
-                        }
-                        .disabled(!canSend)
+                    // Send button (always visible)
+                    Button(action: send) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .background(canSend ? Color.primary : Color.gray.opacity(0.3))
+                            .foregroundColor(canSend ? Color(UIColor.systemBackground) : .gray)
+                            .clipShape(Circle())
                     }
+                    .disabled(!canSend)
                 }
             }
             .padding(.horizontal, 8)
