@@ -294,7 +294,6 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.isRunning = true
           pState.latestSummary = null
           pState.suggestions = []
-          pState.sdkEvents = []
           pState.activityHeartbeat = null
           if (isActiveProject) emitQueryStateChange(true)
           break
@@ -486,15 +485,7 @@ export function useWebSocket(): UseWebSocketReturn {
         }
 
         case 'user_message':
-          pState.messages = (() => {
-            const msgs = pState.messages
-            const isDuplicate = msgs.some(
-              (m) =>
-                m.role === 'user' && m.content === msg.message.content && Date.now() - m.timestamp < 5000
-            )
-            if (isDuplicate) return msgs
-            return [...msgs, msg.message]
-          })()
+          pState.messages = [...pState.messages, msg.message]
           break
 
         case 'ask_user_question':
@@ -655,20 +646,6 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [])
 
   const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => {
-    const pid = activeProjectIdRef.current
-    if (!pid) return
-    const pState = getProjectState(pid)
-
-    const userMsg: ChatMessage = {
-      id: genId(),
-      role: 'user',
-      content: prompt,
-      images: images?.length ? images : undefined,
-      timestamp: Date.now(),
-    }
-    pState.messages = [...pState.messages, userMsg]
-    triggerRender()
-
     sendWithProject({
       type: 'prompt',
       prompt,
@@ -677,7 +654,7 @@ export function useWebSocket(): UseWebSocketReturn {
       ...(disabledSdkServers?.length ? { disabledSdkServers } : {}),
       ...(disabledSkills?.length ? { disabledSkills } : {}),
     })
-  }, [getProjectState, sendWithProject, triggerRender])
+  }, [sendWithProject])
 
   const sendCommand = useCallback((command: string) => {
     if (!command.match(/^\/(clear|switch\s)/)) {

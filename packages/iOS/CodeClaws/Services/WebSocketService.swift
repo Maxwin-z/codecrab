@@ -342,25 +342,13 @@ class WebSocketService: ObservableObject {
                     )
                     loadedMessages.append(msg)
                 }
-                // Preserve locally-added user messages not yet in server history.
-                // Fixes race: sendPrompt adds user message locally, then a stale
-                // message_history (from switch_project) arrives and would wipe it.
-                let localOnlyUserMessages = self.messages.filter { local in
-                    local.role == "user" && !loadedMessages.contains { server in
-                        server.role == "user" &&
-                        server.content == local.content &&
-                        abs(server.timestamp - local.timestamp) < 5000
-                    }
-                }
-                self.messages = loadedMessages + localOnlyUserMessages
+                self.messages = loadedMessages
             }
         case "user_message":
             if isCurrentProject {
                 if let msgData = try? JSONSerialization.data(withJSONObject: json["message"] ?? []),
                    let msg = try? JSONDecoder().decode(ChatMessage.self, from: msgData) {
-                    if !isDuplicate(msg) {
-                        self.messages.append(msg)
-                    }
+                    self.messages.append(msg)
                 }
             }
         case "model_changed":
@@ -482,14 +470,6 @@ class WebSocketService: ObservableObject {
         }
     }
     
-    private func isDuplicate(_ message: ChatMessage) -> Bool {
-        guard message.role == "user" else { return false }
-        return messages.contains { existing in
-            existing.role == "user" &&
-            existing.content == message.content &&
-            abs(existing.timestamp - message.timestamp) < 5000
-        }
-    }
 
     /// Parse Any JSON value to JSONValue enum
     private func parseJSONValue(_ value: Any) -> JSONValue {
@@ -574,16 +554,6 @@ class WebSocketService: ObservableObject {
     // Actions
     func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil, disabledSdkServers: [String]? = nil, disabledSkills: [String]? = nil) {
         guard let projectId = activeProjectId else { return }
-
-        // Add user message locally first (like web version does)
-        let userMsg = ChatMessage(
-            id: UUID().uuidString,
-            role: "user",
-            content: text,
-            images: images,
-            timestamp: Date().timeIntervalSince1970 * 1000
-        )
-        self.messages.append(userMsg)
 
         var payload: [String: Any] = [
             "type": "prompt",

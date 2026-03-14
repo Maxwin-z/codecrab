@@ -1239,18 +1239,32 @@ async function executeUserQuery(
   disabledSdkServers: string[] | undefined,
   disabledSkills: string[] | undefined,
   queuedQuery: QueuedQuery,
+  userMsg: ChatMessage,
+  turn: import('@codeclaws/shared').SessionTurn,
 ): Promise<QueryResult> {
   // Link queue abort to engine abort
   queuedQuery.abortController.signal.addEventListener('abort', () => {
     abortQuery(clientState)
   }, { once: true })
 
+  // Broadcast user message to all clients (including sender) when query starts executing
+  // Update timestamp to execution time so turnGroups correctly orders events after this message
+  const execTimestamp = Date.now()
+  userMsg.timestamp = execTimestamp
+  turn.timestamp = execTimestamp
+  const projState = getOrCreateProjectState(projectId)
+  projState.messages.push(userMsg)
+  broadcastToProject(
+    projectId,
+    { type: 'user_message', message: userMsg, projectId, sessionId: session.sessionId },
+  )
+
   session.status = 'processing'
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
   broadcastProjectStatuses()
 
-  // Debug event logger for this query — pushes to the current (last) turn
-  const currentTurn = session.turns[session.turns.length - 1]
+  // Debug event logger for this query — uses the captured turn reference
+  const currentTurn = turn
   const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
     const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data }
     if (currentTurn) {
@@ -1703,7 +1717,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
       persistSession(session)
 
-      // Broadcast user message to other clients (compat: still send ChatMessage format)
+      // Build user message (will be broadcast when query starts executing)
       const userMsg: ChatMessage = {
         id: `turn-${turnTimestamp}`,
         role: 'user',
@@ -1711,19 +1725,12 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         images: msg.images?.length ? msg.images : undefined,
         timestamp: turnTimestamp,
       }
-      const projState = getOrCreateProjectState(projectId)
-      projState.messages.push(userMsg)
-
-      broadcastToProject(
-        projectId,
-        { type: 'user_message', message: userMsg, projectId, sessionId: session.sessionId },
-        client.connectionId
-      )
 
       // Capture variables for the closure
       const capturedSession = session
       const capturedClientState = clientState
       const capturedMsg = msg
+      const capturedTurn = session.turns[session.turns.length - 1]
 
       // Enqueue the query
       const { queryId } = queryQueue.enqueue({
@@ -1743,6 +1750,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             capturedMsg.disabledSdkServers,
             capturedMsg.disabledSkills,
             queuedQuery,
+            userMsg,
+            capturedTurn,
           )
         },
       })
