@@ -100,6 +100,9 @@ struct ProjectCard: View {
                     .foregroundColor(isSelected ? .accentColor : .primary)
                     .lineLimit(1)
                 Spacer()
+                Text(TimeAgo.format(from: lastActiveTime))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 indicator
             }
 
@@ -108,10 +111,7 @@ struct ProjectCard: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                Spacer()
-                Text(TimeAgo.format(from: project.updatedAt))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .truncationMode(.head)
             }
         }
         .padding(.horizontal, 16)
@@ -122,6 +122,14 @@ struct ProjectCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         )
+    }
+
+    private var lastActiveTime: Double {
+        if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }),
+           let lastMod = status.lastModified {
+            return lastMod
+        }
+        return project.updatedAt
     }
 
     @ViewBuilder
@@ -136,11 +144,12 @@ struct ProjectCard: View {
     }
 
     private func shortenedPath(_ path: String) -> String {
+        var p = path
         if let homeDir = ProcessInfo.processInfo.environment["HOME"],
-           path.hasPrefix(homeDir) {
-            return "~" + path.dropFirst(homeDir.count)
+           p.hasPrefix(homeDir) {
+            p = "~" + p.dropFirst(homeDir.count)
         }
-        return path
+        return p
     }
 }
 
