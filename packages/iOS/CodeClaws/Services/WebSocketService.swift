@@ -205,7 +205,9 @@ class WebSocketService: ObservableObject {
                 self.latestSummary = nil
                 self.suggestions = []
                 self.activityHeartbeat = nil
-                self.sdkEvents = []
+                // Note: do NOT clear sdkEvents here — previous turns' events must persist
+                // so the chat timeline keeps showing earlier assistant responses.
+                // sdkEvents is fully replaced only by sdk_event_history (on session/project switch).
             }
         case "query_end":
             if let pid = projectId {
