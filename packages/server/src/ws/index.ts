@@ -165,6 +165,7 @@ export async function executePromptInSession(
 
 // Internal: execute a cron query (called by the queue when it's this query's turn)
 // Creates a new session for execution, then inserts result into parent session
+// Streams real-time events to both exec session and parent session
 async function executeCronQuery(
   parentSession: Session,
   projectId: string,
@@ -210,6 +211,33 @@ async function executeCronQuery(
   execSession.lastModified = Date.now()
   persistSession(execSession)
 
+  // Debug event logger — stores events in exec session turn and broadcasts to both sessions
+  const currentTurn = execSession.turns[execSession.turns.length - 1]
+  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
+    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data }
+    if (currentTurn) {
+      currentTurn.agent.debugEvents.push(event)
+      if (HIGH_VALUE_EVENT_TYPES.has(type)) {
+        currentTurn.agent.messages.push(event)
+      }
+    }
+    // Broadcast sdk_event to both sessions
+    broadcastToProject(projectId, {
+      type: 'sdk_event',
+      event,
+      projectId,
+      sessionId: execSessionId,
+    })
+    broadcastToProject(projectId, {
+      type: 'sdk_event',
+      event,
+      projectId,
+      sessionId: parentSession.sessionId,
+    })
+  }
+  let thinkingStarted = false
+  let textStarted = false
+
   // Broadcast new session created
   broadcastToProject(projectId, {
     type: 'session_created',
@@ -226,6 +254,12 @@ async function executeCronQuery(
     abortQuery(clientState)
   }, { once: true })
 
+  // Broadcast query_start to both sessions
+  broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: execSessionId, queryId: queuedQuery.id })
+  broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: parentSession.sessionId, queryId: queuedQuery.id })
+
+  logEvent('query_start', prompt.slice(0, 200))
+
   let finalText = ''
   let isSuccess = true
   let errorMessage = ''
@@ -235,41 +269,178 @@ async function executeCronQuery(
   try {
     const stream = executeQuery(clientState, prompt, {
       onTextDelta: (text) => {
+        if (!textStarted) {
+          textStarted = true
+        }
         finalText += text
+        // Broadcast stream_delta to both sessions
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'text',
+          text,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'text',
+          text,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
         queryQueue.touchActivity(queuedQuery.id, 'text_delta')
+        maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
       },
-      onThinkingDelta: () => {
-        // Cron execution doesn't broadcast thinking to parent
+      onThinkingDelta: (thinking) => {
+        if (!thinkingStarted) {
+          thinkingStarted = true
+        }
+        // Broadcast thinking to both sessions
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'thinking',
+          text: thinking,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'stream_delta',
+          deltaType: 'thinking',
+          text: thinking,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
         queryQueue.touchActivity(queuedQuery.id, 'thinking_delta')
+        maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
       },
-      onToolUse: (_toolName) => {
-        // Cron execution doesn't broadcast tool use to parent
-        queryQueue.touchActivity(queuedQuery.id, 'tool_use', _toolName)
+      onToolUse: (toolName, toolId, input) => {
+        // Reset text/thinking flags for next turn
+        thinkingStarted = false
+        textStarted = false
+        // Broadcast tool_use to both sessions
+        broadcastToProject(projectId, {
+          type: 'tool_use',
+          toolName,
+          toolId,
+          input,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'tool_use',
+          toolName,
+          toolId,
+          input,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
+        queryQueue.touchActivity(queuedQuery.id, 'tool_use', toolName)
+        maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
       },
-      onToolResult: () => {
-        // Cron execution doesn't broadcast tool result to parent
+      onToolResult: (toolId, content, isError) => {
+        // Broadcast tool_result to both sessions
+        broadcastToProject(projectId, {
+          type: 'tool_result',
+          toolId,
+          content,
+          isError,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'tool_result',
+          toolId,
+          content,
+          isError,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
         queryQueue.touchActivity(queuedQuery.id, 'tool_result')
+        maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
       },
       onSessionInit: (sdkSessionId) => {
         execSession.sdkSessionId = sdkSessionId
         persistSession(execSession)
+        broadcastToProject(projectId, {
+          type: 'session_resumed',
+          projectId,
+          sessionId: execSessionId,
+        })
       },
       onPermissionRequest: () => {
         // Cron jobs bypass permissions
       },
-      onUsage: () => {
+      onUsage: (usage) => {
+        logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
         queryQueue.touchActivity(queuedQuery.id, 'usage')
+        maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
+      },
+      onSdkLog: (type, detail, data) => {
+        logEvent(type as any, detail, data)
       },
     })
 
     for await (const event of stream) {
-      if (event.type === 'result') {
-        const resultData = event.data as any
-        if (resultData.durationMs) {
-          durationMs = resultData.durationMs
+      switch (event.type) {
+        case 'system_init': {
+          const initData = event.data as any
+          if (initData.sdkMcpServers || initData.sdkSkills) {
+            broadcastToProject(projectId, {
+              type: 'system',
+              subtype: 'init',
+              projectId,
+              sessionId: execSessionId,
+              tools: initData.tools,
+              sdkMcpServers: initData.sdkMcpServers,
+              sdkSkills: initData.sdkSkills,
+            })
+          }
+          break
         }
-        if (resultData.isError) {
-          isSuccess = false
+        case 'text_delta':
+          break
+        case 'thinking_delta':
+          break
+        case 'tool_use':
+          break
+        case 'tool_result':
+          break
+        case 'result': {
+          const resultData = event.data as any
+          if (resultData.durationMs) {
+            durationMs = resultData.durationMs
+          }
+          if (resultData.isError) {
+            isSuccess = false
+          }
+          logEvent('result', `${resultData.subtype || 'end_turn'} | $${resultData.costUsd?.toFixed(4) || '?'} | ${((resultData.durationMs || 0) / 1000).toFixed(1)}s`, {
+            subtype: resultData.subtype,
+            costUsd: resultData.costUsd,
+            durationMs: resultData.durationMs,
+            isError: resultData.isError,
+          })
+          // Broadcast result to both sessions
+          broadcastToProject(projectId, {
+            type: 'result',
+            subtype: resultData.subtype,
+            costUsd: resultData.costUsd,
+            durationMs: resultData.durationMs,
+            result: resultData.result,
+            isError: resultData.isError,
+            projectId,
+            sessionId: execSessionId,
+          })
+          broadcastToProject(projectId, {
+            type: 'result',
+            subtype: resultData.subtype,
+            costUsd: resultData.costUsd,
+            durationMs: resultData.durationMs,
+            result: resultData.result,
+            isError: resultData.isError,
+            projectId,
+            sessionId: parentSession.sessionId,
+          })
+          break
         }
       }
     }
@@ -278,12 +449,55 @@ async function executeCronQuery(
     const assistantMsg = storeAssistantMessage(clientState)
     if (assistantMsg) {
       finalText = assistantMsg.content
-      // Extract per-turn summary from cron execution
+      execSession.lastModified = Date.now()
+
+      // Extract per-turn summary
       const cronSummaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
-      const cronTurn = execSession.turns[execSession.turns.length - 1]
-      if (cronSummaryMatch && cronTurn) {
-        cronTurn.summary = cronSummaryMatch[1].trim()
+      if (cronSummaryMatch && currentTurn) {
+        const extractedSummary = cronSummaryMatch[1].trim()
+        currentTurn.summary = extractedSummary
+        execSession.summary = `${cronJobName || 'Scheduled Task'}: ${extractedSummary}`
+        console.log(`[cron] Summary: ${extractedSummary}`)
+        // Broadcast summary to both sessions
+        broadcastToProject(projectId, {
+          type: 'query_summary',
+          summary: extractedSummary,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'query_summary',
+          summary: extractedSummary,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
       }
+
+      // Extract suggestions
+      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+      if (suggestionsMatch) {
+        const suggestions = suggestionsMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+        broadcastToProject(projectId, {
+          type: 'query_suggestions',
+          suggestions,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'query_suggestions',
+          suggestions,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
+      }
+
+      // Broadcast final assistant_text to both sessions
+      broadcastToProject(projectId, {
+        type: 'assistant_text',
+        text: assistantMsg.content,
+        projectId,
+        sessionId: execSessionId,
+      })
     }
 
     execSession.lastModified = Date.now()
@@ -291,6 +505,7 @@ async function executeCronQuery(
     persistSession(execSession)
 
   } catch (err: any) {
+    logEvent('error', err.message || 'Cron query failed')
     console.error('[cron] Query error:', err)
     isSuccess = false
     errorMessage = err.message || 'Cron query failed'
@@ -299,9 +514,24 @@ async function executeCronQuery(
   } finally {
     durationMs = durationMs || Date.now() - startTime
     removeAllClientStates(cronClientId)
+    cleanupHeartbeat(queuedQuery.id)
+
+    // Broadcast query_end to both sessions
+    broadcastToProject(projectId, {
+      type: 'query_end',
+      projectId,
+      sessionId: execSessionId,
+      queryId: queuedQuery.id,
+    })
+    broadcastToProject(projectId, {
+      type: 'query_end',
+      projectId,
+      sessionId: parentSession.sessionId,
+      queryId: queuedQuery.id,
+    })
   }
 
-  // Insert cron result turn into parent session
+  // Insert cron result turn into parent session (summary only, full details in exec session)
   const resultSummary = isSuccess
     ? `Completed successfully in ${durationMs}ms`
     : `Failed: ${errorMessage}`
@@ -311,14 +541,14 @@ async function executeCronQuery(
     prompt: { type: 'cron', text: prompt, cronJobId: metadata?.cronJobId, cronJobName },
     agent: {
       messages: [{ ts: Date.now(), type: 'text', detail: resultText, data: { content: resultText } }],
-      debugEvents: [{ ts: Date.now(), type: 'result', detail: resultSummary, data: { costUsd: clientState.currentCostUsd, durationMs } }],
+      debugEvents: [{ ts: Date.now(), type: 'result', detail: resultSummary, data: { costUsd: clientState.currentCostUsd, durationMs, execSessionId } }],
     },
     timestamp: Date.now(),
   })
   parentSession.lastModified = Date.now()
   persistSession(parentSession)
 
-  // Broadcast result to parent session
+  // Broadcast result summary to parent session
   broadcastToProject(projectId, {
     type: 'assistant_text',
     text: resultText,
@@ -326,7 +556,7 @@ async function executeCronQuery(
     sessionId: parentSession.sessionId,
   })
 
-  // Also broadcast to execution session for visibility
+  // Broadcast cron_task_completed for session list UI
   broadcastToProject(projectId, {
     type: 'cron_task_completed',
     cronJobId,
@@ -338,7 +568,7 @@ async function executeCronQuery(
   })
   broadcastProjectStatuses()
 
-  // Send push notification to all devices with parent sessionId
+  // Send push notification
   const summaryMatch = finalText.match(/\[SUMMARY:\s*(.+?)\]/)
   const pushSummary = summaryMatch
     ? summaryMatch[1].trim()
