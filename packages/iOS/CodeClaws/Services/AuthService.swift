@@ -114,6 +114,7 @@ class AuthService: ObservableObject {
         }
         
         var request = URLRequest(url: url)
+        request.timeoutInterval = 5
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
