@@ -414,6 +414,7 @@ export interface SessionTurn {
     debugEvents: DebugEvent[]  // all SDK events for timeline/debug
   }
   timestamp: number
+  summary?: string             // per-turn summary extracted from [SUMMARY: ...]
 }
 
 export interface PendingPermission {

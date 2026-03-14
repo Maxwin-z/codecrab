@@ -278,6 +278,12 @@ async function executeCronQuery(
     const assistantMsg = storeAssistantMessage(clientState)
     if (assistantMsg) {
       finalText = assistantMsg.content
+      // Extract per-turn summary from cron execution
+      const cronSummaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
+      const cronTurn = execSession.turns[execSession.turns.length - 1]
+      if (cronSummaryMatch && cronTurn) {
+        cronTurn.summary = cronSummaryMatch[1].trim()
+      }
     }
 
     execSession.lastModified = Date.now()
@@ -1216,16 +1222,21 @@ async function executeUserQuery(
 
       const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
       if (summaryMatch) {
-        session.summary = summaryMatch[1].trim()
-        console.log(`[Summary] Extracted: ${session.summary}`)
+        const extractedSummary = summaryMatch[1].trim()
+        session.summary = extractedSummary
+        // Also store on the current turn
+        if (currentTurn) {
+          currentTurn.summary = extractedSummary
+        }
+        console.log(`[Summary] Extracted: ${extractedSummary}`)
         broadcastToProject(projectId, {
           type: 'query_summary',
-          summary: session.summary,
+          summary: extractedSummary,
           projectId,
           sessionId: session.sessionId,
         })
         // Send push notification (best-effort, never throws)
-        sendQueryCompletionPush(session.summary, projectId, session.sessionId)
+        sendQueryCompletionPush(extractedSummary, projectId, session.sessionId)
       } else {
         console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
       }
