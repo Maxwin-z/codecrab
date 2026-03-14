@@ -445,28 +445,7 @@ async function loadPersistedSessions() {
         const content = await fs.readFile(path.join(SESSIONS_DIR, file), 'utf-8')
         const data = JSON.parse(content)
         if (data.sessionId && !sessions.has(data.sessionId)) {
-          // Migrate old format (messages + debugEvents) to turns
-          let turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
-          if (turns.length === 0 && data.messages?.length > 0) {
-            // Old format: convert user messages to turns
-            for (const msg of data.messages) {
-              if (msg.role === 'user') {
-                turns.push({
-                  prompt: { type: 'user', text: msg.content, images: msg.images },
-                  agent: { messages: [], debugEvents: [] },
-                  timestamp: msg.timestamp,
-                })
-              }
-            }
-            // Assign all old debugEvents to the last turn
-            if (turns.length > 0 && data.debugEvents?.length > 0) {
-              const lastTurn = turns[turns.length - 1]
-              lastTurn.agent.debugEvents = data.debugEvents
-              lastTurn.agent.messages = data.debugEvents.filter(
-                (e: any) => HIGH_VALUE_EVENT_TYPES.has(e.type)
-              )
-            }
-          }
+          const turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
 
           const session: Session = {
             sessionId: data.sessionId,

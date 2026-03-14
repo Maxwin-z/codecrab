@@ -1,26 +1,5 @@
 import SwiftUI
 
-// MARK: - Unified timeline item (message or SDK event)
-
-enum ChatItem: Identifiable {
-    case message(ChatMessage)
-    case sdkEvent(SdkEvent)
-
-    var id: String {
-        switch self {
-        case .message(let m): return m.id
-        case .sdkEvent(let e): return "sdk-\(e.id.uuidString)"
-        }
-    }
-
-    var timestamp: Double {
-        switch self {
-        case .message(let m): return m.timestamp
-        case .sdkEvent(let e): return e.ts
-        }
-    }
-}
-
 // MARK: - Inline SDK Event View
 
 struct SdkEventInlineView: View {

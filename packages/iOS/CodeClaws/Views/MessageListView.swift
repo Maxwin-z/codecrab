@@ -1,5 +1,13 @@
 import SwiftUI
 
+// MARK: - Turn group (user message + agent response events)
+
+struct TurnGroup: Identifiable {
+    let id: String
+    let userMessage: ChatMessage?
+    let agentEvents: [SdkEvent]
+}
+
 struct MessageListView: View {
     let messages: [ChatMessage]
     let streamingText: String
@@ -7,24 +15,50 @@ struct MessageListView: View {
     let isRunning: Bool
     let sdkEvents: [SdkEvent]
 
-    /// Merge user messages and SDK events into a single timeline sorted by timestamp
-    private var timeline: [ChatItem] {
-        // Only include user messages — assistant/system/tool content now comes from SDK events
-        let userMsgItems = messages.filter { $0.role == "user" }.map { ChatItem.message($0) }
-        let evtItems = sdkEvents.map { ChatItem.sdkEvent($0) }
-        return (userMsgItems + evtItems).sorted { $0.timestamp < $1.timestamp }
+    /// Group user messages and SDK events into turns
+    private var turnGroups: [TurnGroup] {
+        let sortedUserMsgs = messages
+            .filter { $0.role == "user" }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        var groups: [TurnGroup] = []
+
+        // Events before the first user message (e.g. from session resume)
+        if let firstTs = sortedUserMsgs.first?.timestamp {
+            let earlyEvents = sdkEvents.filter { $0.ts < firstTs }.sorted { $0.ts < $1.ts }
+            if !earlyEvents.isEmpty {
+                groups.append(TurnGroup(id: "turn-pre", userMessage: nil, agentEvents: earlyEvents))
+            }
+        }
+
+        for (i, userMsg) in sortedUserMsgs.enumerated() {
+            let nextTs = i + 1 < sortedUserMsgs.count
+                ? sortedUserMsgs[i + 1].timestamp
+                : Double.infinity
+            let events = sdkEvents
+                .filter { $0.ts >= userMsg.timestamp && $0.ts < nextTs }
+                .sorted { $0.ts < $1.ts }
+            groups.append(TurnGroup(id: "turn-\(userMsg.id)", userMessage: userMsg, agentEvents: events))
+        }
+
+        // No user messages but have SDK events
+        if sortedUserMsgs.isEmpty && !sdkEvents.isEmpty {
+            groups.append(TurnGroup(id: "turn-all", userMessage: nil, agentEvents: sdkEvents.sorted { $0.ts < $1.ts }))
+        }
+
+        return groups
     }
 
     var body: some View {
         VStack(spacing: 4) {
             if !messages.isEmpty || !sdkEvents.isEmpty || isRunning {
-                ForEach(timeline) { item in
-                    switch item {
-                    case .message(let msg):
-                        MessageBubbleView(message: msg, isRunning: isRunning)
+                ForEach(turnGroups) { group in
+                    if let userMsg = group.userMessage {
+                        MessageBubbleView(message: userMsg, isRunning: isRunning)
                             .padding(.vertical, 6)
-                    case .sdkEvent(let event):
-                        SdkEventInlineView(event: event)
+                    }
+                    if !group.agentEvents.isEmpty {
+                        AgentResponseView(events: group.agentEvents)
                     }
                 }
 
@@ -39,6 +73,45 @@ struct MessageListView: View {
                         Spacer()
                     }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Agent Response View (with message/debug toggle)
+
+struct AgentResponseView: View {
+    let events: [SdkEvent]
+    @State private var showDebug = false
+
+    private static let messageTypes: Set<String> = ["thinking", "text", "tool_use", "tool_result"]
+
+    private var messageEvents: [SdkEvent] {
+        events.filter { Self.messageTypes.contains($0.type) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(showDebug ? events : messageEvents) { event in
+                SdkEventInlineView(event: event)
+            }
+
+            // Toggle button (bottom-right)
+            HStack {
+                Spacer()
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { showDebug.toggle() } }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: showDebug ? "ladybug.fill" : "bubble.left.fill")
+                            .font(.system(size: 9))
+                        Text(showDebug ? "Debug" : "Message")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .foregroundStyle(showDebug ? .orange : .secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color(UIColor.tertiarySystemFill)))
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }
