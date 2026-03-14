@@ -52,13 +52,13 @@ struct MessageListView: View {
     var body: some View {
         VStack(spacing: 4) {
             if !messages.isEmpty || !sdkEvents.isEmpty || isRunning {
-                ForEach(turnGroups) { group in
+                ForEach(Array(turnGroups.enumerated()), id: \.element.id) { index, group in
                     if let userMsg = group.userMessage {
                         MessageBubbleView(message: userMsg, isRunning: isRunning)
                             .padding(.vertical, 6)
                     }
                     if !group.agentEvents.isEmpty {
-                        AgentResponseView(events: group.agentEvents)
+                        AgentResponseView(events: group.agentEvents, isStreaming: isRunning && index == turnGroups.count - 1)
                     }
                 }
 
@@ -82,6 +82,7 @@ struct MessageListView: View {
 
 struct AgentResponseView: View {
     let events: [SdkEvent]
+    let isStreaming: Bool
     @State private var showDebug = false
 
     private static let messageTypes: Set<String> = ["thinking", "text", "tool_use", "tool_result"]
@@ -91,9 +92,15 @@ struct AgentResponseView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(showDebug ? events : messageEvents) { event in
-                SdkEventInlineView(event: event)
+        VStack(alignment: .leading, spacing: showDebug ? 2 : 4) {
+            if showDebug {
+                ForEach(events) { event in
+                    SdkEventInlineView(event: event)
+                }
+            } else {
+                ForEach(messageEvents) { event in
+                    MessageModeEventView(event: event, isStreaming: isStreaming)
+                }
             }
 
             // Toggle button (bottom-right)
@@ -112,6 +119,233 @@ struct AgentResponseView: View {
                     .background(Capsule().fill(Color(UIColor.tertiarySystemFill)))
                 }
                 .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+}
+
+// MARK: - Message Mode Views
+
+struct MessageModeEventView: View {
+    let event: SdkEvent
+    let isStreaming: Bool
+
+    var body: some View {
+        switch event.type {
+        case "text":
+            MessageModeTextView(event: event)
+        case "thinking":
+            MessageModeThinkingView(event: event, isStreaming: isStreaming)
+        case "tool_use":
+            MessageModeToolUseView(event: event, isStreaming: isStreaming)
+        case "tool_result":
+            MessageModeToolResultView(event: event, isStreaming: isStreaming)
+        default:
+            EmptyView()
+        }
+    }
+}
+
+private struct MessageModeTextView: View {
+    let event: SdkEvent
+
+    private var content: String {
+        guard let data = event.data, case .string(let c) = data["content"] else { return "" }
+        return c
+    }
+
+    var body: some View {
+        if !content.isEmpty {
+            Text(content)
+                .font(.body)
+                .fontDesign(.monospaced)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct MessageModeThinkingView: View {
+    let event: SdkEvent
+    let isStreaming: Bool
+    @State private var expanded: Bool
+
+    init(event: SdkEvent, isStreaming: Bool) {
+        self.event = event
+        self.isStreaming = isStreaming
+        self._expanded = State(initialValue: isStreaming)
+    }
+
+    private var content: String {
+        guard let data = event.data, case .string(let c) = data["content"] else { return "" }
+        return c
+    }
+
+    var body: some View {
+        if !content.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("Thinking")
+                            .font(.callout)
+                            .fontDesign(.monospaced)
+                        Spacer()
+                    }
+                    .foregroundColor(.orange.opacity(0.8))
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                if expanded {
+                    Text(content)
+                        .font(.subheadline)
+                        .fontDesign(.monospaced)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+            }
+            .onChange(of: isStreaming) { _, streaming in
+                if !streaming {
+                    withAnimation { expanded = false }
+                }
+            }
+        }
+    }
+}
+
+private struct MessageModeToolUseView: View {
+    let event: SdkEvent
+    let isStreaming: Bool
+    @State private var expanded: Bool
+
+    init(event: SdkEvent, isStreaming: Bool) {
+        self.event = event
+        self.isStreaming = isStreaming
+        self._expanded = State(initialValue: isStreaming)
+    }
+
+    private var toolName: String {
+        guard let data = event.data, case .string(let name) = data["toolName"] else { return "unknown" }
+        return name
+    }
+
+    private var input: String {
+        guard let data = event.data, case .string(let c) = data["input"] else { return "" }
+        return c
+    }
+
+    private var summary: String {
+        let firstLine = input.components(separatedBy: .newlines).first ?? ""
+        return String(firstLine.prefix(60))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } }) {
+                HStack(spacing: 4) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                    Text(toolName)
+                        .font(.callout)
+                        .fontDesign(.monospaced)
+                        .fontWeight(.medium)
+                    if !expanded && !summary.isEmpty {
+                        Text(summary)
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer()
+                }
+                .foregroundColor(.cyan)
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            if expanded && !input.isEmpty {
+                Text(input)
+                    .font(.caption)
+                    .fontDesign(.monospaced)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 18)
+                    .padding(.top, 4)
+                    .textSelection(.enabled)
+            }
+        }
+        .onChange(of: isStreaming) { _, streaming in
+            if !streaming {
+                withAnimation { expanded = false }
+            }
+        }
+    }
+}
+
+private struct MessageModeToolResultView: View {
+    let event: SdkEvent
+    let isStreaming: Bool
+    @State private var expanded: Bool
+
+    init(event: SdkEvent, isStreaming: Bool) {
+        self.event = event
+        self.isStreaming = isStreaming
+        self._expanded = State(initialValue: isStreaming)
+    }
+
+    private var content: String {
+        guard let data = event.data, case .string(let c) = data["content"] else { return "" }
+        return c
+    }
+
+    private var isError: Bool {
+        guard let data = event.data, case .bool(let e) = data["isError"] else { return false }
+        return e
+    }
+
+    private var charCount: Int {
+        if let data = event.data, case .number(let n) = data["length"] { return Int(n) }
+        return content.count
+    }
+
+    var body: some View {
+        if !content.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                        Circle()
+                            .fill(isError ? Color.red : Color.green)
+                            .frame(width: 6, height: 6)
+                        Text("Result")
+                            .font(.callout)
+                            .fontDesign(.monospaced)
+                        Text("\(charCount) chars")
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                        Spacer()
+                    }
+                    .foregroundColor(isError ? .red : .secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                if expanded {
+                    Text(content.count > 2000 ? String(content.prefix(2000)) + "\n… (truncated)" : content)
+                        .font(.caption)
+                        .fontDesign(.monospaced)
+                        .foregroundColor(isError ? .red : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 18)
+                        .padding(.top, 4)
+                        .textSelection(.enabled)
+                }
+            }
+            .onChange(of: isStreaming) { _, streaming in
+                if !streaming {
+                    withAnimation { expanded = false }
+                }
             }
         }
     }
