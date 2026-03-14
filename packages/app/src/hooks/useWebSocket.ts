@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ChatMessage,
   ClientMessage,
+  DebugEvent,
   ImageAttachment,
   McpInfo,
   ModelInfo,
@@ -107,6 +108,8 @@ interface ProjectChatState {
   sdkMcpServers: SdkMcpServer[]
   sdkSkills: SdkSkill[]
   sdkTools: string[]
+  // SDK events timeline
+  sdkEvents: DebugEvent[]
   // Activity heartbeat from server
   activityHeartbeat: {
     elapsedMs: number
@@ -134,6 +137,7 @@ function createEmptyProjectState(): ProjectChatState {
     sdkMcpServers: [],
     sdkSkills: [],
     sdkTools: [],
+    sdkEvents: [],
     activityHeartbeat: null,
   }
 }
@@ -158,6 +162,7 @@ export interface UseWebSocketReturn {
   sdkMcpServers: SdkMcpServer[]
   sdkSkills: SdkSkill[]
   sdkTools: string[]
+  sdkEvents: DebugEvent[]
   activityHeartbeat: ProjectChatState['activityHeartbeat']
   sdkLoaded: boolean
   probeSdk: () => void
@@ -272,6 +277,7 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.isRunning = true
           pState.latestSummary = null
           pState.suggestions = []
+          pState.sdkEvents = []
           pState.activityHeartbeat = null
           if (isActiveProject) emitQueryStateChange(true)
           break
@@ -416,6 +422,7 @@ export function useWebSocket(): UseWebSocketReturn {
           pState.messages = []
           pState.streamingText = ''
           pState.streamingThinking = ''
+          pState.sdkEvents = []
           break
 
         case 'cwd_changed':
@@ -521,6 +528,36 @@ export function useWebSocket(): UseWebSocketReturn {
             paused: msg.paused,
           }
           break
+
+        case 'sdk_event':
+          if ((msg as any).event) {
+            pState.sdkEvents = [...pState.sdkEvents, (msg as any).event]
+          }
+          break
+
+        case 'sdk_event_history':
+          if ((msg as any).events) {
+            pState.sdkEvents = (msg as any).events
+          }
+          break
+
+        case 'cron_task_completed': {
+          const cronMsg = msg as any
+          const cronEvent: DebugEvent = {
+            ts: Date.now(),
+            type: 'cron_task_completed',
+            detail: cronMsg.cronJobName || cronMsg.cronJobId || 'Task',
+            data: {
+              cronJobId: cronMsg.cronJobId,
+              cronJobName: cronMsg.cronJobName,
+              parentSessionId: cronMsg.parentSessionId,
+              execSessionId: cronMsg.execSessionId,
+              success: cronMsg.success,
+            },
+          }
+          pState.sdkEvents = [...pState.sdkEvents, cronEvent]
+          break
+        }
       }
 
       // Trigger re-render if this message is for the active project
@@ -764,6 +801,7 @@ export function useWebSocket(): UseWebSocketReturn {
     sdkMcpServers: activeState.sdkMcpServers,
     sdkSkills: activeState.sdkSkills,
     sdkTools: activeState.sdkTools,
+    sdkEvents: activeState.sdkEvents,
     sdkLoaded: activeState.sdkTools.length > 0,
     probeSdk,
     sendPrompt,

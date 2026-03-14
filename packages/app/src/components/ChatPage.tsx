@@ -6,10 +6,11 @@ import { MessageList } from './MessageList'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { UserQuestionForm } from './UserQuestionForm'
 import { SessionSidebar } from './SessionSidebar'
+import { ExecSessionSheet } from './ExecSessionSheet'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Menu, Loader2 } from 'lucide-react'
+import { ArrowLeft, Menu, Loader2, Code, ArrowDown } from 'lucide-react'
 import { authFetch } from '@/lib/auth'
-import type { ImageAttachment, McpInfo } from '@codeclaws/shared'
+import type { ImageAttachment, McpInfo, SessionInfo } from '@codeclaws/shared'
 
 interface Project {
   id: string
@@ -33,6 +34,8 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const [loadingProject, setLoadingProject] = useState(false)
   const [customMcps, setCustomMcps] = useState<McpInfo[]>([])
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
+  const [lastSession, setLastSession] = useState<SessionInfo | null>(null)
+  const [execSessionId, setExecSessionId] = useState<string | null>(null)
   // Track whether we've initialized enabledIds from the first data load
   const initializedRef = useRef(false)
 
@@ -138,7 +141,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         el.scrollTop = el.scrollHeight
       })
     }
-  }, [ws.messages, ws.streamingText, ws.streamingThinking, project?.id])
+  }, [ws.messages, ws.streamingText, ws.streamingThinking, ws.sdkEvents, project?.id])
 
   // Handle project query param
   useEffect(() => {
@@ -181,6 +184,22 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
       document.title = 'CodeClaws'
     }
   }, [project])
+
+  // Fetch last session for the empty state (mirrors iOS fetchLastSession)
+  useEffect(() => {
+    if (!project) return
+    authFetch(`/api/sessions?projectId=${project.id}`, {}, onUnauthorized)
+      .then((r) => r.json())
+      .then((data: SessionInfo[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          const sorted = [...data].sort((a, b) => b.lastModified - a.lastModified)
+          setLastSession(sorted[0])
+        }
+      })
+      .catch(() => {})
+  }, [project, onUnauthorized])
+
+  const showEmptyState = ws.messages.length === 0 && !ws.streamingText && !ws.streamingThinking && !ws.isRunning
 
   const handleSend = (text: string, images?: ImageAttachment[], mcps?: string[]) => {
     if (text.startsWith('/')) {
@@ -289,12 +308,50 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 min-w-0">
-        <MessageList
-          messages={ws.messages}
-          streamingText={ws.streamingText}
-          streamingThinking={ws.streamingThinking}
-          isRunning={ws.isRunning}
-        />
+        {showEmptyState ? (
+          <div className="flex flex-col items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-4">
+              <Code className="h-10 w-10 text-muted-foreground/30" />
+              <div className="text-center">
+                <p className="text-xl font-bold">CodeClaws</p>
+                <p className="text-sm text-muted-foreground mt-1">Your AI coding companion</p>
+              </div>
+
+              {/* Last session card */}
+              {lastSession && (
+                <button
+                  onClick={() => ws.resumeSession(lastSession.sessionId)}
+                  className="mt-4 w-full max-w-xs flex items-center gap-3 px-4 py-3 rounded-xl bg-muted hover:bg-muted/80 transition-colors text-left"
+                >
+                  <span className="text-muted-foreground shrink-0">🕐</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {lastSession.summary || lastSession.firstPrompt || 'Untitled session'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatTimeAgo(lastSession.lastModified)}
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted-foreground/50">›</span>
+                </button>
+              )}
+
+              <div className="flex flex-col items-center gap-1.5 mt-4 text-muted-foreground/50">
+                <ArrowDown className="h-4 w-4 animate-bounce" />
+                <p className="text-xs">Send a message to start a new session</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <MessageList
+            messages={ws.messages}
+            streamingText={ws.streamingText}
+            streamingThinking={ws.streamingThinking}
+            isRunning={ws.isRunning}
+            sdkEvents={ws.sdkEvents}
+            onResumeSession={(sid) => setExecSessionId(sid)}
+          />
+        )}
       </div>
 
       {/* Summary bar */}
@@ -393,6 +450,25 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
       {/* Session History Sidebar */}
       <SessionSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} projectId={project?.id} />
+
+      {/* Exec Session Sheet */}
+      {execSessionId && (
+        <ExecSessionSheet sessionId={execSessionId} onClose={() => setExecSessionId(null)} />
+      )}
     </div>
   )
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const now = Date.now()
+  const diff = now - timestamp
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+
+  if (days > 0) return `${days}d ago`
+  if (hours > 0) return `${hours}h ago`
+  if (minutes > 0) return `${minutes}m ago`
+  return 'just now'
 }
