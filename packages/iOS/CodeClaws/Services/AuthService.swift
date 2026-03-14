@@ -15,6 +15,7 @@ class AuthService: ObservableObject {
     
     func setToken(_ token: String) {
         KeychainHelper.shared.saveToken(token)
+        SharedDataManager.shared.syncCredentials()
     }
     
     func clearToken() {
@@ -29,6 +30,7 @@ class AuthService: ObservableObject {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalUrl = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
         UserDefaults.standard.set(finalUrl, forKey: serverURLKey)
+        SharedDataManager.shared.syncCredentials()
     }
 
     func clearServerURL() {
@@ -125,6 +127,7 @@ class AuthService: ObservableObject {
                 if httpResponse.statusCode == 200 {
                     print("[AuthService] Session valid")
                     isAuthenticated = true
+                    SharedDataManager.shared.syncCredentials()
                 } else {
                     let body = String(data: data, encoding: .utf8) ?? "no body"
                     print("[AuthService] Session invalid, body: \(body)")

@@ -18,6 +18,7 @@ struct InputBarView: View {
     var projectPath: String = ""
     @Binding var isInputFocused: Bool
     @Binding var prefillText: String
+    @Binding var externalAttachments: [ImageAttachment]
 
     @State private var text: String = ""
     @State private var attachments: [ImageAttachment] = []
@@ -55,28 +56,45 @@ struct InputBarView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Image previews
+            // Attachment previews (images + files)
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(attachments.indices, id: \.self) { idx in
-                            if let data = Data(base64Encoded: attachments[idx].data),
-                               let uiImage = UIImage(data: data) {
-                                ZStack(alignment: .topTrailing) {
+                            let attachment = attachments[idx]
+                            ZStack(alignment: .topTrailing) {
+                                if attachment.mediaType.hasPrefix("image/"),
+                                   let data = Data(base64Encoded: attachment.data),
+                                   let uiImage = UIImage(data: data) {
                                     Image(uiImage: uiImage)
                                         .resizable()
                                         .scaledToFill()
                                         .frame(width: 56, height: 56)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                    Button(action: { attachments.remove(at: idx) }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white)
-                                            .background(Color.black.opacity(0.5).clipShape(Circle()))
+                                } else {
+                                    // Non-image file
+                                    VStack(spacing: 2) {
+                                        Image(systemName: fileIcon(for: attachment.mediaType))
+                                            .font(.system(size: 20))
+                                            .foregroundColor(.orange)
+                                        Text(attachment.name ?? "File")
+                                            .font(.system(size: 7))
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                            .foregroundColor(.secondary)
                                     }
-                                    .offset(x: 4, y: -4)
+                                    .frame(width: 56, height: 56)
+                                    .background(Color(UIColor.tertiarySystemFill))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
+
+                                Button(action: { attachments.remove(at: idx) }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
+                                        .background(Color.black.opacity(0.5).clipShape(Circle()))
+                                }
+                                .offset(x: 4, y: -4)
                             }
                         }
                     }
@@ -203,9 +221,15 @@ struct InputBarView: View {
                         }
                     }
 
-                    // Image count indicator
+                    // Attachment count indicator
                     if !attachments.isEmpty {
-                        Text("\(attachments.count) image\(attachments.count > 1 ? "s" : "")")
+                        let imageCount = attachments.filter { $0.mediaType.hasPrefix("image/") }.count
+                        let fileCount = attachments.count - imageCount
+                        let label = [
+                            imageCount > 0 ? "\(imageCount) image\(imageCount > 1 ? "s" : "")" : nil,
+                            fileCount > 0 ? "\(fileCount) file\(fileCount > 1 ? "s" : "")" : nil
+                        ].compactMap { $0 }.joined(separator: ", ")
+                        Text(label)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .padding(.leading, 4)
@@ -301,6 +325,23 @@ struct InputBarView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .onChange(of: externalAttachments) { _, newAttachments in
+            if !newAttachments.isEmpty {
+                attachments.append(contentsOf: newAttachments)
+                externalAttachments = []
+                isFocused = true
+            }
+        }
+    }
+
+    private func fileIcon(for mimeType: String) -> String {
+        if mimeType.hasPrefix("text/") { return "doc.text" }
+        if mimeType.contains("pdf") { return "doc.richtext" }
+        if mimeType.contains("json") { return "curlybraces" }
+        if mimeType.contains("zip") || mimeType.contains("archive") { return "doc.zipper" }
+        if mimeType.contains("video") { return "film" }
+        if mimeType.contains("audio") { return "waveform" }
+        return "doc"
     }
 
     @ViewBuilder

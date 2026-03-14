@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
@@ -15,19 +16,62 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+/// Tracks pending share data from the Share Extension
+class ShareHandler: ObservableObject {
+    @Published var pendingProjectId: String?
+    @Published var pendingSessionId: String?
+    @Published var pendingAttachments: [ImageAttachment] = []
+
+    func handleURL(_ url: URL) {
+        guard url.scheme == "codeclaws", url.host == "share" else { return }
+        consumeShare()
+    }
+
+    func checkOnActivation() {
+        // Also check when app becomes active (fallback if URL scheme didn't fire)
+        if pendingProjectId == nil {
+            consumeShare()
+        }
+    }
+
+    private func consumeShare() {
+        guard let result = SharedDataManager.shared.consumePendingShare() else { return }
+        pendingProjectId = result.projectId
+        pendingSessionId = result.sessionId
+        pendingAttachments = result.attachments
+    }
+
+    func clear() {
+        pendingProjectId = nil
+        pendingSessionId = nil
+        pendingAttachments = []
+    }
+}
+
 @main
 struct CodeClawsApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject var authService = AuthService()
     @StateObject var webSocketService = WebSocketService()
+    @StateObject var shareHandler = ShareHandler()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(authService)
                 .environmentObject(webSocketService)
+                .environmentObject(shareHandler)
+                .onOpenURL { url in
+                    shareHandler.handleURL(url)
+                }
                 .task {
                     await authService.checkAuth()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        shareHandler.checkOnActivation()
+                    }
                 }
         }
     }
@@ -84,7 +128,7 @@ struct LaunchScreen: View {
                         .frame(width: 180, height: 180)
                         .scaleEffect(lobsterScale * 1.2)
 
-                    Text("🦞")
+                    Text("\u{1F99E}")
                         .font(.system(size: 100))
                         .scaleEffect(lobsterScale)
                         .rotationEffect(.degrees(lobsterRotation))

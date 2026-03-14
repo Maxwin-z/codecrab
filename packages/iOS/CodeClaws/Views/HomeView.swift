@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var wsService: WebSocketService
+    @EnvironmentObject var shareHandler: ShareHandler
     @ObservedObject private var pushService = PushNotificationService.shared
 
     @State private var selectedProject: Project?
@@ -10,6 +11,8 @@ struct HomeView: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var projects: [Project] = []
     @State private var toastData: PushToastData? = nil
+    @State private var shareAttachments: [ImageAttachment] = []
+    @State private var shareSessionId: String? = nil
 
     var body: some View {
         ZStack {
@@ -31,7 +34,11 @@ struct HomeView: View {
             } detail: {
                 NavigationStack {
                     if let project = selectedProject {
-                        ChatView(project: project)
+                        ChatView(
+                            project: project,
+                            pendingAttachments: $shareAttachments,
+                            pendingSessionId: $shareSessionId
+                        )
                             .id(project.id)
                     } else {
                         VStack(spacing: 20) {
@@ -80,6 +87,10 @@ struct HomeView: View {
         }
         .task {
             await fetchProjects()
+        }
+        .onChange(of: shareHandler.pendingProjectId) { _, projectId in
+            guard let projectId = projectId else { return }
+            handleIncomingShare(projectId: projectId)
         }
     }
 
@@ -133,6 +144,29 @@ struct HomeView: View {
             self.projects = fetched
         } catch {
             print("[HomeView] Failed to fetch projects: \(error)")
+        }
+    }
+
+    private func handleIncomingShare(projectId: String) {
+        // Find matching project
+        if let project = projects.first(where: { $0.id == projectId }) {
+            selectedProject = project
+            shareAttachments = shareHandler.pendingAttachments
+            shareSessionId = shareHandler.pendingSessionId
+            shareHandler.clear()
+        } else {
+            // Fetch projects first, then retry
+            Task {
+                await fetchProjects()
+                if let project = projects.first(where: { $0.id == projectId }) {
+                    selectedProject = project
+                    shareAttachments = shareHandler.pendingAttachments
+                    shareSessionId = shareHandler.pendingSessionId
+                    shareHandler.clear()
+                } else {
+                    shareHandler.clear()
+                }
+            }
         }
     }
 }

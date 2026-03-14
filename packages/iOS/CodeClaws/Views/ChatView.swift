@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ChatView: View {
     let project: Project
+    @Binding var pendingAttachments: [ImageAttachment]
+    @Binding var pendingSessionId: String?
     @EnvironmentObject var wsService: WebSocketService
     @State private var showSidebar = false
     @State private var showFileBrowser = false
@@ -14,6 +16,7 @@ struct ChatView: View {
     @State private var lastSession: SessionInfo?
     @State private var arrowBounce = false
     @State private var execSessionId: String? = nil
+    @State private var inputAttachments: [ImageAttachment] = []
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -66,152 +69,8 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Messages
-            Group {
-                if showEmptyState {
-                    VStack {
-                        Spacer()
-                        emptyStateView
-                        Spacer()
-                        Spacer()
-                    }
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            MessageListView(
-                                messages: wsService.messages,
-                                streamingText: wsService.displayStreamingText,
-                                streamingThinking: wsService.streamingThinking,
-                                isRunning: wsService.isRunning,
-                                sdkEvents: wsService.sdkEvents,
-                                onResumeSession: { sid in
-                                    execSessionId = sid
-                                }
-                            )
-                            .padding()
-                            .id("Bottom")
-                        }
-                        .scrollDismissesKeyboard(.interactively)
-                        .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
-                        .onChange(of: wsService.sdkEvents.count) { scrollToBottom(proxy) }
-                        .onChange(of: wsService.displayStreamingText) { scrollToBottom(proxy) }
-                        .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
-                        .onChange(of: isInputFocused) { scrollToBottom(proxy) }
-                        .onAppear {
-                            // Auto-scroll to bottom when entering the session
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                scrollToBottom(proxy)
-                            }
-                        }
-                        .onChange(of: wsService.sessionId) {
-                            // Auto-scroll to bottom when switching sessions
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                scrollToBottom(proxy)
-                            }
-                        }
-                    }
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                isInputFocused = false
-            }
-
-            // Summary Banner
-            if let summary = wsService.latestSummary {
-                Text(summary)
-                    .font(.caption)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.green.opacity(0.2))
-                    .cornerRadius(4)
-                    .padding(.horizontal)
-            }
-
-            // Question Form
-            if let pq = wsService.pendingQuestion {
-                UserQuestionFormView(toolId: pq.toolId, questions: pq.questions) { answers in
-                    wsService.submitQuestionResponse(toolId: pq.toolId, answers: answers)
-                } onCancel: {
-                    wsService.dismissQuestion()
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 4)
-            }
-
-            // Permission Request
-            if let pp = wsService.pendingPermission {
-                PermissionRequestView(permission: pp) {
-                    wsService.respondToPermission(requestId: pp.requestId, allow: true)
-                } onDeny: {
-                    wsService.respondToPermission(requestId: pp.requestId, allow: false)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 4)
-            }
-
-            // Suggested Replies
-            if !wsService.suggestions.isEmpty && !wsService.isRunning {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(wsService.suggestions, id: \.self) { suggestion in
-                            Button(action: { prefillText = suggestion }) {
-                                Text(suggestion)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.accentColor.opacity(0.1))
-                                    .foregroundColor(.accentColor)
-                                    .clipShape(Capsule())
-                                    .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.vertical, 4)
-            }
-
-            // Query Queue
-            if !wsService.queryQueue.isEmpty {
-                QueryQueueBarView(
-                    items: wsService.queryQueue,
-                    currentSessionId: wsService.sessionId,
-                    onAbort: { wsService.abort() },
-                    onDequeue: { queryId in wsService.dequeueQuery(queryId) },
-                    isAborting: wsService.isAborting
-                )
-                .padding(.horizontal)
-                .padding(.vertical, 4)
-            }
-
-            // Input Bar
-            InputBarView(
-                onSend: handleSend,
-                onAbort: { wsService.abort() },
-                onPermissionModeChange: { mode in wsService.setPermissionMode(mode) },
-                isRunning: wsService.isRunning,
-                isAborting: wsService.isAborting,
-                currentModel: wsService.currentModel.isEmpty ? "Model" : wsService.currentModel,
-                permissionMode: wsService.permissionMode,
-                availableMcps: allMcps,
-                enabledMcps: enabledMcpsList,
-                onToggleMcp: { mcpId in
-                    if enabledIds.contains(mcpId) {
-                        enabledIds.remove(mcpId)
-                    } else {
-                        enabledIds.insert(mcpId)
-                    }
-                },
-                sdkLoaded: wsService.sdkLoaded,
-                onProbeSdk: { wsService.probeSdk() },
-                projectPath: project.path,
-                isInputFocused: $isInputFocused,
-                prefillText: $prefillText
-            )
-            .padding(.horizontal)
-            .padding(.top, 4)
+            messagesSection
+            bottomControlsSection
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -271,10 +130,176 @@ struct ChatView: View {
             wsService.switchProject(projectId: project.id, cwd: project.path)
             fetchMcps()
             fetchLastSession()
+            handlePendingShare()
+        }
+        .onChange(of: pendingAttachments) { _, newAttachments in
+            if !newAttachments.isEmpty {
+                handlePendingShare()
+            }
         }
         // Auto-enable new SDK MCPs and skills when they appear
         .onChange(of: wsService.sdkMcpServers.map { $0.name }) { autoEnableNewEntries() }
         .onChange(of: wsService.sdkSkills.map { $0.name }) { autoEnableNewEntries() }
+    }
+
+    // MARK: - Messages
+
+    private var messagesSection: some View {
+        Group {
+            if showEmptyState {
+                VStack {
+                    Spacer()
+                    emptyStateView
+                    Spacer()
+                    Spacer()
+                }
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        MessageListView(
+                            messages: wsService.messages,
+                            streamingText: wsService.displayStreamingText,
+                            streamingThinking: wsService.streamingThinking,
+                            isRunning: wsService.isRunning,
+                            sdkEvents: wsService.sdkEvents,
+                            onResumeSession: { sid in
+                                execSessionId = sid
+                            }
+                        )
+                        .padding()
+                        .id("Bottom")
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
+                    .onChange(of: wsService.sdkEvents.count) { scrollToBottom(proxy) }
+                    .onChange(of: wsService.displayStreamingText) { scrollToBottom(proxy) }
+                    .onChange(of: wsService.streamingThinking) { scrollToBottom(proxy) }
+                    .onChange(of: isInputFocused) { scrollToBottom(proxy) }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            scrollToBottom(proxy)
+                        }
+                    }
+                    .onChange(of: wsService.sessionId) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            scrollToBottom(proxy)
+                        }
+                    }
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isInputFocused = false
+        }
+    }
+
+    // MARK: - Bottom Controls
+
+    @ViewBuilder
+    private var bottomControlsSection: some View {
+        // Summary Banner
+        if let summary = wsService.latestSummary {
+            Text(summary)
+                .font(.caption)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.2))
+                .cornerRadius(4)
+                .padding(.horizontal)
+        }
+
+        // Question Form
+        if let pq = wsService.pendingQuestion {
+            UserQuestionFormView(toolId: pq.toolId, questions: pq.questions) { answers in
+                wsService.submitQuestionResponse(toolId: pq.toolId, answers: answers)
+            } onCancel: {
+                wsService.dismissQuestion()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+        }
+
+        // Permission Request
+        if let pp = wsService.pendingPermission {
+            PermissionRequestView(permission: pp) {
+                wsService.respondToPermission(requestId: pp.requestId, allow: true)
+            } onDeny: {
+                wsService.respondToPermission(requestId: pp.requestId, allow: false)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+        }
+
+        // Suggested Replies
+        if !wsService.suggestions.isEmpty && !wsService.isRunning {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(wsService.suggestions, id: \.self) { suggestion in
+                        Button(action: { prefillText = suggestion }) {
+                            Text(suggestion)
+                                .font(.caption)
+                                .lineLimit(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.accentColor.opacity(0.1))
+                                .foregroundColor(.accentColor)
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 4)
+        }
+
+        // Query Queue
+        if !wsService.queryQueue.isEmpty {
+            QueryQueueBarView(
+                items: wsService.queryQueue,
+                currentSessionId: wsService.sessionId,
+                onAbort: { wsService.abort() },
+                onDequeue: { queryId in wsService.dequeueQuery(queryId) },
+                isAborting: wsService.isAborting
+            )
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+        }
+
+        // Input Bar
+        inputBarSection
+    }
+
+    // MARK: - Input Bar
+
+    private var inputBarSection: some View {
+        InputBarView(
+            onSend: handleSend,
+            onAbort: { wsService.abort() },
+            onPermissionModeChange: { mode in wsService.setPermissionMode(mode) },
+            isRunning: wsService.isRunning,
+            isAborting: wsService.isAborting,
+            currentModel: wsService.currentModel.isEmpty ? "Model" : wsService.currentModel,
+            permissionMode: wsService.permissionMode,
+            availableMcps: allMcps,
+            enabledMcps: enabledMcpsList,
+            onToggleMcp: { mcpId in
+                if enabledIds.contains(mcpId) {
+                    enabledIds.remove(mcpId)
+                } else {
+                    enabledIds.insert(mcpId)
+                }
+            },
+            sdkLoaded: wsService.sdkLoaded,
+            onProbeSdk: { wsService.probeSdk() },
+            projectPath: project.path,
+            isInputFocused: $isInputFocused,
+            prefillText: $prefillText,
+            externalAttachments: $inputAttachments
+        )
+        .padding(.horizontal)
+        .padding(.top, 4)
     }
 
     // MARK: - Empty State
@@ -409,6 +434,22 @@ struct ChatView: View {
                 print("Failed to load MCPs: \(error)")
             }
         }
+    }
+
+    private func handlePendingShare() {
+        guard !pendingAttachments.isEmpty else { return }
+
+        // Resume session if specified
+        if let sessionId = pendingSessionId {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                wsService.resumeSession(sessionId)
+            }
+            pendingSessionId = nil
+        }
+
+        // Pass attachments to input bar
+        inputAttachments = pendingAttachments
+        pendingAttachments = []
     }
 
     private func autoEnableNewEntries() {
