@@ -53,14 +53,12 @@ struct ExecSessionSheet: View {
             .navigationTitle("Execution Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") { dismiss() }
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Text(String(sessionId.suffix(8)))
-                        .font(.caption2)
-                        .fontDesign(.monospaced)
-                        .foregroundStyle(.secondary)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
