@@ -39,6 +39,8 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const [execSessionId, setExecSessionId] = useState<string | null>(null)
   // Track whether we've initialized enabledIds from the first data load
   const initializedRef = useRef(false)
+  // Track whether we've already handled the initial session param from the URL
+  const initialSessionHandledRef = useRef(false)
 
   // Fetch custom MCPs (chrome, cron, etc.) on mount
   useEffect(() => {
@@ -144,9 +146,10 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     }
   }, [ws.messages, ws.streamingText, ws.streamingThinking, ws.sdkEvents, project?.id])
 
-  // Handle project query param
+  // Handle project (and optional session) query params
   useEffect(() => {
     const projectId = searchParams.get('project')
+    const sessionParam = searchParams.get('session')
     if (projectId) {
       setLoadingProject(true)
       authFetch(`/api/projects/${projectId}`, {}, onUnauthorized)
@@ -161,6 +164,11 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
           if (data.error) throw new Error(data.error)
           setProject(data)
           ws.setProjectId(projectId, data.path)
+          // If URL contains a session param, resume that session on initial load
+          if (sessionParam && !initialSessionHandledRef.current) {
+            initialSessionHandledRef.current = true
+            ws.resumeSession(sessionParam)
+          }
         })
         .catch((err) => {
           if (err.message !== 'Unauthorized') {
@@ -175,6 +183,16 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
       ws.setProjectId(null)
     }
   }, [searchParams, ws.setProjectId, navigate, onUnauthorized])
+
+  // Sync session ID to URL (replaceState to avoid polluting history)
+  useEffect(() => {
+    if (!project || !ws.sessionId) return
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('session') !== ws.sessionId) {
+      url.searchParams.set('session', ws.sessionId)
+      window.history.replaceState(null, '', url.toString())
+    }
+  }, [project, ws.sessionId])
 
   // Update document title when project changes
   useEffect(() => {

@@ -1,5 +1,5 @@
 // WebSocket hook — client-side connection and state management
-// Single WS connection, per-project state cache, project switching is pure frontend state change
+// Single WS connection, per-project state cache with per-session message isolation
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ChatMessage,
@@ -101,27 +101,57 @@ export interface QueueItem {
   cronJobName?: string
 }
 
-// Per-project cached state
-interface ProjectChatState {
+// Per-session state (messages, streaming, events are isolated per session)
+interface SessionChatState {
   messages: ChatMessage[]
   streamingText: string
   streamingThinking: string
+  sdkEvents: DebugEvent[]
+  latestSummary: string | null
+  suggestions: string[]
+}
+
+function createEmptySessionState(): SessionChatState {
+  return {
+    messages: [],
+    streamingText: '',
+    streamingThinking: '',
+    sdkEvents: [],
+    latestSummary: null,
+    suggestions: [],
+  }
+}
+
+function getSessionState(pState: ProjectChatState, sessionId: string): SessionChatState {
+  let sState = pState.sessionStates.get(sessionId)
+  if (!sState) {
+    sState = createEmptySessionState()
+    pState.sessionStates.set(sessionId, sState)
+  }
+  return sState
+}
+
+// Per-project cached state
+interface ProjectChatState {
+  // Session management
+  sessionId: string // The session the user is currently viewing (viewingSessionId)
+  sessionStates: Map<string, SessionChatState> // Per-session state cache
+  // True when we've sent switch_project or /clear and are waiting for the server
+  // to tell us the new session ID. Prevents background query broadcasts from
+  // overwriting the viewing session.
+  awaitingSessionSwitch: boolean
+  // Per-project state
   pendingQuestion: { toolId: string; questions: Question[] } | null
   pendingPermission: PendingPermission | null
   isRunning: boolean
   isAborting: boolean
-  sessionId: string
   cwd: string
-  latestSummary: string | null
-  suggestions: string[]
   currentModel: string
   permissionMode: PermissionMode
   // SDK-reported MCP servers, skills, and tools (from init message)
   sdkMcpServers: SdkMcpServer[]
   sdkSkills: SdkSkill[]
   sdkTools: string[]
-  // SDK events timeline
-  sdkEvents: DebugEvent[]
   // Activity heartbeat from server
   activityHeartbeat: {
     elapsedMs: number
@@ -135,23 +165,19 @@ interface ProjectChatState {
 
 function createEmptyProjectState(): ProjectChatState {
   return {
-    messages: [],
-    streamingText: '',
-    streamingThinking: '',
+    sessionId: '',
+    sessionStates: new Map(),
+    awaitingSessionSwitch: false,
     pendingQuestion: null,
     pendingPermission: null,
     isRunning: false,
     isAborting: false,
-    sessionId: '',
     cwd: '',
-    latestSummary: null,
-    suggestions: [],
     currentModel: '',
     permissionMode: 'bypassPermissions',
     sdkMcpServers: [],
     sdkSkills: [],
     sdkTools: [],
-    sdkEvents: [],
     activityHeartbeat: null,
     queryQueue: [],
   }
@@ -253,6 +279,7 @@ export function useWebSocket(): UseWebSocketReturn {
       const pid = activeProjectIdRef.current
       if (pid) {
         const sub = projectStatesRef.current.get(pid)
+        if (sub) sub.awaitingSessionSwitch = true
         ws.send(JSON.stringify({
           type: 'switch_project',
           projectId: pid,
@@ -289,210 +316,308 @@ export function useWebSocket(): UseWebSocketReturn {
       const pState = getProjectState(msgProjectId)
       const isActiveProject = msgProjectId === activeProjectIdRef.current
 
+      // Extract sessionId from the message for per-session routing
+      const msgSessionId = (msg as any).sessionId as string | undefined
+
+      // Helper: get session state for this message, falling back to viewing session
+      const getTargetSession = (): { sState: SessionChatState; sid: string; isViewing: boolean } | null => {
+        const sid = msgSessionId || pState.sessionId
+        if (!sid) return null
+        return { sState: getSessionState(pState, sid), sid, isViewing: sid === pState.sessionId }
+      }
+
+      // Track whether we need to re-render
+      let needsRender = false
+
       switch (msg.type) {
-        case 'query_start':
+        case 'query_start': {
           pState.isRunning = true
-          pState.latestSummary = null
-          pState.suggestions = []
           pState.activityHeartbeat = null
+          needsRender = true
           if (isActiveProject) emitQueryStateChange(true)
-          break
-
-        case 'query_end':
-          pState.isRunning = false
-          pState.isAborting = false
-          pState.activityHeartbeat = null
-          if (isActiveProject) emitQueryStateChange(false)
-
-          // Flush remaining streaming text into a message
-          if (pState.streamingText || pState.streamingThinking) {
-            const cleaned = (pState.streamingText || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
-            if (cleaned || pState.streamingThinking) {
-              // Check if last message is an assistant message we can attach thinking to
-              const lastMsg = pState.messages[pState.messages.length - 1]
-              if (pState.streamingThinking && lastMsg?.role === 'assistant' && !cleaned) {
-                // Attach thinking to existing assistant message
-                pState.messages = [
-                  ...pState.messages.slice(0, -1),
-                  { ...lastMsg, thinking: (lastMsg.thinking || '') + pState.streamingThinking },
-                ]
-              } else if (cleaned) {
-                pState.messages = [
-                  ...pState.messages,
-                  { id: genId(), role: 'assistant', content: cleaned, thinking: pState.streamingThinking || undefined, timestamp: Date.now() },
-                ]
-              }
-            }
-            pState.streamingText = ''
+          // Clear summary/suggestions for the session that's starting a query
+          const target = getTargetSession()
+          if (target) {
+            target.sState.latestSummary = null
+            target.sState.suggestions = []
           }
-          pState.streamingThinking = ''
-          break
-
-        case 'query_summary':
-          pState.latestSummary = msg.summary
-          break
-
-        case 'query_suggestions':
-          pState.suggestions = msg.suggestions || []
-          break
-
-        case 'stream_delta':
-          if (msg.deltaType === 'text') {
-            pState.streamingText += msg.text
-          } else if (msg.deltaType === 'thinking') {
-            pState.streamingThinking += msg.text
-          }
-          break
-
-        case 'assistant_text': {
-          const thinkingToSave = pState.streamingThinking || undefined
-          pState.streamingText = ''
-          pState.streamingThinking = ''
-          const cleanedText = msg.text.replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
-          pState.messages = [
-            ...pState.messages,
-            {
-              id: genId(),
-              role: 'assistant',
-              content: cleanedText,
-              thinking: thinkingToSave,
-              parentToolUseId: msg.parentToolUseId ?? undefined,
-              timestamp: Date.now(),
-            },
-          ]
           break
         }
 
-        case 'thinking':
-          pState.messages = (() => {
-            const msgs = pState.messages
-            const last = msgs[msgs.length - 1]
-            if (last?.role === 'assistant') {
-              return [...msgs.slice(0, -1), { ...last, thinking: (last.thinking || '') + msg.thinking }]
-            }
-            return [
-              ...msgs,
-              { id: genId(), role: 'assistant', content: '', thinking: msg.thinking, timestamp: Date.now() },
-            ]
-          })()
-          break
+        case 'query_end': {
+          pState.isRunning = false
+          pState.isAborting = false
+          pState.activityHeartbeat = null
+          needsRender = true
+          if (isActiveProject) emitQueryStateChange(false)
 
-        case 'tool_use':
-          if (pState.streamingText) {
-            pState.messages = [
-              ...pState.messages,
-              { id: genId(), role: 'assistant', content: pState.streamingText, thinking: pState.streamingThinking || undefined, timestamp: Date.now() },
-            ]
-            pState.streamingText = ''
-            pState.streamingThinking = ''
-          }
-          pState.messages = [
-            ...pState.messages,
-            {
-              id: genId(),
-              role: 'system',
-              content: '',
-              toolCalls: [{ name: msg.toolName, id: msg.toolId, input: msg.input }],
-              timestamp: Date.now(),
-            },
-          ]
-          break
-
-        case 'tool_result':
-          pState.messages = (() => {
-            const msgs = [...pState.messages]
-            for (let i = msgs.length - 1; i >= 0; i--) {
-              const m = msgs[i]
-              if (m.toolCalls?.some((tc) => tc.id === msg.toolId)) {
-                const updated = { ...m }
-                updated.toolCalls = m.toolCalls!.map((tc) =>
-                  tc.id === msg.toolId ? { ...tc, result: msg.content, isError: msg.isError } : tc
-                )
-                msgs[i] = updated
-                return msgs
+          // Flush remaining streaming text into the correct session's messages
+          const target = getTargetSession()
+          if (target) {
+            const { sState } = target
+            if (sState.streamingText || sState.streamingThinking) {
+              const cleaned = (sState.streamingText || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+              if (cleaned || sState.streamingThinking) {
+                const lastMsg = sState.messages[sState.messages.length - 1]
+                if (sState.streamingThinking && lastMsg?.role === 'assistant' && !cleaned) {
+                  sState.messages = [
+                    ...sState.messages.slice(0, -1),
+                    { ...lastMsg, thinking: (lastMsg.thinking || '') + sState.streamingThinking },
+                  ]
+                } else if (cleaned) {
+                  sState.messages = [
+                    ...sState.messages,
+                    { id: genId(), role: 'assistant', content: cleaned, thinking: sState.streamingThinking || undefined, timestamp: Date.now() },
+                  ]
+                }
               }
+              sState.streamingText = ''
             }
-            return msgs
-          })()
+            sState.streamingThinking = ''
+          }
           break
+        }
 
-        case 'result':
-          if (msg.isError) {
-            pState.messages = [
-              ...pState.messages,
+        case 'query_summary': {
+          const target = getTargetSession()
+          if (target) {
+            target.sState.latestSummary = msg.summary
+            if (target.isViewing) needsRender = true
+          }
+          break
+        }
+
+        case 'query_suggestions': {
+          const target = getTargetSession()
+          if (target) {
+            target.sState.suggestions = msg.suggestions || []
+            if (target.isViewing) needsRender = true
+          }
+          break
+        }
+
+        case 'stream_delta': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            if (msg.deltaType === 'text') {
+              sState.streamingText += msg.text
+            } else if (msg.deltaType === 'thinking') {
+              sState.streamingThinking += msg.text
+            }
+            if (isViewing) needsRender = true
+          }
+          break
+        }
+
+        case 'assistant_text': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            const thinkingToSave = sState.streamingThinking || undefined
+            sState.streamingText = ''
+            sState.streamingThinking = ''
+            const cleanedText = msg.text.replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+            sState.messages = [
+              ...sState.messages,
               {
                 id: genId(),
-                role: 'system',
-                content: `Error: ${msg.result}`,
+                role: 'assistant',
+                content: cleanedText,
+                thinking: thinkingToSave,
+                parentToolUseId: msg.parentToolUseId ?? undefined,
                 timestamp: Date.now(),
               },
             ]
+            if (isViewing) needsRender = true
           }
           break
+        }
+
+        case 'thinking': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            sState.messages = (() => {
+              const msgs = sState.messages
+              const last = msgs[msgs.length - 1]
+              if (last?.role === 'assistant') {
+                return [...msgs.slice(0, -1), { ...last, thinking: (last.thinking || '') + msg.thinking }]
+              }
+              return [
+                ...msgs,
+                { id: genId(), role: 'assistant', content: '', thinking: msg.thinking, timestamp: Date.now() },
+              ]
+            })()
+            if (isViewing) needsRender = true
+          }
+          break
+        }
+
+        case 'tool_use': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            if (sState.streamingText) {
+              sState.messages = [
+                ...sState.messages,
+                { id: genId(), role: 'assistant', content: sState.streamingText, thinking: sState.streamingThinking || undefined, timestamp: Date.now() },
+              ]
+              sState.streamingText = ''
+              sState.streamingThinking = ''
+            }
+            sState.messages = [
+              ...sState.messages,
+              {
+                id: genId(),
+                role: 'system',
+                content: '',
+                toolCalls: [{ name: msg.toolName, id: msg.toolId, input: msg.input }],
+                timestamp: Date.now(),
+              },
+            ]
+            if (isViewing) needsRender = true
+          }
+          break
+        }
+
+        case 'tool_result': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            sState.messages = (() => {
+              const msgs = [...sState.messages]
+              for (let i = msgs.length - 1; i >= 0; i--) {
+                const m = msgs[i]
+                if (m.toolCalls?.some((tc) => tc.id === msg.toolId)) {
+                  const updated = { ...m }
+                  updated.toolCalls = m.toolCalls!.map((tc) =>
+                    tc.id === msg.toolId ? { ...tc, result: msg.content, isError: msg.isError } : tc
+                  )
+                  msgs[i] = updated
+                  return msgs
+                }
+              }
+              return msgs
+            })()
+            if (isViewing) needsRender = true
+          }
+          break
+        }
+
+        case 'result': {
+          if (msg.isError) {
+            const target = getTargetSession()
+            if (target) {
+              const { sState, isViewing } = target
+              sState.messages = [
+                ...sState.messages,
+                {
+                  id: genId(),
+                  role: 'system',
+                  content: `Error: ${msg.result}`,
+                  timestamp: Date.now(),
+                },
+              ]
+              if (isViewing) needsRender = true
+            }
+          }
+          break
+        }
 
         case 'aborted':
           pState.isAborting = false
+          needsRender = true
           break
 
-        case 'cleared':
-          pState.messages = []
-          pState.streamingText = ''
-          pState.streamingThinking = ''
-          pState.sdkEvents = []
+        case 'cleared': {
+          // Server creates a new session after /clear — clear the viewing session state.
+          // The new session ID will arrive via system init.
+          const sid = pState.sessionId
+          if (sid) {
+            pState.sessionStates.set(sid, createEmptySessionState())
+          }
+          needsRender = true
           break
+        }
 
         case 'cwd_changed':
           pState.cwd = msg.cwd
+          needsRender = true
           break
 
-        case 'error':
-          pState.messages = [
-            ...pState.messages,
-            { id: genId(), role: 'system', content: `Error: ${msg.message}`, timestamp: Date.now() },
-          ]
+        case 'error': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            sState.messages = [
+              ...sState.messages,
+              { id: genId(), role: 'system', content: `Error: ${msg.message}`, timestamp: Date.now() },
+            ]
+            if (isViewing) needsRender = true
+          }
           pState.isRunning = false
+          needsRender = true
           break
+        }
 
         case 'session_resumed':
-          if (msg.sessionId) {
+          // Only update viewing session if we're expecting it (user-initiated resume/switch).
+          // The server also broadcasts session_resumed during background query execution
+          // (onSessionInit), which we must ignore to avoid hijacking the user's view.
+          if (msg.sessionId && pState.awaitingSessionSwitch) {
             pState.sessionId = msg.sessionId
+            pState.awaitingSessionSwitch = false
+            needsRender = true
           }
           break
 
         case 'message_history': {
-          // Convert summaries to ChatMessages, preserving tool call info
-          pState.messages = msg.messages.map((summary: any) => {
-            const base: ChatMessage = {
-              id: summary.id,
-              role: summary.role,
-              content: summary.content,
-              timestamp: summary.timestamp,
-            }
-            if (summary.costUsd != null) base.costUsd = summary.costUsd
-            if (summary.durationMs != null) base.durationMs = summary.durationMs
-            if (summary.toolCalls?.length) {
-              base.toolCalls = summary.toolCalls.map((tc: any) => ({
-                name: tc.name,
-                id: tc.id,
-                input: tc.inputSummary || '',
-                result: tc.resultPreview,
-                isError: tc.isError,
-              }))
-            }
-            return base
-          })
+          // Route to the correct session (message includes sessionId from server)
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            sState.messages = msg.messages.map((summary: any) => {
+              const base: ChatMessage = {
+                id: summary.id,
+                role: summary.role,
+                content: summary.content,
+                timestamp: summary.timestamp,
+              }
+              if (summary.costUsd != null) base.costUsd = summary.costUsd
+              if (summary.durationMs != null) base.durationMs = summary.durationMs
+              if (summary.toolCalls?.length) {
+                base.toolCalls = summary.toolCalls.map((tc: any) => ({
+                  name: tc.name,
+                  id: tc.id,
+                  input: tc.inputSummary || '',
+                  result: tc.resultPreview,
+                  isError: tc.isError,
+                }))
+              }
+              return base
+            })
+            if (isViewing) needsRender = true
+          }
           break
         }
 
-        case 'user_message':
-          pState.messages = [...pState.messages, msg.message]
+        case 'user_message': {
+          const target = getTargetSession()
+          if (target) {
+            const { sState, isViewing } = target
+            sState.messages = [...sState.messages, msg.message]
+            if (isViewing) needsRender = true
+          }
           break
+        }
 
         case 'ask_user_question':
           pState.pendingQuestion = {
             toolId: msg.toolId,
             questions: msg.questions,
           }
+          needsRender = true
           break
 
         case 'session_status_changed':
@@ -503,10 +628,12 @@ export function useWebSocket(): UseWebSocketReturn {
 
         case 'model_changed':
           if (msg.model) pState.currentModel = msg.model
+          needsRender = true
           break
 
         case 'permission_mode_changed':
           pState.permissionMode = msg.mode as PermissionMode
+          needsRender = true
           break
 
         case 'permission_request':
@@ -516,16 +643,24 @@ export function useWebSocket(): UseWebSocketReturn {
             input: msg.input,
             reason: msg.reason,
           }
+          needsRender = true
           break
 
         case 'system':
           if (msg.subtype === 'init') {
             if (msg.model) pState.currentModel = msg.model
-            if (msg.sessionId) pState.sessionId = msg.sessionId
+            // Only update viewing session if we're expecting it (switch_project, /clear, reconnect).
+            // The server also broadcasts system init during background query execution
+            // (SDK system_init event), which we must ignore.
+            if (msg.sessionId && pState.awaitingSessionSwitch) {
+              pState.sessionId = msg.sessionId
+              pState.awaitingSessionSwitch = false
+            }
             if (msg.sdkMcpServers) pState.sdkMcpServers = msg.sdkMcpServers
             if (msg.sdkSkills) pState.sdkSkills = msg.sdkSkills
             if (msg.tools) pState.sdkTools = msg.tools
           }
+          needsRender = true
           break
 
         case 'activity_heartbeat':
@@ -535,19 +670,28 @@ export function useWebSocket(): UseWebSocketReturn {
             lastToolName: msg.lastToolName,
             paused: msg.paused,
           }
+          needsRender = true
           break
 
-        case 'sdk_event':
-          if ((msg as any).event) {
-            pState.sdkEvents = [...pState.sdkEvents, (msg as any).event]
+        case 'sdk_event': {
+          const target = getTargetSession()
+          if (target && (msg as any).event) {
+            const { sState, isViewing } = target
+            sState.sdkEvents = [...sState.sdkEvents, (msg as any).event]
+            if (isViewing) needsRender = true
           }
           break
+        }
 
-        case 'sdk_event_history':
-          if ((msg as any).events) {
-            pState.sdkEvents = (msg as any).events
+        case 'sdk_event_history': {
+          const target = getTargetSession()
+          if (target && (msg as any).events) {
+            const { sState, isViewing } = target
+            sState.sdkEvents = (msg as any).events
+            if (isViewing) needsRender = true
           }
           break
+        }
 
         case 'cron_task_completed': {
           const cronMsg = msg as any
@@ -563,7 +707,13 @@ export function useWebSocket(): UseWebSocketReturn {
               success: cronMsg.success,
             },
           }
-          pState.sdkEvents = [...pState.sdkEvents, cronEvent]
+          // Add to viewing session's events (cron completion is a project-level notification)
+          const sid = pState.sessionId
+          if (sid) {
+            const sState = getSessionState(pState, sid)
+            sState.sdkEvents = [...sState.sdkEvents, cronEvent]
+          }
+          needsRender = true
           break
         }
 
@@ -595,6 +745,7 @@ export function useWebSocket(): UseWebSocketReturn {
             // Sort by position
             pState.queryQueue.sort((a, b) => a.position - b.position)
           }
+          needsRender = true
           break
         }
 
@@ -609,12 +760,13 @@ export function useWebSocket(): UseWebSocketReturn {
             sessionId: item.sessionId,
             cronJobName: item.cronJobName,
           }))
+          needsRender = true
           break
         }
       }
 
-      // Trigger re-render if this message is for the active project
-      if (isActiveProject) {
+      // Trigger re-render if this message is for the active project and state changed
+      if (isActiveProject && needsRender) {
         triggerRender()
       }
     }
@@ -631,7 +783,7 @@ export function useWebSocket(): UseWebSocketReturn {
     return cleanup
   }, [connect])
 
-  // Send helper: stamps projectId + sessionId on outgoing messages
+  // Send helper: stamps projectId + sessionId (viewingSessionId) on outgoing messages
   const sendWithProject = useCallback((msg: Record<string, unknown>) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
@@ -661,13 +813,17 @@ export function useWebSocket(): UseWebSocketReturn {
       const pid = activeProjectIdRef.current
       if (pid) {
         const pState = getProjectState(pid)
-        const userMsg: ChatMessage = {
-          id: genId(),
-          role: 'user',
-          content: command,
-          timestamp: Date.now(),
+        const sid = pState.sessionId
+        if (sid) {
+          const sState = getSessionState(pState, sid)
+          const userMsg: ChatMessage = {
+            id: genId(),
+            role: 'user',
+            content: command,
+            timestamp: Date.now(),
+          }
+          sState.messages = [...sState.messages, userMsg]
         }
-        pState.messages = [...pState.messages, userMsg]
         triggerRender()
       }
     }
@@ -695,6 +851,15 @@ export function useWebSocket(): UseWebSocketReturn {
     activeProjectIdRef.current = projectId
     setActiveProjectId(projectId)
 
+    // If we have a project, ensure we have a state entry for it
+    if (projectId) {
+      const pState = getProjectState(projectId)
+      if (projectCwd && !pState.cwd) {
+        pState.cwd = projectCwd
+      }
+      pState.awaitingSessionSwitch = true
+    }
+
     // Send switch_project to server (if we have a project and are connected)
     if (projectId && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -704,35 +869,39 @@ export function useWebSocket(): UseWebSocketReturn {
       }))
     }
 
-    // If we have a project, ensure we have a state entry for it
-    if (projectId) {
-      const pState = getProjectState(projectId)
-      if (projectCwd && !pState.cwd) {
-        pState.cwd = projectCwd
-      }
-    }
-
     triggerRender()
   }, [getProjectState, triggerRender])
 
   const clearMessages = useCallback(() => {
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.awaitingSessionSwitch = true
+    }
     sendWithProject({ type: 'command', command: '/clear' })
-  }, [sendWithProject])
+  }, [getProjectState, sendWithProject])
 
   const resumeSession = useCallback((sessionId: string) => {
     const pid = activeProjectIdRef.current
     if (!pid) return
     const pState = getProjectState(pid)
-    pState.messages = []
-    pState.streamingText = ''
-    pState.streamingThinking = ''
+    // Switch viewing session and clear cached state (server will send fresh message_history)
+    // Cancel any pending switch_project session assignment — this explicit resume takes priority
+    pState.awaitingSessionSwitch = false
+    pState.sessionId = sessionId
+    pState.sessionStates.set(sessionId, createEmptySessionState())
     triggerRender()
     sendWithProject({ type: 'resume_session', sessionId })
   }, [getProjectState, sendWithProject, triggerRender])
 
   const newChat = useCallback(() => {
+    const pid = activeProjectIdRef.current
+    if (pid) {
+      const pState = getProjectState(pid)
+      pState.awaitingSessionSwitch = true
+    }
     sendWithProject({ type: 'command', command: '/clear' })
-  }, [sendWithProject])
+  }, [getProjectState, sendWithProject])
 
   const submitQuestionResponse = useCallback(
     (answers: Record<string, string | string[]>) => {
@@ -820,18 +989,21 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, [])
 
-  // Read active project's state for the return value
+  // Read active project's state and viewing session's state for the return value
   const activeState = getActiveState()
+  const viewingSessionState = activeState.sessionId
+    ? (activeState.sessionStates.get(activeState.sessionId) || createEmptySessionState())
+    : createEmptySessionState()
 
   return {
     connected,
     isRunning: activeState.isRunning,
     isAborting: activeState.isAborting,
-    messages: activeState.messages,
-    streamingText: getDisplayStreamingText(activeState.streamingText),
-    streamingThinking: activeState.streamingThinking,
-    latestSummary: activeState.latestSummary,
-    suggestions: activeState.suggestions,
+    messages: viewingSessionState.messages,
+    streamingText: getDisplayStreamingText(viewingSessionState.streamingText),
+    streamingThinking: viewingSessionState.streamingThinking,
+    latestSummary: viewingSessionState.latestSummary,
+    suggestions: viewingSessionState.suggestions,
     pendingQuestion: activeState.pendingQuestion,
     pendingPermission: activeState.pendingPermission,
     cwd: activeState.cwd,
@@ -845,7 +1017,7 @@ export function useWebSocket(): UseWebSocketReturn {
     sdkMcpServers: activeState.sdkMcpServers,
     sdkSkills: activeState.sdkSkills,
     sdkTools: activeState.sdkTools,
-    sdkEvents: activeState.sdkEvents,
+    sdkEvents: viewingSessionState.sdkEvents,
     sdkLoaded: activeState.sdkTools.length > 0,
     probeSdk,
     sendPrompt,
