@@ -447,6 +447,26 @@ class WebSocketService: ObservableObject {
                     paused: paused
                 )
             }
+        case "cron_task_completed":
+            if isCurrentProject {
+                let cronJobId = json["cronJobId"] as? String ?? "unknown"
+                let cronJobName = json["cronJobName"] as? String
+                let execSessionId = json["execSessionId"] as? String ?? ""
+                let success = json["success"] as? Bool ?? false
+                let label = cronJobName ?? cronJobId
+                let event = SdkEvent(
+                    ts: Date().timeIntervalSince1970 * 1000,
+                    type: "cron_task_completed",
+                    detail: "\(success ? "Completed" : "Failed"): \(label)",
+                    data: [
+                        "cronJobId": .string(cronJobId),
+                        "cronJobName": .string(cronJobName ?? ""),
+                        "execSessionId": .string(execSessionId),
+                        "success": .bool(success),
+                    ]
+                )
+                self.sdkEvents.append(event)
+            }
         case "sdk_event":
             if isCurrentProject, let eventDict = json["event"] as? [String: Any] {
                 if let event = parseSdkEvent(eventDict) {

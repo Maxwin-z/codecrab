@@ -14,6 +14,7 @@ struct MessageListView: View {
     let streamingThinking: String
     let isRunning: Bool
     let sdkEvents: [SdkEvent]
+    var onResumeSession: ((String) -> Void)? = nil
 
     /// Group user messages and SDK events into turns
     private var turnGroups: [TurnGroup] {
@@ -58,7 +59,7 @@ struct MessageListView: View {
                             .padding(.vertical, 6)
                     }
                     if !group.agentEvents.isEmpty {
-                        AgentResponseView(events: group.agentEvents, isStreaming: isRunning && index == turnGroups.count - 1)
+                        AgentResponseView(events: group.agentEvents, isStreaming: isRunning && index == turnGroups.count - 1, onResumeSession: onResumeSession)
                     }
                 }
 
@@ -83,12 +84,20 @@ struct MessageListView: View {
 struct AgentResponseView: View {
     let events: [SdkEvent]
     let isStreaming: Bool
+    var onResumeSession: ((String) -> Void)? = nil
     @State private var showDebug = false
 
-    private static let messageTypes: Set<String> = ["thinking", "text", "tool_use", "tool_result"]
+    private static let messageTypes: Set<String> = ["thinking", "text", "tool_use", "tool_result", "cron_task_completed"]
 
     private var messageEvents: [SdkEvent] {
-        events.filter { Self.messageTypes.contains($0.type) }
+        events.filter { event in
+            if Self.messageTypes.contains(event.type) { return true }
+            // Include result events with execSessionId (cron task results from history)
+            if event.type == "result",
+               let data = event.data,
+               case .string(_) = data["execSessionId"] { return true }
+            return false
+        }
     }
 
     var body: some View {
@@ -99,7 +108,13 @@ struct AgentResponseView: View {
                 }
             } else {
                 ForEach(messageEvents) { event in
-                    MessageModeEventView(event: event, isStreaming: isStreaming)
+                    if event.type == "cron_task_completed" {
+                        CronTaskCompletedView(event: event, onResumeSession: onResumeSession)
+                    } else if event.type == "result", let data = event.data, case .string(_) = data["execSessionId"] {
+                        CronResultView(event: event, onResumeSession: onResumeSession)
+                    } else {
+                        MessageModeEventView(event: event, isStreaming: isStreaming)
+                    }
                 }
             }
 
@@ -348,6 +363,142 @@ private struct MessageModeToolResultView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Cron Result View (from persisted session history — result event with execSessionId)
+
+private struct CronResultView: View {
+    let event: SdkEvent
+    var onResumeSession: ((String) -> Void)? = nil
+
+    private var execSessionId: String {
+        guard let data = event.data, case .string(let sid) = data["execSessionId"] else { return "" }
+        return sid
+    }
+
+    private var durationMs: Double {
+        guard let data = event.data, case .number(let ms) = data["durationMs"] else { return 0 }
+        return ms
+    }
+
+    private var costUsd: Double? {
+        guard let data = event.data, case .number(let c) = data["costUsd"] else { return nil }
+        return c
+    }
+
+    private var isError: Bool {
+        guard let data = event.data, case .bool(let e) = data["isError"] else { return false }
+        return e
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: isError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                    .foregroundColor(isError ? .red : .green)
+                    .font(.system(size: 13))
+                Text(event.detail ?? (isError ? "Failed" : "Completed"))
+                    .font(.caption)
+                    .fontDesign(.monospaced)
+                    .foregroundColor(.secondary)
+                if let cost = costUsd {
+                    Text("$\(String(format: "%.4f", cost))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
+                Spacer()
+            }
+
+            if !execSessionId.isEmpty, let action = onResumeSession {
+                Button(action: { action(execSessionId) }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.right.circle")
+                            .font(.system(size: 12))
+                        Text("View Execution Details")
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.blue.opacity(0.08))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+}
+
+// MARK: - Cron Task Completed View
+
+private struct CronTaskCompletedView: View {
+    let event: SdkEvent
+    var onResumeSession: ((String) -> Void)? = nil
+
+    private var cronJobName: String {
+        guard let data = event.data, case .string(let name) = data["cronJobName"], !name.isEmpty else {
+            if let data = event.data, case .string(let id) = data["cronJobId"] { return id }
+            return "Task"
+        }
+        return name
+    }
+
+    private var execSessionId: String {
+        guard let data = event.data, case .string(let sid) = data["execSessionId"] else { return "" }
+        return sid
+    }
+
+    private var success: Bool {
+        guard let data = event.data, case .bool(let s) = data["success"] else { return false }
+        return s
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundColor(success ? .green : .red)
+                    .font(.system(size: 14))
+                Text("Scheduled Task: \(cronJobName)")
+                    .font(.callout)
+                    .fontDesign(.monospaced)
+                    .fontWeight(.medium)
+                Spacer()
+            }
+
+            if !execSessionId.isEmpty, let action = onResumeSession {
+                Button(action: { action(execSessionId) }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.right.circle")
+                            .font(.system(size: 12))
+                        Text("View Execution Details")
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.08))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(10)
+        .background(Color(UIColor.secondarySystemBackground).opacity(0.5))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(success ? Color.green.opacity(0.3) : Color.red.opacity(0.3), lineWidth: 0.5)
+        )
     }
 }
 

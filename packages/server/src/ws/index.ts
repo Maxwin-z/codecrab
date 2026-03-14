@@ -531,24 +531,35 @@ async function executeCronQuery(
     })
   }
 
-  // Insert cron result turn into parent session (summary only, full details in exec session)
+  // Insert cron result turn into parent session with full debug events from exec session
   const resultSummary = isSuccess
     ? `Completed successfully in ${durationMs}ms`
     : `Failed: ${errorMessage}`
-  const resultText = `[Scheduled Task Completed: ${cronJobName || 'Task'}]\nResult: ${resultSummary}\nOutput: ${finalText.slice(0, 1000)}${finalText.length > 1000 ? '...' : ''}`
+  const now = Date.now()
+
+  // Copy debug events from exec session turn so clients can render full content
+  const execTurnEvents = currentTurn?.agent.debugEvents || []
+  const execTurnMessages = currentTurn?.agent.messages || []
+
+  // Append a final result event with execSessionId reference
+  const resultEvent: import('@codeclaws/shared').DebugEvent = {
+    ts: now, type: 'result', detail: resultSummary,
+    data: { costUsd: clientState.currentCostUsd, durationMs, execSessionId },
+  }
 
   parentSession.turns.push({
     prompt: { type: 'cron', text: prompt, cronJobId: metadata?.cronJobId, cronJobName },
     agent: {
-      messages: [{ ts: Date.now(), type: 'text', detail: resultText, data: { content: resultText } }],
-      debugEvents: [{ ts: Date.now(), type: 'result', detail: resultSummary, data: { costUsd: clientState.currentCostUsd, durationMs, execSessionId } }],
+      messages: [...execTurnMessages],
+      debugEvents: [...execTurnEvents, resultEvent],
     },
-    timestamp: Date.now(),
+    timestamp: now,
   })
   parentSession.lastModified = Date.now()
   persistSession(parentSession)
 
   // Broadcast result summary to parent session
+  const resultText = `[Scheduled Task Completed: ${cronJobName || 'Task'}]\nResult: ${resultSummary}`
   broadcastToProject(projectId, {
     type: 'assistant_text',
     text: resultText,

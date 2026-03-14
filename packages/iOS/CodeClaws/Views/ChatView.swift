@@ -13,6 +13,7 @@ struct ChatView: View {
     @State private var breathe = false
     @State private var lastSession: SessionInfo?
     @State private var arrowBounce = false
+    @State private var execSessionId: String? = nil
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -82,7 +83,10 @@ struct ChatView: View {
                                 streamingText: wsService.displayStreamingText,
                                 streamingThinking: wsService.streamingThinking,
                                 isRunning: wsService.isRunning,
-                                sdkEvents: wsService.sdkEvents
+                                sdkEvents: wsService.sdkEvents,
+                                onResumeSession: { sid in
+                                    execSessionId = sid
+                                }
                             )
                             .padding()
                             .id("Bottom")
@@ -244,6 +248,11 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showFileBrowser) {
             FileBrowserView(projectPath: project.path)
+        }
+        .sheet(isPresented: showExecSession) {
+            if let sid = execSessionId {
+                ExecSessionSheet(sessionId: sid)
+            }
         }
         .onAppear {
             wsService.switchProject(projectId: project.id, cwd: project.path)
@@ -421,5 +430,12 @@ struct ChatView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return "\(minutes)m \(seconds)s"
+    }
+
+    private var showExecSession: Binding<Bool> {
+        Binding(
+            get: { execSessionId != nil },
+            set: { if !$0 { execSessionId = nil } }
+        )
     }
 }
