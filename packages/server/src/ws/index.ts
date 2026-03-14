@@ -91,6 +91,44 @@ function cleanupHeartbeat(queryId: string): void {
   lastHeartbeatSentAt.delete(queryId)
 }
 
+// Project activity — lightweight global broadcast for project list UI
+const PROJECT_ACTIVITY_THROTTLE_MS = 2_000
+const lastProjectActivitySentAt = new Map<string, number>()
+
+function maybeBroadcastProjectActivity(projectId: string, queryId: string): void {
+  const now = Date.now()
+  const lastSent = lastProjectActivitySentAt.get(projectId) || 0
+  if (now - lastSent < PROJECT_ACTIVITY_THROTTLE_MS) return
+
+  const timerState = queryQueue.getTimerState(queryId)
+  if (!timerState) return
+
+  lastProjectActivitySentAt.set(projectId, now)
+
+  let activityType: 'thinking' | 'text' | 'tool_use' | 'idle' = 'idle'
+  if (timerState.lastActivityType === 'thinking_delta') activityType = 'thinking'
+  else if (timerState.lastActivityType === 'text_delta') activityType = 'text'
+  else if (timerState.lastActivityType === 'tool_use') activityType = 'tool_use'
+  else return // skip non-interesting activity types (usage, tool_result, started)
+
+  broadcastGlobal({
+    type: 'project_activity',
+    projectId,
+    activityType,
+    toolName: timerState.lastToolName,
+    textSnippet: timerState.textSnippet,
+  })
+}
+
+function clearProjectActivity(projectId: string): void {
+  lastProjectActivitySentAt.delete(projectId)
+  broadcastGlobal({
+    type: 'project_activity',
+    projectId,
+    activityType: 'idle',
+  })
+}
+
 // Execute a prompt in a specific session (used by cron jobs)
 // Now enqueues through the query queue instead of executing directly
 // If sessionId is not provided, a new session will be created for the project
@@ -291,8 +329,9 @@ async function executeCronQuery(
           projectId,
           sessionId: parentSession.sessionId,
         })
-        queryQueue.touchActivity(queuedQuery.id, 'text_delta')
+        queryQueue.touchActivity(queuedQuery.id, 'text_delta', undefined, text)
         maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
+        maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onThinkingDelta: (thinking) => {
         if (!thinkingStarted) {
@@ -313,8 +352,9 @@ async function executeCronQuery(
           projectId,
           sessionId: parentSession.sessionId,
         })
-        queryQueue.touchActivity(queuedQuery.id, 'thinking_delta')
+        queryQueue.touchActivity(queuedQuery.id, 'thinking_delta', undefined, thinking)
         maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
+        maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onToolUse: (toolName, toolId, input) => {
         // Reset text/thinking flags for next turn
@@ -339,6 +379,7 @@ async function executeCronQuery(
         })
         queryQueue.touchActivity(queuedQuery.id, 'tool_use', toolName)
         maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
+        maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
         // Broadcast tool_result to both sessions
@@ -518,6 +559,7 @@ async function executeCronQuery(
     durationMs = durationMs || Date.now() - startTime
     removeAllClientStates(cronClientId)
     cleanupHeartbeat(queuedQuery.id)
+    clearProjectActivity(projectId)
 
     // Broadcast query_end to both sessions
     broadcastToProject(projectId, {
@@ -1303,8 +1345,9 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
-        queryQueue.touchActivity(queuedQuery.id, 'text_delta')
+        queryQueue.touchActivity(queuedQuery.id, 'text_delta', undefined, text)
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+        maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onThinkingDelta: (thinking) => {
         if (!thinkingStarted) {
@@ -1317,8 +1360,9 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
-        queryQueue.touchActivity(queuedQuery.id, 'thinking_delta')
+        queryQueue.touchActivity(queuedQuery.id, 'thinking_delta', undefined, thinking)
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+        maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onToolUse: (toolName, toolId, input) => {
         // Reset text/thinking flags for next turn
@@ -1334,6 +1378,7 @@ async function executeUserQuery(
         })
         queryQueue.touchActivity(queuedQuery.id, 'tool_use', toolName)
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+        maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
         broadcastToProject(projectId, {
@@ -1528,6 +1573,7 @@ async function executeUserQuery(
     session.pendingQuestion = null
     session.pendingPermissionRequest = null
     cleanupHeartbeat(queuedQuery.id)
+    clearProjectActivity(projectId)
     broadcastToProject(projectId, {
       type: 'query_end',
       projectId,

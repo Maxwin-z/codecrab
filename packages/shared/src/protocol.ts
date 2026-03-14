@@ -338,6 +338,14 @@ export interface ProjectStatusesMessage {
   statuses: ProjectStatus[]
 }
 
+export interface ProjectActivityMessage {
+  type: 'project_activity'
+  projectId: string
+  activityType: 'thinking' | 'text' | 'tool_use' | 'idle'
+  toolName?: string
+  textSnippet?: string
+}
+
 export type ServerMessage =
   | SystemMessage
   | StreamDeltaMessage
@@ -373,6 +381,7 @@ export type ServerMessage =
   | ActivityHeartbeatMessage
   | SdkEventMessage
   | SdkEventHistoryMessage
+  | ProjectActivityMessage
 
 // ============ Image Attachments ============
 

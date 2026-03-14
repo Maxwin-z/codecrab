@@ -59,6 +59,7 @@ export interface QueryTimerState {
   paused: boolean
   lastActivityType: string
   lastToolName?: string
+  textSnippet?: string
 }
 
 export type StatusChangeCallback = (event: QueryStatusEvent) => void
@@ -269,13 +270,19 @@ export class QueryQueue {
   /**
    * Signal activity on a running query, resetting the idle timer.
    */
-  touchActivity(queryId: string, activityType: string, toolName?: string): void {
+  touchActivity(queryId: string, activityType: string, toolName?: string, textSnippet?: string): void {
     const state = this.timerStates.get(queryId)
     if (!state) return
 
     state.lastActivityAt = Date.now()
     state.lastActivityType = activityType
     state.lastToolName = toolName
+    if (textSnippet !== undefined) {
+      // Accumulate and keep only the last 50 characters
+      state.textSnippet = ((state.textSnippet || '') + textSnippet).slice(-50)
+    } else if (activityType === 'tool_use') {
+      state.textSnippet = undefined
+    }
 
     // If paused (waiting for user input), only update metadata — timer restarts on resume
     if (state.paused) return

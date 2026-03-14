@@ -54,11 +54,18 @@ struct ActivityHeartbeat: Equatable {
     var paused: Bool
 }
 
+struct ProjectActivity: Equatable {
+    var activityType: String  // "thinking" | "text" | "tool_use" | "idle"
+    var toolName: String?
+    var textSnippet: String?
+}
+
 @MainActor
 class WebSocketService: ObservableObject {
     @Published var connected: Bool = false
     @Published var availableModels: [ModelInfo] = []
     @Published var projectStatuses: [ProjectStatus] = []
+    @Published var projectActivities: [String: ProjectActivity] = [:]
 
     /// Single source of truth for which projects are currently processing.
     /// Driven by query_start (insert) and query_end (remove).
@@ -273,6 +280,19 @@ class WebSocketService: ObservableObject {
                         runningProjectIds.remove(status.projectId)
                         recentlyEndedProjectIds.remove(status.projectId)
                     }
+                }
+            }
+        case "project_activity":
+            if let pid = json["projectId"] as? String,
+               let actType = json["activityType"] as? String {
+                if actType == "idle" {
+                    projectActivities.removeValue(forKey: pid)
+                } else {
+                    projectActivities[pid] = ProjectActivity(
+                        activityType: actType,
+                        toolName: json["toolName"] as? String,
+                        textSnippet: json["textSnippet"] as? String
+                    )
                 }
             }
         case "query_start":

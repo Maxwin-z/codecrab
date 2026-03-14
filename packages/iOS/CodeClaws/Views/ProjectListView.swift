@@ -113,6 +113,11 @@ struct ProjectCard: View {
                     .lineLimit(1)
                     .truncationMode(.head)
             }
+
+            // Live activity row
+            if let activity = wsService.projectActivities[project.id] {
+                activityRow(activity)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -140,6 +145,43 @@ struct ProjectCard: View {
                   let lastMod = status.lastModified,
                   Date().timeIntervalSince1970 * 1000 - lastMod < 600_000 {
             Circle().fill(Color.green).frame(width: 8, height: 8)
+        }
+    }
+
+    @ViewBuilder
+    private func activityRow(_ activity: ProjectActivity) -> some View {
+        HStack(spacing: 4) {
+            switch activity.activityType {
+            case "thinking":
+                Text("💭")
+                    .font(.caption2)
+                Text("..." + (activity.textSnippet ?? "").suffix(30))
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            case "tool_use":
+                Text("🔧")
+                    .font(.caption2)
+                Text("tool_use [\(activity.toolName ?? "unknown")]")
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            case "text":
+                Text("💬")
+                    .font(.caption2)
+                Text("..." + (activity.textSnippet ?? "").suffix(30))
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            default:
+                EmptyView()
+            }
+            Spacer()
         }
     }
 
