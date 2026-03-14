@@ -44,13 +44,32 @@ struct SessionSidebarView: View {
                                 wsService.resumeSession(session.sessionId)
                                 dismiss()
                             }) {
-                                HStack {
+                                HStack(spacing: 10) {
+                                    if session.isCron {
+                                        Image(systemName: "clock.arrow.2.circlepath")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.purple)
+                                    }
+
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(session.summary.isEmpty ? (session.firstPrompt ?? "Untitled session") : session.summary)
-                                            .font(.headline)
-                                            .lineLimit(1)
-                                            .foregroundColor(.primary)
-                                        
+                                        HStack(spacing: 6) {
+                                            if session.isCron {
+                                                Text(session.cronJobName ?? "Scheduled")
+                                                    .font(.caption2)
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.purple)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Color.purple.opacity(0.12))
+                                                    .cornerRadius(4)
+                                            }
+
+                                            Text(session.summary.isEmpty ? (session.firstPrompt ?? "Untitled session") : session.summary)
+                                                .font(.headline)
+                                                .lineLimit(1)
+                                                .foregroundColor(.primary)
+                                        }
+
                                         HStack {
                                             Text(TimeAgo.format(from: session.lastModified, now: now))
                                             Text("•")
@@ -60,15 +79,15 @@ struct SessionSidebarView: View {
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     }
-                                    
+
                                     Spacer()
-                                    
+
                                     if session.status == "processing" {
                                         Circle().fill(Color.orange).frame(width: 8, height: 8)
                                     } else if session.status == "error" {
                                         Circle().fill(Color.red).frame(width: 8, height: 8)
                                     } else {
-                                        Circle().fill(Color.gray).frame(width: 8, height: 8)
+                                        Circle().fill(session.isCron ? Color.purple.opacity(0.5) : Color.gray).frame(width: 8, height: 8)
                                     }
                                 }
                                 .padding(.vertical, 4)

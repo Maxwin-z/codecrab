@@ -826,6 +826,10 @@ export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[]
       return false
     })
 
+    // Detect cron session: check if any turn has a cron prompt
+    const cronTurn = session.turns.find((t) => t.prompt.type === 'cron')
+    const cronJobName = cronTurn?.prompt.cronJobName
+
     result.push({
       sessionId: session.sessionId,
       summary: session.summary || '',
@@ -835,6 +839,7 @@ export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[]
       status: session.status,
       isActive,
       projectId: session.projectId,
+      cronJobName,
     })
   }
 

@@ -9,4 +9,7 @@ struct SessionInfo: Codable, Identifiable, Equatable {
     let cwd: String?
     let status: String?
     let isActive: Bool?
+    let cronJobName: String?
+
+    var isCron: Bool { cronJobName != nil }
 }

@@ -460,6 +460,7 @@ export interface SessionInfo {
   status?: 'idle' | 'processing' | 'error'
   isActive?: boolean
   projectId?: string
+  cronJobName?: string
 }
 
 export interface McpInfo {
