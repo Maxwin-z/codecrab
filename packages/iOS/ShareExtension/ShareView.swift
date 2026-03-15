@@ -457,20 +457,21 @@ struct ShareNavigationView: View {
     }
 
     private func loadItem(from provider: NSItemProvider, typeIdentifier: String) async -> (name: String, data: Data, mimeType: String)? {
-        await withCheckedContinuation { continuation in
+        let suggestedName = provider.suggestedName
+        return await withCheckedContinuation { continuation in
             provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
                 if let url = item as? URL, let data = try? Data(contentsOf: url) {
-                    let name = provider.suggestedName ?? url.lastPathComponent
+                    let name = suggestedName ?? url.lastPathComponent
                     let mimeType = mimeTypeForExtension(url.pathExtension)
                     continuation.resume(returning: (name, data, mimeType))
                 } else if let data = item as? Data {
                     let utType = UTType(typeIdentifier)
                     let ext = utType?.preferredFilenameExtension ?? "dat"
-                    let name = provider.suggestedName ?? "file.\(ext)"
+                    let name = suggestedName ?? "file.\(ext)"
                     let mimeType = utType?.preferredMIMEType ?? "application/octet-stream"
                     continuation.resume(returning: (name, data, mimeType))
                 } else if let image = item as? UIImage, let data = image.jpegData(compressionQuality: 0.85) {
-                    let name = provider.suggestedName ?? "image.jpg"
+                    let name = suggestedName ?? "image.jpg"
                     continuation.resume(returning: (name, data, "image/jpeg"))
                 } else {
                     continuation.resume(returning: nil)

@@ -136,8 +136,17 @@ class SharedDataManager {
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 1568, height: 1568)
-            let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
-            return UIImage(cgImage: cgImage)
+            var cgImage: CGImage?
+            let semaphore = DispatchSemaphore(value: 0)
+            generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: .zero)]) { _, image, _, _, _ in
+                cgImage = image
+                semaphore.signal()
+            }
+            semaphore.wait()
+            if let cgImage {
+                return UIImage(cgImage: cgImage)
+            }
+            return nil
         } catch {
             return nil
         }
