@@ -49,22 +49,23 @@ struct MarkdownPDFExporter {
         <title>\(escapeHTML(title))</title>
         <style>
         body { font-family: -apple-system, Helvetica Neue, sans-serif; font-size: 13px; line-height: 1.7; color: #1a1a1a; }
-        h1 { font-size: 22px; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; margin-top: 20px; }
-        h2 { font-size: 18px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; margin-top: 16px; }
-        h3 { font-size: 15px; margin-top: 14px; }
-        h4, h5, h6 { font-size: 13px; margin-top: 12px; }
-        code { background: #f3f3f3; padding: 1px 5px; border-radius: 3px; font-family: Menlo, monospace; font-size: 12px; }
-        pre { background: #f3f3f3; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 12px 0; }
-        pre code { background: none; padding: 0; font-size: 11px; }
-        blockquote { border-left: 3px solid #d0d0d0; padding-left: 12px; color: #555; margin: 8px 0; }
-        table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-        th, td { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; font-size: 12px; }
+        h1 { font-size: 22px; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; margin-top: 20px; page-break-after: avoid; }
+        h2 { font-size: 18px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; margin-top: 16px; page-break-after: avoid; }
+        h3 { font-size: 15px; margin-top: 14px; page-break-after: avoid; }
+        h4, h5, h6 { font-size: 13px; margin-top: 12px; page-break-after: avoid; }
+        code { background: #f3f3f3; padding: 1px 5px; border-radius: 3px; font-family: Menlo, monospace; font-size: 12px; word-break: break-all; }
+        pre { background: #f3f3f3; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 12px 0; page-break-inside: avoid; white-space: pre-wrap; word-wrap: break-word; }
+        pre code { background: none; padding: 0; font-size: 11px; word-break: normal; }
+        blockquote { border-left: 3px solid #d0d0d0; padding-left: 12px; color: #555; margin: 8px 0; page-break-inside: avoid; }
+        table { border-collapse: collapse; width: 100%; margin: 12px 0; table-layout: fixed; word-wrap: break-word; overflow-wrap: break-word; }
+        tr { page-break-inside: avoid; }
+        th, td { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; font-size: 12px; overflow-wrap: break-word; word-wrap: break-word; }
         th { background: #f5f5f5; font-weight: 600; }
         hr { border: none; border-top: 1px solid #e0e0e0; margin: 16px 0; }
         a { color: #0066cc; }
         ul, ol { padding-left: 24px; }
-        li { margin: 2px 0; }
-        p { margin: 8px 0; }
+        li { margin: 2px 0; page-break-inside: avoid; }
+        p { margin: 8px 0; orphans: 3; widows: 3; }
         </style>
         </head><body>
         \(body)
