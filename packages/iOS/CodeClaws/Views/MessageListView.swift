@@ -118,9 +118,20 @@ struct AgentResponseView: View {
                 }
             }
 
-            // Toggle button (bottom-right)
+            // Loading indicator when streaming
+            if isStreaming {
+                HStack(spacing: 6) {
+                    StreamingDotsView()
+                    Text("Generating...")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.top, 2)
+            }
+
+            // Toggle button (bottom-left)
             HStack {
-                Spacer()
                 Button(action: { withAnimation(.easeInOut(duration: 0.15)) { showDebug.toggle() } }) {
                     HStack(spacing: 3) {
                         Image(systemName: showDebug ? "ladybug.fill" : "bubble.left.fill")
@@ -134,6 +145,7 @@ struct AgentResponseView: View {
                     .background(Capsule().fill(Color(UIColor.tertiarySystemFill)))
                 }
                 .buttonStyle(PlainButtonStyle())
+                Spacer()
             }
         }
     }
@@ -863,5 +875,29 @@ struct ToolCallView: View {
     private func truncate(_ str: String, max: Int) -> String {
         if str.count <= max { return str }
         return String(str.prefix(max)) + "\n... (truncated)"
+    }
+}
+
+// MARK: - Streaming Dots Animation
+
+struct StreamingDotsView: View {
+    @State private var phase: Int = 0
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 4, height: 4)
+                    .opacity(phase == index ? 1.0 : 0.3)
+            }
+        }
+        .onAppear {
+            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    phase = (phase + 1) % 3
+                }
+            }
+        }
     }
 }
