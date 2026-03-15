@@ -46,6 +46,9 @@ private struct FilePreviewPageView: View {
     @State private var error: String? = nil
     @State private var showLineNumbers = true
     @State private var showRendered = true
+    @State private var shareURL: URL? = nil
+    @State private var showShareSheet = false
+    @State private var isPreparingShare = false
 
     private var ext: String {
         (fileName as NSString).pathExtension.lowercased()
@@ -161,6 +164,18 @@ private struct FilePreviewPageView: View {
                     }) {
                         Label("Copy path", systemImage: "link")
                     }
+
+                    Divider()
+
+                    Button(action: {
+                        Task { await prepareAndShare() }
+                    }) {
+                        Label(
+                            isPreparingShare ? "Preparing..." : (isMarkdown ? "Share as PDF" : "Share file"),
+                            systemImage: "square.and.arrow.up"
+                        )
+                    }
+                    .disabled(isPreparingShare || fileContent?.content == nil)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -168,6 +183,11 @@ private struct FilePreviewPageView: View {
         }
         .task {
             await loadFile()
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = shareURL {
+                ShareActivityView(activityItems: [url])
+            }
         }
     }
 
@@ -305,6 +325,43 @@ private struct FilePreviewPageView: View {
         if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
         return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
     }
+
+    private func prepareAndShare() async {
+        guard let content = fileContent?.content else { return }
+        isPreparingShare = true
+        defer { isPreparingShare = false }
+
+        let tempDir = FileManager.default.temporaryDirectory
+
+        if isMarkdown {
+            let title = (fileName as NSString).deletingPathExtension
+            if let url = MarkdownPDFExporter.generatePDF(markdown: content, title: title) {
+                shareURL = url
+                showShareSheet = true
+            }
+        } else {
+            let url = tempDir.appendingPathComponent(fileName)
+            do {
+                try content.write(to: url, atomically: true, encoding: .utf8)
+                shareURL = url
+                showShareSheet = true
+            } catch {
+                // silently fail
+            }
+        }
+    }
+}
+
+// MARK: - Share Activity View
+
+private struct ShareActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Code Content View (extracted for type-checker performance)
