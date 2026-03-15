@@ -335,7 +335,7 @@ private struct FilePreviewPageView: View {
 
         if isMarkdown {
             let title = (fileName as NSString).deletingPathExtension
-            if let url = MarkdownPDFExporter.generatePDF(markdown: content, title: title) {
+            if let url = await MarkdownPDFExporter.generatePDF(markdown: content, title: title) {
                 shareURL = url
                 showShareSheet = true
             }

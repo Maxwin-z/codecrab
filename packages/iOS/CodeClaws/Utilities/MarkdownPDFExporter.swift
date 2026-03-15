@@ -1,42 +1,16 @@
 import UIKit
+import WebKit
 
 struct MarkdownPDFExporter {
 
-    static func generatePDF(markdown: String, title: String) -> URL? {
+    static func generatePDF(markdown: String, title: String) async -> URL? {
         let html = wrapInHTML(convertToHTML(markdown), title: title)
-
-        let formatter = UIMarkupTextPrintFormatter(markupText: html)
-        let renderer = UIPrintPageRenderer()
-        renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
-
-        let pageSize = CGSize(width: 595.2, height: 841.8) // A4
-        let margin: CGFloat = 48
-        let printableRect = CGRect(
-            x: margin, y: margin,
-            width: pageSize.width - 2 * margin,
-            height: pageSize.height - 2 * margin
-        )
-        let paperRect = CGRect(origin: .zero, size: pageSize)
-
-        renderer.setValue(NSValue(cgRect: paperRect), forKey: "paperRect")
-        renderer.setValue(NSValue(cgRect: printableRect), forKey: "printableRect")
-
-        let pdfData = NSMutableData()
-        UIGraphicsBeginPDFContextToData(pdfData, paperRect, nil)
-        for i in 0..<renderer.numberOfPages {
-            UIGraphicsBeginPDFPage()
-            renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
-        }
-        UIGraphicsEndPDFContext()
-
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(title).pdf")
-        do {
-            try pdfData.write(to: url)
-            return url
-        } catch {
-            return nil
-        }
+
+        let renderer = PDFRenderer()
+        let success = await renderer.render(html: html, to: url)
+        return success ? url : nil
     }
 
     // MARK: - HTML Wrapper
@@ -46,9 +20,11 @@ struct MarkdownPDFExporter {
         <!DOCTYPE html>
         <html><head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>\(escapeHTML(title))</title>
         <style>
-        body { font-family: -apple-system, Helvetica Neue, sans-serif; font-size: 13px; line-height: 1.7; color: #1a1a1a; }
+        @page { margin: 48px; }
+        body { font-family: -apple-system, Helvetica Neue, sans-serif; font-size: 13px; line-height: 1.7; color: #1a1a1a; margin: 0; padding: 0; }
         h1 { font-size: 22px; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; margin-top: 20px; page-break-after: avoid; }
         h2 { font-size: 18px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; margin-top: 16px; page-break-after: avoid; }
         h3 { font-size: 15px; margin-top: 14px; page-break-after: avoid; }
@@ -295,5 +271,59 @@ struct MarkdownPDFExporter {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+}
+
+// MARK: - WKWebView PDF Renderer
+
+private final class PDFRenderer: NSObject, WKNavigationDelegate {
+    private let webView: WKWebView
+    private var loadContinuation: CheckedContinuation<Void, Never>?
+
+    override init() {
+        let config = WKWebViewConfiguration()
+        self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 595.2, height: 841.8), configuration: config)
+        super.init()
+        self.webView.navigationDelegate = self
+    }
+
+    func render(html: String, to url: URL) async -> Bool {
+        // Load HTML and wait for completion
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            self.loadContinuation = continuation
+            self.webView.loadHTMLString(html, baseURL: nil)
+        }
+
+        // Generate paginated PDF
+        let pdfConfig = WKPDFConfiguration()
+        pdfConfig.rect = CGRect(x: 0, y: 0, width: 595.2, height: 841.8) // A4
+
+        do {
+            let data: Data = try await withCheckedThrowingContinuation { continuation in
+                self.webView.createPDF(configuration: pdfConfig) { result in
+                    continuation.resume(with: result)
+                }
+            }
+            try data.write(to: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        MainActor.assumeIsolated {
+            loadContinuation?.resume()
+            loadContinuation = nil
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        MainActor.assumeIsolated {
+            loadContinuation?.resume()
+            loadContinuation = nil
+        }
     }
 }
