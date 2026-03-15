@@ -1,11 +1,46 @@
 import SwiftUI
 import Textual
 
+// MARK: - FilePreviewSheet (sheet wrapper with NavigationStack)
+
 struct FilePreviewSheet: View {
     let filePath: String
     let fileName: String
 
     @Environment(\.dismiss) var dismiss
+    @State private var navigationPath = NavigationPath()
+
+    var body: some View {
+        NavigationStack(path: $navigationPath) {
+            FilePreviewPageView(filePath: filePath, fileName: fileName, navigationPath: $navigationPath)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                .navigationDestination(for: LinkedFile.self) { file in
+                    FilePreviewPageView(filePath: file.path, fileName: file.name, navigationPath: $navigationPath)
+                }
+        }
+        .presentationDetents([.large])
+        .interactiveDismissDisabled(false)
+    }
+}
+
+// MARK: - LinkedFile
+
+private struct LinkedFile: Hashable {
+    let path: String
+    let name: String
+}
+
+// MARK: - FilePreviewPageView (reusable for root and pushed pages)
+
+private struct FilePreviewPageView: View {
+    let filePath: String
+    let fileName: String
+    @Binding var navigationPath: NavigationPath
+
     @State private var fileContent: FileContent? = nil
     @State private var isLoading = true
     @State private var error: String? = nil
@@ -51,96 +86,89 @@ struct FilePreviewSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // File info bar
-                if let fc = fileContent {
-                    fileInfoBar(fc)
-                }
+        VStack(spacing: 0) {
+            // File info bar
+            if let fc = fileContent {
+                fileInfoBar(fc)
+            }
 
-                // Content
-                if isLoading {
-                    Spacer()
-                    ProgressView("Loading...")
-                    Spacer()
-                } else if let error = error {
-                    Spacer()
-                    VStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 32))
-                            .foregroundColor(.orange)
-                        Text(error)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                    Spacer()
-                } else if let fc = fileContent {
-                    if fc.binary {
-                        binaryFileView(fc)
-                    } else if fc.truncated == true {
-                        truncatedFileView(fc)
-                    } else if let content = fc.content {
-                        if isMarkdown && showRendered {
-                            markdownView(content)
-                        } else {
-                            codeView(content)
-                        }
-                    }
+            // Content
+            if isLoading {
+                Spacer()
+                ProgressView("Loading...")
+                Spacer()
+            } else if let error = error {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundColor(.orange)
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-            }
-            .navigationTitle(fileName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        if isMarkdown {
-                            Button(action: {
-                                showRendered.toggle()
-                            }) {
-                                Label(
-                                    showRendered ? "Show source" : "Show preview",
-                                    systemImage: showRendered ? "chevron.left.forwardslash.chevron.right" : "eye"
-                                )
-                            }
-                        }
-                        if !isMarkdown || !showRendered {
-                            Button(action: {
-                                showLineNumbers.toggle()
-                            }) {
-                                Label(
-                                    showLineNumbers ? "Hide line numbers" : "Show line numbers",
-                                    systemImage: showLineNumbers ? "list.number" : "list.bullet"
-                                )
-                            }
-                        }
-                        Button(action: {
-                            if let content = fileContent?.content {
-                                UIPasteboard.general.string = content
-                            }
-                        }) {
-                            Label("Copy contents", systemImage: "doc.on.doc")
-                        }
-                        Button(action: {
-                            UIPasteboard.general.string = filePath
-                        }) {
-                            Label("Copy path", systemImage: "link")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                .padding()
+                Spacer()
+            } else if let fc = fileContent {
+                if fc.binary {
+                    binaryFileView(fc)
+                } else if fc.truncated == true {
+                    truncatedFileView(fc)
+                } else if let content = fc.content {
+                    if isMarkdown && showRendered {
+                        markdownView(content)
+                    } else {
+                        codeView(content)
                     }
                 }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .task {
-                await loadFile()
             }
         }
-        .presentationDetents([.large])
-        .interactiveDismissDisabled(false)
+        .navigationTitle(fileName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    if isMarkdown {
+                        Button(action: {
+                            showRendered.toggle()
+                        }) {
+                            Label(
+                                showRendered ? "Show source" : "Show preview",
+                                systemImage: showRendered ? "chevron.left.forwardslash.chevron.right" : "eye"
+                            )
+                        }
+                    }
+                    if !isMarkdown || !showRendered {
+                        Button(action: {
+                            showLineNumbers.toggle()
+                        }) {
+                            Label(
+                                showLineNumbers ? "Hide line numbers" : "Show line numbers",
+                                systemImage: showLineNumbers ? "list.number" : "list.bullet"
+                            )
+                        }
+                    }
+                    Button(action: {
+                        if let content = fileContent?.content {
+                            UIPasteboard.general.string = content
+                        }
+                    }) {
+                        Label("Copy contents", systemImage: "doc.on.doc")
+                    }
+                    Button(action: {
+                        UIPasteboard.general.string = filePath
+                    }) {
+                        Label("Copy path", systemImage: "link")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .task {
+            await loadFile()
+        }
     }
 
     // MARK: - File Info Bar
@@ -194,6 +222,20 @@ struct FilePreviewSheet: View {
                 .textual.textSelection(.enabled)
                 .padding(16)
         }
+        .environment(\.openURL, OpenURLAction { url in
+            // External links — open in browser
+            if url.scheme == "http" || url.scheme == "https" {
+                return .systemAction
+            }
+            // Relative file links — resolve and push navigation
+            let linkPath = (url.scheme == "file" ? url.path : url.absoluteString)
+                .removingPercentEncoding ?? url.absoluteString
+            let dir = (filePath as NSString).deletingLastPathComponent
+            let resolved = ((dir as NSString).appendingPathComponent(linkPath) as NSString).standardizingPath
+            let name = (resolved as NSString).lastPathComponent
+            navigationPath.append(LinkedFile(path: resolved, name: name))
+            return .handled
+        })
     }
 
     // MARK: - Code View
