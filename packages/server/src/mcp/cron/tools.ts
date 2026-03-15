@@ -194,7 +194,7 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
       status: z
         .string()
         .optional()
-        .describe('Filter by status: pending, running, completed, failed, disabled'),
+        .describe('Filter by status: pending, running, completed, failed, disabled, deprecated. Deprecated tasks are hidden by default.'),
       limit: z
         .number()
         .optional()
@@ -230,7 +230,7 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
 
   tool(
     'cron_delete',
-    'Delete a scheduled task by its ID',
+    'Delete (deprecate) a scheduled task by its ID. The task is marked as deprecated rather than physically removed, preserving it for debugging.',
     {
       jobId: z.string().describe('The ID of the task to delete'),
     },
@@ -252,18 +252,26 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
         }
       }
 
+      if (job.status === 'deprecated') {
+        return {
+          content: [
+            { type: 'text' as const, text: `Task "${job.name}" is already deprecated.` },
+          ],
+        }
+      }
+
       scheduler.cancelSchedule(input.jobId)
       const deleted = deleteJob(input.jobId)
 
       if (deleted) {
         return {
           content: [
-            { type: 'text' as const, text: `Deleted scheduled task "${job.name}"` },
+            { type: 'text' as const, text: `Deprecated scheduled task "${job.name}" (${job.id}). The task is preserved for debugging but will no longer execute.` },
           ],
         }
       } else {
         return {
-          content: [{ type: 'text' as const, text: 'Failed to delete the task' }],
+          content: [{ type: 'text' as const, text: 'Failed to deprecate the task' }],
           isError: true,
         }
       }
@@ -343,7 +351,7 @@ ${
         }
       }
 
-      if (job.status === 'completed' || job.status === 'failed') {
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'deprecated') {
         return {
           content: [
             { type: 'text' as const, text: `Cannot pause a task with status "${job.status}". Only pending or running tasks can be paused.` },
@@ -383,6 +391,15 @@ ${
       if (!job) {
         return {
           content: [{ type: 'text' as const, text: `Task not found: ${input.jobId}` }],
+          isError: true,
+        }
+      }
+
+      if (job.status === 'deprecated') {
+        return {
+          content: [
+            { type: 'text' as const, text: `Task "${job.name}" is deprecated and cannot be resumed.` },
+          ],
           isError: true,
         }
       }

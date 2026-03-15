@@ -53,8 +53,8 @@ afterEach(() => {
 })
 
 describe('cronTools', () => {
-  it('should have 4 tools defined', () => {
-    expect(cronTools.length).toBe(4)
+  it('should have 8 tools defined', () => {
+    expect(cronTools.length).toBe(8)
   })
 
   it('should have correct tool names', () => {
@@ -63,6 +63,10 @@ describe('cronTools', () => {
     expect(names).toContain('cron_list')
     expect(names).toContain('cron_delete')
     expect(names).toContain('cron_get')
+    expect(names).toContain('cron_pause')
+    expect(names).toContain('cron_resume')
+    expect(names).toContain('cron_update')
+    expect(names).toContain('cron_trigger')
   })
 
   it('each tool should have a description', () => {

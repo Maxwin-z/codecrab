@@ -34,7 +34,7 @@ export class CronScheduler {
 
     for (const job of jobs.values()) {
       // Skip terminal states
-      if (job.status === 'disabled' || job.status === 'failed' || job.status === 'completed') {
+      if (job.status === 'disabled' || job.status === 'failed' || job.status === 'completed' || job.status === 'deprecated') {
         skipped++
         continue
       }

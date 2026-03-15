@@ -11,6 +11,7 @@ export type CronJobStatus =
   | 'completed' // executed successfully
   | 'failed' // execution failed
   | 'disabled' // manually disabled
+  | 'deprecated' // soft-deleted (retained for debugging)
 
 export interface CronJobContext {
   projectId?: string
@@ -39,6 +40,7 @@ export interface CronJob {
     mode: 'websocket' | 'none'
     target?: string
   }
+  deprecatedAt?: string
 }
 
 export interface CronJobRun {

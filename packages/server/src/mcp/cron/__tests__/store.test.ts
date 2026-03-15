@@ -110,14 +110,57 @@ describe('CronStore', () => {
     expect(limited.length).toBe(3)
   })
 
-  it('should delete a job', () => {
+  it('should soft-delete a job by marking it as deprecated', () => {
     const job = createTestJob()
     saveJob(job)
     expect(getJob(job.id)).toBeDefined()
 
     const deleted = deleteJob(job.id)
     expect(deleted).toBe(true)
-    expect(getJob(job.id)).toBeUndefined()
+
+    // Job still exists but is marked as deprecated
+    const deprecatedJob = getJob(job.id)
+    expect(deprecatedJob).toBeDefined()
+    expect(deprecatedJob!.status).toBe('deprecated')
+    expect(deprecatedJob!.deprecatedAt).toBeDefined()
+  })
+
+  it('should exclude deprecated jobs from listJobs by default', () => {
+    const job1 = createTestJob({ name: 'Active Job' })
+    const job2 = createTestJob({ name: 'To Deprecate' })
+    saveJob(job1)
+    saveJob(job2)
+
+    deleteJob(job2.id)
+
+    const jobs = listJobs()
+    expect(jobs.length).toBe(1)
+    expect(jobs[0].name).toBe('Active Job')
+  })
+
+  it('should include deprecated jobs when explicitly requested', () => {
+    const job1 = createTestJob({ name: 'Active Job' })
+    const job2 = createTestJob({ name: 'Deprecated Job' })
+    saveJob(job1)
+    saveJob(job2)
+
+    deleteJob(job2.id)
+
+    const jobs = listJobs({ includeDeprecated: true })
+    expect(jobs.length).toBe(2)
+  })
+
+  it('should list only deprecated jobs when filtering by status', () => {
+    const job1 = createTestJob({ name: 'Active Job' })
+    const job2 = createTestJob({ name: 'Deprecated Job' })
+    saveJob(job1)
+    saveJob(job2)
+
+    deleteJob(job2.id)
+
+    const jobs = listJobs({ status: 'deprecated' })
+    expect(jobs.length).toBe(1)
+    expect(jobs[0].name).toBe('Deprecated Job')
   })
 
   it('should return false when deleting non-existent job', () => {

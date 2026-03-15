@@ -47,15 +47,14 @@ export function saveJob(job: CronJob): void {
 
 export function deleteJob(jobId: string): boolean {
   const jobs = loadJobs()
-  const deleted = jobs.delete(jobId)
-  if (deleted) {
-    saveJobs(jobs)
-    const runFile = path.join(RUNS_DIR, `${jobId}.jsonl`)
-    if (fs.existsSync(runFile)) {
-      fs.unlinkSync(runFile)
-    }
-  }
-  return deleted
+  const job = jobs.get(jobId)
+  if (!job) return false
+
+  job.status = 'deprecated'
+  job.deprecatedAt = new Date().toISOString()
+  job.updatedAt = new Date().toISOString()
+  saveJobs(jobs)
+  return true
 }
 
 export function getJob(jobId: string): CronJob | undefined {
@@ -66,10 +65,16 @@ export function getJob(jobId: string): CronJob | undefined {
 export function listJobs(options?: {
   projectId?: string
   status?: string
+  includeDeprecated?: boolean
   limit?: number
 }): CronJob[] {
   const jobs = loadJobs()
   let result = Array.from(jobs.values())
+
+  // Exclude deprecated tasks by default
+  if (!options?.includeDeprecated && options?.status !== 'deprecated') {
+    result = result.filter((j) => j.status !== 'deprecated')
+  }
 
   if (options?.projectId) {
     result = result.filter((j) => j.context.projectId === options.projectId)
