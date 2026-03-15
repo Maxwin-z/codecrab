@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 
 struct FilePreviewSheet: View {
     let filePath: String
@@ -9,9 +10,14 @@ struct FilePreviewSheet: View {
     @State private var isLoading = true
     @State private var error: String? = nil
     @State private var showLineNumbers = true
+    @State private var showRendered = true
 
     private var ext: String {
         (fileName as NSString).pathExtension.lowercased()
+    }
+
+    private var isMarkdown: Bool {
+        ext == "md" || ext == "markdown" || ext == "mdx"
     }
 
     private var languageLabel: String {
@@ -76,7 +82,11 @@ struct FilePreviewSheet: View {
                     } else if fc.truncated == true {
                         truncatedFileView(fc)
                     } else if let content = fc.content {
-                        codeView(content)
+                        if isMarkdown && showRendered {
+                            markdownView(content)
+                        } else {
+                            codeView(content)
+                        }
                     }
                 }
             }
@@ -85,13 +95,25 @@ struct FilePreviewSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button(action: {
-                            showLineNumbers.toggle()
-                        }) {
-                            Label(
-                                showLineNumbers ? "Hide line numbers" : "Show line numbers",
-                                systemImage: showLineNumbers ? "list.number" : "list.bullet"
-                            )
+                        if isMarkdown {
+                            Button(action: {
+                                showRendered.toggle()
+                            }) {
+                                Label(
+                                    showRendered ? "Show source" : "Show preview",
+                                    systemImage: showRendered ? "chevron.left.forwardslash.chevron.right" : "eye"
+                                )
+                            }
+                        }
+                        if !isMarkdown || !showRendered {
+                            Button(action: {
+                                showLineNumbers.toggle()
+                            }) {
+                                Label(
+                                    showLineNumbers ? "Hide line numbers" : "Show line numbers",
+                                    systemImage: showLineNumbers ? "list.number" : "list.bullet"
+                                )
+                            }
                         }
                         Button(action: {
                             if let content = fileContent?.content {
@@ -160,6 +182,18 @@ struct FilePreviewSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color(UIColor.secondarySystemBackground))
+    }
+
+    // MARK: - Markdown View
+
+    @ViewBuilder
+    private func markdownView(_ content: String) -> some View {
+        ScrollView {
+            StructuredText(markdown: content)
+                .textual.structuredTextStyle(.gitHub)
+                .textual.textSelection(.enabled)
+                .padding(16)
+        }
     }
 
     // MARK: - Code View
@@ -245,6 +279,17 @@ private struct CodeContentView: View {
         max(3, String(lines.count).count)
     }
 
+    private var charWidth: CGFloat {
+        let font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        return ("W" as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    private var estimatedContentWidth: CGFloat {
+        let maxChars = lines.reduce(0) { max($0, $1.count) }
+        let gutterW: CGFloat = showLineNumbers ? CGFloat(gutterWidth * 9 + 12 + 8) : 0
+        return CGFloat(maxChars) * charWidth + gutterW + 24 // horizontal padding
+    }
+
     var body: some View {
         GeometryReader { geo in
             ScrollView([.horizontal, .vertical]) {
@@ -260,7 +305,7 @@ private struct CodeContentView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .frame(minWidth: geo.size.width, alignment: .leading)
+                .frame(minWidth: max(geo.size.width, estimatedContentWidth), alignment: .leading)
             }
         }
         .background(Color(UIColor.systemBackground))
