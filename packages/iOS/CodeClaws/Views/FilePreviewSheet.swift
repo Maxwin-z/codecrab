@@ -167,15 +167,28 @@ private struct FilePreviewPageView: View {
 
                     Divider()
 
-                    Button(action: {
-                        Task { await prepareAndShare() }
-                    }) {
-                        Label(
-                            isPreparingShare ? "Preparing..." : (isMarkdown ? "Share as PDF" : "Share file"),
-                            systemImage: "square.and.arrow.up"
-                        )
+                    if isMarkdown {
+                        Button(action: {
+                            Task { await prepareAndShare(asPDF: true) }
+                        }) {
+                            Label("Share as PDF", systemImage: "doc.richtext")
+                        }
+                        .disabled(isPreparingShare || fileContent?.content == nil)
+
+                        Button(action: {
+                            Task { await prepareAndShare(asPDF: false) }
+                        }) {
+                            Label("Share as Markdown", systemImage: "doc.plaintext")
+                        }
+                        .disabled(isPreparingShare || fileContent?.content == nil)
+                    } else {
+                        Button(action: {
+                            Task { await prepareAndShare(asPDF: false) }
+                        }) {
+                            Label("Share file", systemImage: "square.and.arrow.up")
+                        }
+                        .disabled(isPreparingShare || fileContent?.content == nil)
                     }
-                    .disabled(isPreparingShare || fileContent?.content == nil)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -326,14 +339,14 @@ private struct FilePreviewPageView: View {
         return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
     }
 
-    private func prepareAndShare() async {
+    private func prepareAndShare(asPDF: Bool) async {
         guard let content = fileContent?.content else { return }
         isPreparingShare = true
         defer { isPreparingShare = false }
 
         let tempDir = FileManager.default.temporaryDirectory
 
-        if isMarkdown {
+        if asPDF {
             let title = (fileName as NSString).deletingPathExtension
             if let url = await MarkdownPDFExporter.generatePDF(markdown: content, title: title) {
                 shareURL = url
