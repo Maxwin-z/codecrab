@@ -53,9 +53,9 @@ struct MarkdownPDFExporter {
         h2 { font-size: 18px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; margin-top: 16px; page-break-after: avoid; }
         h3 { font-size: 15px; margin-top: 14px; page-break-after: avoid; }
         h4, h5, h6 { font-size: 13px; margin-top: 12px; page-break-after: avoid; }
-        code { background: #f3f3f3; padding: 1px 5px; border-radius: 3px; font-family: Menlo, monospace; font-size: 12px; word-break: break-all; }
-        pre { background: #f3f3f3; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 12px 0; page-break-inside: avoid; white-space: pre-wrap; word-wrap: break-word; }
-        pre code { background: none; padding: 0; font-size: 11px; word-break: normal; }
+        code { background: #f3f3f3; padding: 1px 5px; border-radius: 3px; font-family: Menlo, Courier New, Courier, monospace; font-size: 12px; word-break: break-all; }
+        pre { background: #f3f3f3; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 12px 0; page-break-inside: avoid; white-space: pre-wrap; word-wrap: break-word; font-family: Menlo, Courier New, Courier, monospace; font-size: 11px; }
+        pre code { background: none; padding: 0; font-size: inherit; font-family: inherit; word-break: normal; }
         blockquote { border-left: 3px solid #d0d0d0; padding-left: 12px; color: #555; margin: 8px 0; page-break-inside: avoid; }
         table { border-collapse: collapse; width: 100%; margin: 12px 0; table-layout: fixed; word-wrap: break-word; overflow-wrap: break-word; }
         tr { page-break-inside: avoid; }
