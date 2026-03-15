@@ -71,6 +71,7 @@ struct CodeClawsApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         shareHandler.checkOnActivation()
+                        webSocketService.requestQueueSnapshot()
                     }
                 }
         }

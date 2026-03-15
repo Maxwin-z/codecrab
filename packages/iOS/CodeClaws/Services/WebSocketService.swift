@@ -976,6 +976,17 @@ class WebSocketService: ObservableObject {
         ])
     }
 
+    /// Request a fresh queue snapshot from the server.
+    /// Called when the app returns to foreground to sync stale queue state.
+    func requestQueueSnapshot() {
+        guard let projectId = activeProjectId, connected else { return }
+        sendWebSocketMessage([
+            "type": "request_queue_snapshot",
+            "projectId": projectId,
+            "sessionId": sessionId
+        ])
+    }
+
     func switchProject(projectId: String, cwd: String?) {
         if let current = activeProjectId {
             // Save per-session data to current session state

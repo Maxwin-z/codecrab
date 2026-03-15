@@ -73,6 +73,10 @@ export interface DequeueMessage extends ProjectContext {
   queryId: string
 }
 
+export interface RequestQueueSnapshotMessage extends ProjectContext {
+  type: 'request_queue_snapshot'
+}
+
 export type ClientMessage =
   | PromptMessage
   | CommandMessage
@@ -86,6 +90,7 @@ export type ClientMessage =
   | SwitchProjectMessage
   | ProbeSdkMessage
   | DequeueMessage
+  | RequestQueueSnapshotMessage
 
 // ============ Server → Client Messages ============
 

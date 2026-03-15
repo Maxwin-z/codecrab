@@ -1683,13 +1683,11 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         cronJobName: q.metadata?.cronJobName,
       })
     }
-    if (snapshotItems.length > 0) {
-      sendToClient(client, {
-        type: 'query_queue_snapshot',
-        projectId,
-        items: snapshotItems,
-      })
-    }
+    sendToClient(client, {
+      type: 'query_queue_snapshot',
+      projectId,
+      items: snapshotItems,
+    })
 
     // Resend pending interactive state (ask_user_question / permission_request)
     // Check both in-memory ProjectState (server still running) and persisted Session (server restarted)
@@ -1936,6 +1934,40 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       } else {
         console.log(`[ws] Dequeue failed: query ${msg.queryId} not found or already running`)
       }
+      break
+    }
+
+    case 'request_queue_snapshot': {
+      const queueState = queryQueue.getProjectQueue(projectId)
+      const items: { queryId: string; status: 'queued' | 'running'; position: number; prompt: string; queryType: 'user' | 'cron'; sessionId?: string; cronJobName?: string }[] = []
+      if (queueState.running) {
+        items.push({
+          queryId: queueState.running.id,
+          status: 'running',
+          position: 0,
+          prompt: queueState.running.prompt,
+          queryType: queueState.running.type,
+          sessionId: queueState.running.sessionId,
+          cronJobName: queueState.running.metadata?.cronJobName,
+        })
+      }
+      for (let i = 0; i < queueState.queued.length; i++) {
+        const q = queueState.queued[i]
+        items.push({
+          queryId: q.id,
+          status: 'queued',
+          position: i + 1,
+          prompt: q.prompt,
+          queryType: q.type,
+          sessionId: q.sessionId,
+          cronJobName: q.metadata?.cronJobName,
+        })
+      }
+      sendToClient(client, {
+        type: 'query_queue_snapshot',
+        projectId,
+        items,
+      })
       break
     }
 
