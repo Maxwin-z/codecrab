@@ -434,9 +434,13 @@ export interface ChatMessage {
 
 export interface DebugEvent {
   ts: number
-  type: 'query_start' | 'sdk_spawn' | 'sdk_init' | 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'result' | 'error' | 'permission_request' | 'permission_response' | 'ask_question' | 'usage' | 'message_start' | 'message_done' | 'content_block_start' | 'content_block_stop' | 'rate_limit' | 'assistant'
+  type: 'query_start' | 'sdk_spawn' | 'sdk_init' | 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'result' | 'error' | 'permission_request' | 'permission_response' | 'ask_question' | 'usage' | 'message_start' | 'message_done' | 'content_block_start' | 'content_block_stop' | 'rate_limit' | 'assistant' | 'task_started' | 'task_progress' | 'task_notification' | 'tool_progress'
   detail?: string
   data?: Record<string, unknown>
+  /** Non-null when event originates from a subagent (points to the Agent tool_use id) */
+  parentToolUseId?: string | null
+  /** Links to the subagent task lifecycle (task_started / task_progress / task_notification) */
+  taskId?: string
 }
 
 /** A single query turn: prompt + agent response */

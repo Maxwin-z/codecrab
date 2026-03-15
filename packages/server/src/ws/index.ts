@@ -254,8 +254,8 @@ async function executeCronQuery(
 
   // Debug event logger — stores events in exec session turn and broadcasts to both sessions
   const currentTurn = execSession.turns[execSession.turns.length - 1]
-  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
-    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data }
+  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => {
+    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data, ...(parentToolUseId != null ? { parentToolUseId } : {}), ...(taskId ? { taskId } : {}) }
     if (currentTurn) {
       currentTurn.agent.debugEvents.push(event)
       if (HIGH_VALUE_EVENT_TYPES.has(type)) {
@@ -419,8 +419,8 @@ async function executeCronQuery(
         queryQueue.touchActivity(queuedQuery.id, 'usage')
         maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
       },
-      onSdkLog: (type, detail, data) => {
-        logEvent(type as any, detail, data)
+      onSdkLog: (type, detail, data, parentToolUseId, taskId) => {
+        logEvent(type as any, detail, data, parentToolUseId, taskId)
       },
     })
 
@@ -792,7 +792,7 @@ interface Session {
 }
 
 /** Event types that are kept in turn.agent.messages (high-value) */
-const HIGH_VALUE_EVENT_TYPES = new Set(['thinking', 'text', 'tool_use'])
+const HIGH_VALUE_EVENT_TYPES = new Set(['thinking', 'text', 'tool_use', 'tool_result', 'task_started', 'task_progress', 'task_notification'])
 
 const clients = new Map<string, Client>()
 const sessions = new Map<string, Session>()
@@ -1312,8 +1312,8 @@ async function executeUserQuery(
 
   // Debug event logger for this query — uses the captured turn reference
   const currentTurn = turn
-  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>) => {
-    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data }
+  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => {
+    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data, ...(parentToolUseId != null ? { parentToolUseId } : {}), ...(taskId ? { taskId } : {}) }
     if (currentTurn) {
       currentTurn.agent.debugEvents.push(event)
       if (HIGH_VALUE_EVENT_TYPES.has(type)) {
@@ -1427,8 +1427,8 @@ async function executeUserQuery(
         queryQueue.touchActivity(queuedQuery.id, 'usage')
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
-      onSdkLog: (type, detail, data) => {
-        logEvent(type as any, detail, data)
+      onSdkLog: (type, detail, data, parentToolUseId, taskId) => {
+        logEvent(type as any, detail, data, parentToolUseId, taskId)
       },
     }, images, enabledMcps, disabledSdkServers, disabledSkills)
 

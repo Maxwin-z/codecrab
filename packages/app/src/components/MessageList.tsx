@@ -152,7 +152,17 @@ export function MessageList({ messages, streamingText, streamingThinking, isRunn
 
 // ─── Agent Response View (with message/debug toggle) ────────────────────
 
-const MESSAGE_TYPES = new Set(['thinking', 'text', 'tool_use', 'tool_result', 'cron_task_completed'])
+const MESSAGE_TYPES = new Set(['thinking', 'text', 'tool_use', 'tool_result', 'cron_task_completed', 'task_started', 'task_progress', 'task_notification'])
+
+// Subagent event group: all events belonging to one subagent invocation
+interface SubagentGroup {
+  parentToolUseId: string
+  taskId?: string
+  taskStarted?: DebugEvent
+  taskProgress: DebugEvent[]
+  taskNotification?: DebugEvent
+  events: DebugEvent[]          // inner thinking/tool_use/tool_result/text events
+}
 
 function AgentResponseView({
   events,
@@ -169,24 +179,81 @@ function AgentResponseView({
     () =>
       events.filter((e) => {
         if (MESSAGE_TYPES.has(e.type)) return true
-        // Include result events with execSessionId (cron task results from history)
         if (e.type === 'result' && e.data && typeof e.data.execSessionId === 'string') return true
         return false
       }),
     [events]
   )
 
+  // Group subagent events by parentToolUseId / taskId
+  const { mainEvents, subagentGroups } = useMemo(() => {
+    const main: DebugEvent[] = []
+    const groups = new Map<string, SubagentGroup>()
+
+    // Helper: get or create a group by key
+    const getGroup = (key: string): SubagentGroup => {
+      let g = groups.get(key)
+      if (!g) {
+        g = { parentToolUseId: key, events: [], taskProgress: [] }
+        groups.set(key, g)
+      }
+      return g
+    }
+
+    // First pass: index task lifecycle events by taskId → toolUseId mapping
+    const taskIdToToolUseId = new Map<string, string>()
+    for (const event of messageEvents) {
+      if (event.type === 'task_started' && event.data?.toolUseId && event.taskId) {
+        taskIdToToolUseId.set(event.taskId, event.data.toolUseId as string)
+      }
+    }
+
+    for (const event of messageEvents) {
+      const { type } = event
+
+      // Task lifecycle events: link via toolUseId in data
+      if (type === 'task_started' || type === 'task_progress' || type === 'task_notification') {
+        const toolUseId = (event.data?.toolUseId as string) || (event.taskId ? taskIdToToolUseId.get(event.taskId) : undefined) || ''
+        if (toolUseId) {
+          const group = getGroup(toolUseId)
+          if (event.taskId) group.taskId = event.taskId
+          if (type === 'task_started') group.taskStarted = event
+          else if (type === 'task_progress') group.taskProgress.push(event)
+          else if (type === 'task_notification') group.taskNotification = event
+        }
+        continue
+      }
+
+      // Events with parentToolUseId belong to a subagent
+      if (event.parentToolUseId) {
+        const group = getGroup(event.parentToolUseId)
+        group.events.push(event)
+        continue
+      }
+
+      main.push(event)
+    }
+
+    return { mainEvents: main, subagentGroups: groups }
+  }, [messageEvents])
+
   return (
     <div className={`space-y-${showDebug ? '0.5' : '1'}`}>
       {showDebug ? (
         events.map((event, i) => <SdkEventInline key={i} event={event} />)
       ) : (
-        messageEvents.map((event, i) => {
+        mainEvents.map((event, i) => {
           if (event.type === 'cron_task_completed') {
             return <CronTaskCompletedView key={i} event={event} onResumeSession={onResumeSession} />
           }
           if (event.type === 'result' && event.data && typeof event.data.execSessionId === 'string') {
             return <CronResultView key={i} event={event} onResumeSession={onResumeSession} />
+          }
+          // When we see an Agent tool_use, render as SubagentCard
+          if (event.type === 'tool_use' && ((event.data?.toolName as string) === 'Agent' || (event.data?.toolName as string) === 'Task')) {
+            const toolId = event.data?.toolId as string
+            const group = toolId ? subagentGroups.get(toolId) : undefined
+            return <SubagentCard key={i} toolUseEvent={event} group={group} isStreaming={isStreaming} />
           }
           return <MessageModeEventView key={i} event={event} isStreaming={isStreaming} />
         })
@@ -206,6 +273,101 @@ function AgentResponseView({
           <span>{showDebug ? 'Debug' : 'Message'}</span>
         </button>
       </div>
+    </div>
+  )
+}
+
+// ─── Subagent Card ──────────────────────────────────────────────────────
+
+function SubagentCard({
+  toolUseEvent,
+  group,
+  isStreaming,
+}: {
+  toolUseEvent: DebugEvent
+  group?: SubagentGroup
+  isStreaming: boolean
+}) {
+  const status = group?.taskNotification?.data?.status as string | undefined
+  const isRunning = !status && isStreaming
+  const [expanded, setExpanded] = useState(isRunning)
+
+  // Extract agent description from task_started or tool_use input
+  const description = (group?.taskStarted?.data?.description as string)
+    || (() => {
+      try {
+        const input = toolUseEvent.data?.input as string
+        if (!input) return ''
+        const parsed = JSON.parse(input)
+        return parsed.description || parsed.prompt?.slice(0, 80) || ''
+      } catch { return '' }
+    })()
+
+  const summary = (group?.taskNotification?.data?.summary as string)
+    || (group?.taskProgress?.length
+      ? (group.taskProgress[group.taskProgress.length - 1].data?.summary as string) || ''
+      : '')
+
+  // Usage from latest progress or notification
+  const usage = group?.taskNotification?.data || group?.taskProgress?.[group?.taskProgress.length - 1]?.data
+  const toolUses = usage?.toolUses as number | undefined
+  const totalTokens = usage?.totalTokens as number | undefined
+  const durationMs = usage?.durationMs as number | undefined
+
+  const statusDot = isRunning
+    ? 'bg-amber-500 animate-pulse'
+    : status === 'completed'
+    ? 'bg-green-500'
+    : status === 'failed' || status === 'stopped'
+    ? 'bg-red-500'
+    : 'bg-gray-400'
+
+  const hasInnerEvents = group && group.events.length > 0
+
+  return (
+    <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-purple-500/10 transition-colors"
+      >
+        <span className="text-[10px] text-muted-foreground">{expanded ? '▼' : '▶'}</span>
+        <span className={`w-2 h-2 rounded-full shrink-0 ${statusDot}`} />
+        <span className="font-mono font-medium text-purple-600 dark:text-purple-400 shrink-0">
+          Agent
+        </span>
+        {description && (
+          <span className="font-mono text-muted-foreground truncate">{description}</span>
+        )}
+        <span className="flex-1" />
+        {(toolUses || totalTokens || durationMs) && (
+          <span className="font-mono text-muted-foreground/60 text-[10px] shrink-0">
+            {[
+              durationMs ? `${(durationMs / 1000).toFixed(1)}s` : null,
+              toolUses ? `${toolUses} tools` : null,
+              totalTokens ? `${totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens} tok` : null,
+            ].filter(Boolean).join(' · ')}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="px-2.5 pb-2 space-y-1">
+          {summary && !hasInnerEvents && (
+            <div className="text-xs font-mono text-muted-foreground pl-4">{summary}</div>
+          )}
+          {hasInnerEvents && (
+            <div className="pl-3 border-l-2 border-purple-500/20 space-y-1">
+              {group.events.map((evt, j) => (
+                <MessageModeEventView key={j} event={evt} isStreaming={isStreaming} />
+              ))}
+            </div>
+          )}
+          {summary && hasInnerEvents && (
+            <div className="text-xs font-mono text-muted-foreground pl-4 pt-1 border-t border-purple-500/10">
+              {summary}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -378,6 +540,8 @@ const EVENT_ICONS: Record<string, string> = {
   usage: '📊', message_start: '▶', message_done: '■',
   content_block_start: '▷', content_block_stop: '◁',
   rate_limit: '⏱', assistant: '◀', cron_task_completed: '📋',
+  task_started: '🚀', task_progress: '⏳', task_notification: '🏁',
+  tool_progress: '⏱',
 }
 
 const EVENT_COLORS: Record<string, string> = {
@@ -392,6 +556,8 @@ const EVENT_COLORS: Record<string, string> = {
   message_start: 'text-blue-500', message_done: 'text-blue-500',
   rate_limit: 'text-yellow-600',
   cron_task_completed: 'text-blue-500',
+  task_started: 'text-purple-500', task_progress: 'text-purple-400',
+  task_notification: 'text-purple-600', tool_progress: 'text-gray-500',
 }
 
 function getEventInlineInfo(event: DebugEvent): string {
@@ -424,6 +590,33 @@ function getEventInlineInfo(event: DebugEvent): string {
     }
     case 'sdk_init':
       return (data.model as string) || ''
+    case 'task_started': {
+      const parts: string[] = []
+      if (data.taskId) parts.push(`task=${String(data.taskId).slice(-8)}`)
+      if (data.description) parts.push(String(data.description))
+      return parts.join('  ')
+    }
+    case 'task_progress': {
+      const parts: string[] = []
+      if (data.taskId) parts.push(`task=${String(data.taskId).slice(-8)}`)
+      if (data.summary) parts.push(String(data.summary))
+      else if (data.description) parts.push(String(data.description))
+      if (data.totalTokens) parts.push(`${data.totalTokens} tok`)
+      return parts.join('  ')
+    }
+    case 'task_notification': {
+      const parts: string[] = []
+      if (data.taskId) parts.push(`task=${String(data.taskId).slice(-8)}`)
+      if (data.status) parts.push(String(data.status))
+      if (data.summary) parts.push(String(data.summary).slice(0, 100))
+      return parts.join('  ')
+    }
+    case 'tool_progress': {
+      const parts: string[] = []
+      if (data.toolName) parts.push(String(data.toolName))
+      if (data.elapsedSeconds) parts.push(`${data.elapsedSeconds}s`)
+      return parts.join('  ')
+    }
     default:
       return event.detail || ''
   }
@@ -456,6 +649,9 @@ function SdkEventInline({ event }: { event: DebugEvent }) {
       <div className="flex items-center gap-0">
         <span className="w-4 text-center shrink-0">{icon}</span>
         <span className={`font-semibold ${color}`}>{event.type}</span>
+        {event.parentToolUseId && (
+          <span className="text-purple-400/60 ml-1 shrink-0">↑{event.parentToolUseId.slice(-6)}</span>
+        )}
         {info && <span className="text-muted-foreground ml-2 truncate">{info}</span>}
         <span className="flex-1" />
         {fullContent && (

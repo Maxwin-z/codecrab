@@ -227,6 +227,16 @@ function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
         console.log(`${tag}   ${C.dim}version:${C.reset}     ${msg.claude_code_version || '?'}`)
       } else if (msg.subtype === 'compact_boundary') {
         console.log(`${tag} ${C.dim}── compact boundary ──${C.reset}`)
+      } else if (msg.subtype === 'task_started') {
+        const parentId = msg.tool_use_id ? `  tool=${msg.tool_use_id.slice(-8)}` : ''
+        console.log(`${tag} ${C.magenta}${C.bold}🚀 task_started${C.reset}  task=${msg.task_id}${parentId}  ${C.dim}${msg.description || ''}${C.reset}`)
+      } else if (msg.subtype === 'task_progress') {
+        const tokens = msg.usage?.total_tokens || '?'
+        const tools = msg.usage?.tool_uses || '?'
+        console.log(`${tag} ${C.magenta}⏳ task_progress${C.reset}  task=${msg.task_id}  tokens=${tokens}  tools=${tools}  ${C.dim}${msg.summary || msg.description || ''}${C.reset}`)
+      } else if (msg.subtype === 'task_notification') {
+        const taskStatus = msg.status === 'completed' ? `${C.green}✓ completed${C.reset}` : `${C.red}✗ ${msg.status}${C.reset}`
+        console.log(`${tag} ${C.magenta}${C.bold}🏁 task_notification${C.reset}  task=${msg.task_id}  ${taskStatus}  ${C.dim}${msg.summary || ''}${C.reset}`)
       } else {
         console.log(`${tag} ${C.dim}system: ${msg.subtype || 'unknown'}${C.reset}`)
       }
@@ -455,6 +465,12 @@ function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
       break
     }
 
+    case 'tool_progress': {
+      const parentId = msg.parent_tool_use_id ? `  parent=${msg.parent_tool_use_id.slice(-8)}` : ''
+      console.log(`${tag} ${C.dim}⏱ tool_progress${C.reset}  ${msg.tool_name}  ${msg.elapsed_time_seconds}s${parentId}`)
+      break
+    }
+
     default: {
       console.log(`${tag} ${C.dim}${type}: ${JSON.stringify(msg).slice(0, 300)}${C.reset}`)
     }
@@ -463,7 +479,7 @@ function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
 
 // Emit structured SDK log events for each raw SDK message
 // These go through logEvent → broadcastToProject → iOS client
-function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record<string, unknown>) => void): void {
+function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => void): void {
   const type = msg.type
 
   switch (type) {
@@ -482,6 +498,36 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
           plugins: (msg.plugins || []).map((p: any) => p.name).join(', '),
           version: msg.claude_code_version,
         })
+      } else if (msg.subtype === 'task_started') {
+        log('task_started', msg.description || '', {
+          taskId: msg.task_id,
+          toolUseId: msg.tool_use_id,
+          taskType: msg.task_type,
+          prompt: msg.prompt,
+          description: msg.description,
+        }, null, msg.task_id)
+      } else if (msg.subtype === 'task_progress') {
+        log('task_progress', msg.summary || msg.description || '', {
+          taskId: msg.task_id,
+          toolUseId: msg.tool_use_id,
+          description: msg.description,
+          lastToolName: msg.last_tool_name,
+          summary: msg.summary,
+          totalTokens: msg.usage?.total_tokens,
+          toolUses: msg.usage?.tool_uses,
+          durationMs: msg.usage?.duration_ms,
+        }, null, msg.task_id)
+      } else if (msg.subtype === 'task_notification') {
+        log('task_notification', `${msg.status}: ${msg.summary || ''}`, {
+          taskId: msg.task_id,
+          toolUseId: msg.tool_use_id,
+          status: msg.status,
+          summary: msg.summary,
+          outputFile: msg.output_file,
+          totalTokens: msg.usage?.total_tokens,
+          toolUses: msg.usage?.tool_uses,
+          durationMs: msg.usage?.duration_ms,
+        }, null, msg.task_id)
       }
       break
     }
@@ -489,6 +535,7 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
     case 'stream_event': {
       const evt = msg.event
       if (!evt) break
+      const streamParent: string | null = msg.parent_tool_use_id ?? null
 
       switch (evt.type) {
         case 'message_start': {
@@ -502,7 +549,7 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
             cacheReadTokens: u?.cache_read_input_tokens,
             cacheCreateTokens: u?.cache_creation_input_tokens,
             serviceTier: u?.service_tier,
-          })
+          }, streamParent)
           break
         }
         case 'content_block_start': {
@@ -514,16 +561,16 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
               toolName: block.name,
               toolId: block.id,
               caller: block.caller?.type,
-            })
+            }, streamParent)
           } else if (block?.type === 'text') {
-            log('content_block_start', 'text', { blockType: 'text', index: evt.index })
+            log('content_block_start', 'text', { blockType: 'text', index: evt.index }, streamParent)
           } else if (block?.type === 'thinking') {
-            log('content_block_start', 'thinking', { blockType: 'thinking', index: evt.index })
+            log('content_block_start', 'thinking', { blockType: 'thinking', index: evt.index }, streamParent)
           }
           break
         }
         case 'content_block_stop': {
-          log('content_block_stop', `block[${evt.index}]`, { index: evt.index })
+          log('content_block_stop', `block[${evt.index}]`, { index: evt.index }, streamParent)
           break
         }
         case 'message_delta': {
@@ -534,7 +581,7 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
             stopReason: stop,
             outputTokens: outTokens,
             contextEdits: edits,
-          })
+          }, streamParent)
           break
         }
       }
@@ -546,6 +593,7 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
       const content = m?.content
       if (!content) break
       const usage = m?.usage
+      const assistantParent: string | null = msg.parent_tool_use_id ?? null
       // Emit per-block events with full content
       for (const block of content) {
         if (block.type === 'tool_use') {
@@ -554,17 +602,17 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
             toolName: block.name,
             toolId: block.id,
             input: inputStr,
-          })
+          }, assistantParent)
         } else if (block.type === 'text' && block.text) {
           log('text', block.text.length > 200 ? block.text.slice(0, 200) + '…' : block.text, {
             content: block.text,
             length: block.text.length,
-          })
+          }, assistantParent)
         } else if (block.type === 'thinking' && block.thinking) {
           log('thinking', block.thinking.length > 200 ? block.thinking.slice(0, 200) + '…' : block.thinking, {
             content: block.thinking,
             length: block.thinking.length,
-          })
+          }, assistantParent)
         }
       }
       // Also emit the overall assistant summary with token usage
@@ -581,13 +629,14 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
         outputTokens: usage?.output_tokens,
         cacheReadTokens: usage?.cache_read_input_tokens,
         cacheCreateTokens: usage?.cache_creation_input_tokens,
-      })
+      }, assistantParent)
       break
     }
 
     case 'user': {
       const content = msg.message?.content
       if (!Array.isArray(content)) break
+      const userParent: string | null = msg.parent_tool_use_id ?? null
       for (const block of content) {
         if (block.type === 'tool_result') {
           const resultStr = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
@@ -596,7 +645,7 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
             content: resultStr,
             isError: block.is_error || false,
             length: resultStr.length,
-          })
+          }, userParent)
         }
       }
       break
@@ -613,6 +662,16 @@ function emitSdkLog(msg: any, log: (type: string, detail?: string, data?: Record
         resetsAt: info.resetsAt,
         isUsingOverage: info.isUsingOverage,
       })
+      break
+    }
+
+    case 'tool_progress': {
+      log('tool_progress', `${msg.tool_name} (${msg.elapsed_time_seconds}s)`, {
+        toolUseId: msg.tool_use_id,
+        toolName: msg.tool_name,
+        elapsedSeconds: msg.elapsed_time_seconds,
+        taskId: msg.task_id,
+      }, msg.parent_tool_use_id ?? null, msg.task_id)
       break
     }
   }
@@ -880,6 +939,7 @@ export function buildQueryOptions(
     // Server-side defaults
     maxTurns: DEFAULT_MAX_TURNS,
     effort: DEFAULT_EFFORT,
+    agentProgressSummaries: true,
 
     systemPrompt: {
       type: 'preset',
@@ -1091,7 +1151,7 @@ export async function* executeQuery(
     onSessionInit: (sessionId: string) => void
     onPermissionRequest: (requestId: string, toolName: string, input: unknown, reason: string) => void
     onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }) => void
-    onSdkLog?: (type: string, detail?: string, data?: Record<string, unknown>) => void
+    onSdkLog?: (type: string, detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => void
   },
   images?: ImageAttachment[],
   enabledMcps?: string[],
