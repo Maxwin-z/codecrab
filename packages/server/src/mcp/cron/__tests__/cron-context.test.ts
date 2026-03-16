@@ -8,11 +8,8 @@ import * as os from 'os'
 import { cronTools, initializeCronTools, setCurrentQueryContext } from '../tools.js'
 import { CronScheduler } from '../scheduler.js'
 import { CronExecutor } from '../executor.js'
-import { loadJobs } from '../store.js'
+import { loadJobs, setCronDir, resetCronDir } from '../store.js'
 import type { CronJob, CronExecutionRequest, CronExecutionResult } from '../types.js'
-
-const CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
-const JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
 
 // Helper to execute a tool by name
 async function executeTool(name: string, input: Record<string, unknown>) {
@@ -23,16 +20,13 @@ async function executeTool(name: string, input: Record<string, unknown>) {
   throw new Error(`Cannot find handler for tool: ${name}`)
 }
 
-let backupData: string | null = null
+let tmpDir: string
 let scheduler: CronScheduler
 
 beforeEach(() => {
-  // Backup existing jobs
-  if (fs.existsSync(JOBS_FILE)) {
-    backupData = fs.readFileSync(JOBS_FILE, 'utf-8')
-  }
-  fs.mkdirSync(CRON_DIR, { recursive: true })
-  fs.writeFileSync(JOBS_FILE, '[]')
+  // Use a temporary directory so tests never touch real user data
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cron-context-test-'))
+  setCronDir(tmpDir)
 
   // Create scheduler with no-op executor
   scheduler = new CronScheduler(vi.fn().mockResolvedValue(undefined))
@@ -41,14 +35,10 @@ beforeEach(() => {
 
 afterEach(() => {
   scheduler.stop()
-  // Clear query context
   setCurrentQueryContext({})
-  if (backupData !== null) {
-    fs.writeFileSync(JOBS_FILE, backupData)
-  } else if (fs.existsSync(JOBS_FILE)) {
-    fs.unlinkSync(JOBS_FILE)
-  }
-  backupData = null
+  resetCronDir()
+  // Clean up temp directory
+  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('cron_create context injection via setCurrentQueryContext', () => {

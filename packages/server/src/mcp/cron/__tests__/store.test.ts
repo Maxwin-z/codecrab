@@ -12,12 +12,10 @@ import {
   getRuns,
   generateJobId,
   generateRunId,
+  setCronDir,
+  resetCronDir,
 } from '../store.js'
 import type { CronJob, CronJobRun } from '../types.js'
-
-const CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
-const JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
-const RUNS_DIR = path.join(CRON_DIR, 'runs')
 
 function createTestJob(overrides: Partial<CronJob> = {}): CronJob {
   return {
@@ -34,27 +32,18 @@ function createTestJob(overrides: Partial<CronJob> = {}): CronJob {
   }
 }
 
-// Backup and restore real jobs file to avoid clobbering user data
-let backupData: string | null = null
+let tmpDir: string
 
 beforeEach(() => {
-  if (fs.existsSync(JOBS_FILE)) {
-    backupData = fs.readFileSync(JOBS_FILE, 'utf-8')
-  }
-  // Start each test with empty store
-  if (fs.existsSync(JOBS_FILE)) {
-    fs.writeFileSync(JOBS_FILE, '[]')
-  }
+  // Use a temporary directory so tests never touch real user data
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cron-store-test-'))
+  setCronDir(tmpDir)
 })
 
 afterEach(() => {
-  // Restore original data
-  if (backupData !== null) {
-    fs.writeFileSync(JOBS_FILE, backupData)
-  } else if (fs.existsSync(JOBS_FILE)) {
-    fs.unlinkSync(JOBS_FILE)
-  }
-  backupData = null
+  resetCronDir()
+  // Clean up temp directory
+  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('CronStore', () => {
@@ -191,12 +180,6 @@ describe('CronStore', () => {
 
   it('should append and retrieve runs', () => {
     const jobId = 'test-job-runs'
-    const runFile = path.join(RUNS_DIR, `${jobId}.jsonl`)
-
-    // Clean up any existing run file
-    if (fs.existsSync(runFile)) {
-      fs.unlinkSync(runFile)
-    }
 
     const run1: CronJobRun = {
       id: generateRunId(),
@@ -223,11 +206,6 @@ describe('CronStore', () => {
     expect(runs.length).toBe(2)
     expect(runs[0].status).toBe('completed')
     expect(runs[1].status).toBe('failed')
-
-    // Clean up
-    if (fs.existsSync(runFile)) {
-      fs.unlinkSync(runFile)
-    }
   })
 
   it('should return empty array for non-existent run history', () => {
@@ -237,11 +215,6 @@ describe('CronStore', () => {
 
   it('should respect runs limit', () => {
     const jobId = 'test-job-runs-limit'
-    const runFile = path.join(RUNS_DIR, `${jobId}.jsonl`)
-
-    if (fs.existsSync(runFile)) {
-      fs.unlinkSync(runFile)
-    }
 
     for (let i = 0; i < 10; i++) {
       appendRun(jobId, {
@@ -254,10 +227,5 @@ describe('CronStore', () => {
 
     const limited = getRuns(jobId, 3)
     expect(limited.length).toBe(3)
-
-    // Clean up
-    if (fs.existsSync(runFile)) {
-      fs.unlinkSync(runFile)
-    }
   })
 })

@@ -5,9 +5,23 @@ import * as path from 'path'
 import * as os from 'os'
 import type { CronJob, CronJobRun } from './types.js'
 
-const CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
-const JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
-const RUNS_DIR = path.join(CRON_DIR, 'runs')
+let CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
+let JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
+let RUNS_DIR = path.join(CRON_DIR, 'runs')
+
+/** Override the cron data directory (for testing). */
+export function setCronDir(dir: string): void {
+  CRON_DIR = dir
+  JOBS_FILE = path.join(dir, 'jobs.json')
+  RUNS_DIR = path.join(dir, 'runs')
+}
+
+/** Reset to the default cron data directory. */
+export function resetCronDir(): void {
+  CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
+  JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
+  RUNS_DIR = path.join(CRON_DIR, 'runs')
+}
 
 function ensureDirs() {
   if (!fs.existsSync(CRON_DIR)) {
