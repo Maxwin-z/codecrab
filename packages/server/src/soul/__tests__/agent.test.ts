@@ -19,27 +19,40 @@ import { executeInternalQuery } from '../../engine/internal.js'
 const mockExecuteInternalQuery = vi.mocked(executeInternalQuery)
 
 const SOUL_DIR = path.join(os.homedir(), '.codeclaws', 'soul')
-const SOUL_JSON = path.join(SOUL_DIR, 'SOUL.json')
+const SOUL_MD = path.join(SOUL_DIR, 'SOUL.md')
+const CLAUDE_MD = path.join(SOUL_DIR, 'CLAUDE.md')
 const EVOLUTION_LOG = path.join(SOUL_DIR, 'evolution-log.jsonl')
 
+// Backup and restore real SOUL files to prevent test contamination
+function backupSoulFiles(): Map<string, string | null> {
+  const backups = new Map<string, string | null>()
+  for (const fp of [SOUL_MD, CLAUDE_MD, EVOLUTION_LOG]) {
+    try { backups.set(fp, fs.readFileSync(fp, 'utf-8')) } catch { backups.set(fp, null) }
+  }
+  return backups
+}
+
+function restoreSoulFiles(backups: Map<string, string | null>): void {
+  for (const [fp, content] of backups) {
+    if (content !== null) {
+      fs.writeFileSync(fp, content, 'utf-8')
+    } else {
+      // File didn't exist before test — remove if created
+      try { fs.unlinkSync(fp) } catch { /* ok */ }
+    }
+  }
+}
+
 describe('SoulAgent', () => {
-  // Backup and restore real SOUL files
-  let soulBackup: string | null = null
-  let logBackup: string | null = null
+  let backups: Map<string, string | null>
 
   beforeEach(() => {
-    try { soulBackup = fs.readFileSync(SOUL_JSON, 'utf-8') } catch { soulBackup = null }
-    try { logBackup = fs.readFileSync(EVOLUTION_LOG, 'utf-8') } catch { logBackup = null }
+    backups = backupSoulFiles()
     vi.clearAllMocks()
   })
 
   afterEach(() => {
-    if (soulBackup !== null) {
-      fs.writeFileSync(SOUL_JSON, soulBackup, 'utf-8')
-    }
-    if (logBackup !== null) {
-      fs.writeFileSync(EVOLUTION_LOG, logBackup, 'utf-8')
-    }
+    restoreSoulFiles(backups)
   })
 
   it('should not trigger with empty conversations', async () => {
@@ -99,7 +112,7 @@ describe('SoulAgent', () => {
   it('should include multiple conversations in the prompt', async () => {
     mockExecuteInternalQuery.mockResolvedValue({
       success: true,
-      output: 'Updated communicationStyle',
+      output: 'Updated preferences section',
       durationMs: 1000,
     })
 
@@ -127,11 +140,21 @@ describe('SoulAgent', () => {
 })
 
 describe('ensureSoulProject', () => {
+  let backups: Map<string, string | null>
+
+  beforeEach(() => {
+    backups = backupSoulFiles()
+  })
+
+  afterEach(() => {
+    restoreSoulFiles(backups)
+  })
+
   it('should create SOUL project directory and files', () => {
     ensureSoulProject()
 
     expect(fs.existsSync(SOUL_DIR)).toBe(true)
-    expect(fs.existsSync(SOUL_JSON)).toBe(true)
+    expect(fs.existsSync(SOUL_MD)).toBe(true)
     expect(fs.existsSync(EVOLUTION_LOG)).toBe(true)
     expect(fs.existsSync(path.join(SOUL_DIR, 'CLAUDE.md'))).toBe(true)
     expect(fs.existsSync(path.join(SOUL_DIR, 'insights'))).toBe(true)
@@ -143,19 +166,21 @@ describe('ensureSoulProject', () => {
     expect(content).toContain('SOUL Evolution Agent')
     expect(content).toContain('Conservative updates')
     expect(content).toContain('evolution-log.jsonl')
+    expect(content).toContain('SOUL.md')
+    expect(content).toContain('4000')
   })
 
-  it('should not overwrite existing SOUL.json', () => {
-    // Write a custom SOUL.json
+  it('should not overwrite existing SOUL.md', () => {
     ensureSoulProject()
-    const customSoul = { identity: { name: 'Test', role: '', expertise: [] }, preferences: { communicationStyle: 'test', decisionStyle: '', riskTolerance: '' }, values: {}, context: { activeGoals: [], domain: '', constraints: [] }, meta: { version: 99, lastUpdated: '', evolutionLog: [] } }
-    fs.writeFileSync(SOUL_JSON, JSON.stringify(customSoul, null, 2), 'utf-8')
+    // Write custom SOUL.md
+    const custom = `---\nversion: 99\nlastUpdated: 2026-03-16T00:00:00Z\n---\n\n# Identity\n\n- **Name:** Test User\n`
+    fs.writeFileSync(SOUL_MD, custom, 'utf-8')
 
     // Re-ensure — should NOT overwrite
     ensureSoulProject()
-    const loaded = JSON.parse(fs.readFileSync(SOUL_JSON, 'utf-8'))
-    expect(loaded.meta.version).toBe(99)
-    expect(loaded.identity.name).toBe('Test')
+    const loaded = fs.readFileSync(SOUL_MD, 'utf-8')
+    expect(loaded).toContain('version: 99')
+    expect(loaded).toContain('Test User')
   })
 
   it('should register __soul__ in projects.json', () => {

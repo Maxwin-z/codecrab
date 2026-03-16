@@ -21,9 +21,40 @@ function timeAgo(iso: string): string {
   return `${days}d ago`
 }
 
+/** Extract a brief summary line from soul markdown content */
+function extractSummary(content: string): string {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const clean = trimmed.replace(/\*\*/g, '').replace(/\*/g, '').replace(/^-\s*/, '')
+    if (clean.length > 0) return clean.length > 80 ? clean.slice(0, 80) + '…' : clean
+  }
+  return ''
+}
+
+/** Extract tags/keywords from soul markdown for display */
+function extractTags(content: string): string[] {
+  const tags: string[] = []
+  const lines = content.split('\n')
+  for (const line of lines) {
+    // Match "- **Label:** Value" pattern
+    const match = line.match(/^\s*-\s*\*\*[^*]+:\*\*\s*(.+)/)
+    if (match && tags.length < 4) {
+      const value = match[1].trim()
+      // Split comma-separated values
+      if (value.includes(',')) {
+        tags.push(...value.split(',').map(v => v.trim()).filter(Boolean).slice(0, 2))
+      } else if (value.length < 30) {
+        tags.push(value)
+      }
+    }
+  }
+  return tags.slice(0, 4)
+}
+
 export function SoulCard({ soul, status, recentEvolution }: SoulCardProps) {
   const navigate = useNavigate()
-  const hasSoul = status?.hasSoul && soul?.identity?.name
+  const hasSoul = status?.hasSoul
 
   // Empty state — SOUL not initialized yet
   if (!hasSoul) {
@@ -57,11 +88,8 @@ export function SoulCard({ soul, status, recentEvolution }: SoulCardProps) {
 
   // Active state — show persona summary + recent evolution
   const latestEvolution = recentEvolution[recentEvolution.length - 1]
-  const tags = [
-    soul.preferences.communicationStyle,
-    soul.preferences.decisionStyle,
-    soul.context.domain,
-  ].filter(Boolean)
+  const summary = soul ? extractSummary(soul.content) : ''
+  const tags = soul ? extractTags(soul.content) : []
 
   return (
     <div
@@ -75,12 +103,12 @@ export function SoulCard({ soul, status, recentEvolution }: SoulCardProps) {
             <User className="h-4 w-4 text-foreground" />
           </div>
           <div>
-            <h3 className="text-sm font-medium">{soul.identity.name}</h3>
-            <p className="text-xs text-muted-foreground">{soul.identity.role || 'SOUL Profile'}</p>
+            <h3 className="text-sm font-medium">SOUL</h3>
+            <p className="text-xs text-muted-foreground line-clamp-1">{summary || 'Personal Profile'}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground/60 tabular-nums">v{soul.meta.version}</span>
+          <span className="text-xs text-muted-foreground/60 tabular-nums">v{status.soulVersion}</span>
           <ChevronRight className="h-4 w-4 text-muted-foreground/30" />
         </div>
       </div>
@@ -96,14 +124,6 @@ export function SoulCard({ soul, status, recentEvolution }: SoulCardProps) {
               {tag}
             </span>
           ))}
-          {soul.identity.expertise.slice(0, 2).map((exp) => (
-            <span
-              key={exp}
-              className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground"
-            >
-              {exp}
-            </span>
-          ))}
         </div>
       )}
 
@@ -112,7 +132,7 @@ export function SoulCard({ soul, status, recentEvolution }: SoulCardProps) {
         <div className="flex items-start gap-2 text-xs text-muted-foreground">
           <Sparkles className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
           <div className="min-w-0">
-            <span className="line-clamp-1">{latestEvolution.reasoning}</span>
+            <span className="line-clamp-1">{latestEvolution.summary}</span>
             <span className="text-muted-foreground/50 ml-1">{timeAgo(latestEvolution.timestamp)}</span>
           </div>
         </div>

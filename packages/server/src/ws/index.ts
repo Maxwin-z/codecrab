@@ -60,9 +60,18 @@ export { queryQueue }
 
 // SOUL evolution — fire-and-forget async trigger after user queries
 function triggerSoulEvolutionAsync(userMessage: string, assistantResponse: string): void {
-  // Skip trivial interactions
-  if (!userMessage.trim() || !assistantResponse.trim()) return
-  if (userMessage.length < 10) return
+  console.log(`[SOUL] triggerSoulEvolutionAsync called — user: ${userMessage.length} chars, assistant: ${assistantResponse.length} chars`)
+
+  // Skip trivial interactions (threshold=5 chars to accommodate CJK languages)
+  const trimmed = userMessage.trim()
+  if (!trimmed || !assistantResponse.trim()) {
+    console.log('[SOUL] Skipped — empty user or assistant message')
+    return
+  }
+  if (trimmed.length < 5) {
+    console.log(`[SOUL] Skipped — user message too short (${trimmed.length} < 5)`)
+    return
+  }
 
   // Strip [SUMMARY: ...] and [SUGGESTIONS: ...] tags — these are prompt-forced
   // output markers, not meaningful conversation content for SOUL analysis
@@ -1583,8 +1592,11 @@ async function executeUserQuery(
 
     // Trigger SOUL evolution asynchronously (fire-and-forget)
     // Skip for internal projects (e.g. __soul__ itself) to avoid infinite loops
+    console.log(`[SOUL] Query complete — projectId=${projectId}, finalText=${finalText.length} chars, prompt=${prompt.length} chars`)
     if (projectId && !projectId.startsWith('__')) {
       triggerSoulEvolutionAsync(prompt, finalText)
+    } else {
+      console.log(`[SOUL] Skipped — internal project: ${projectId}`)
     }
 
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }

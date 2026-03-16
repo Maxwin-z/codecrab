@@ -1,7 +1,7 @@
-// SOUL API — Read/write SOUL profile and trigger evolution
+// SOUL API — Read/write SOUL profile (Markdown) and trigger evolution
 //
 // Endpoints:
-//   GET    /api/soul           — Get current SOUL document
+//   GET    /api/soul           — Get current SOUL document (content + meta)
 //   PUT    /api/soul           — Update SOUL document manually
 //   POST   /api/soul/evolve    — Trigger SOUL evolution via SoulAgent
 //   GET    /api/soul/log       — Get evolution history
@@ -13,13 +13,15 @@ import { Router, type Router as RouterType } from 'express'
 import * as fs from 'fs'
 import * as path from 'path'
 import { ensureSoulProject, getSoulProjectDir } from '../soul/project.js'
+import { parseSoulMarkdown, serializeSoulMarkdown } from '../soul/markdown.js'
+import { SOUL_MAX_LENGTH } from '../soul/types.js'
 import { triggerSoulEvolution } from '../soul/agent.js'
 import type { SoulDocument, EvolutionEntry } from '../soul/types.js'
 
 const router: RouterType = Router()
 
 function soulPath(): string {
-  return path.join(getSoulProjectDir(), 'SOUL.json')
+  return path.join(getSoulProjectDir(), 'SOUL.md')
 }
 
 function logPath(): string {
@@ -32,13 +34,13 @@ function insightsDir(): string {
 
 function loadSoul(): SoulDocument {
   ensureSoulProject()
-  const data = fs.readFileSync(soulPath(), 'utf-8')
-  return JSON.parse(data)
+  const raw = fs.readFileSync(soulPath(), 'utf-8')
+  return parseSoulMarkdown(raw)
 }
 
-function saveSoul(soul: SoulDocument): void {
+function saveSoul(doc: SoulDocument): void {
   ensureSoulProject()
-  fs.writeFileSync(soulPath(), JSON.stringify(soul, null, 2), 'utf-8')
+  fs.writeFileSync(soulPath(), serializeSoulMarkdown(doc), 'utf-8')
 }
 
 // GET /api/soul — current SOUL document
@@ -54,14 +56,27 @@ router.get('/', (_req, res) => {
 // PUT /api/soul — manual update
 router.put('/', (req, res) => {
   try {
-    const soul = req.body
-    if (!soul?.identity || !soul?.preferences || !soul?.meta) {
-      res.status(400).json({ error: 'Invalid SOUL document: missing required fields' })
+    const { content } = req.body
+    if (typeof content !== 'string') {
+      res.status(400).json({ error: 'content field (string) is required' })
       return
     }
-    soul.meta.lastUpdated = new Date().toISOString()
-    saveSoul(soul)
-    res.json(soul)
+    if (content.length > SOUL_MAX_LENGTH) {
+      res.status(400).json({ error: `Content exceeds ${SOUL_MAX_LENGTH} character limit (got ${content.length})` })
+      return
+    }
+
+    // Load existing to get current version, then bump
+    const existing = loadSoul()
+    const doc: SoulDocument = {
+      content,
+      meta: {
+        version: existing.meta.version + 1,
+        lastUpdated: new Date().toISOString(),
+      },
+    }
+    saveSoul(doc)
+    res.json(doc)
   } catch (err) {
     res.status(500).json({ error: 'Failed to save SOUL', details: String(err) })
   }
@@ -121,7 +136,9 @@ router.get('/status', (_req, res) => {
   try {
     ensureSoulProject()
     const soul = loadSoul()
-    const hasSoul = Boolean(soul.identity?.name)
+    // Consider soul as "active" if there's meaningful content beyond empty headings
+    const meaningfulContent = soul.content.replace(/^#.*$/gm, '').trim()
+    const hasSoul = meaningfulContent.length > 0
 
     // Count evolution log entries
     let evolutionCount = 0
@@ -141,9 +158,11 @@ router.get('/status', (_req, res) => {
 
     res.json({
       hasSoul,
-      soulVersion: soul.meta?.version || 1,
+      soulVersion: soul.meta.version,
       evolutionCount,
       insightCount,
+      contentLength: soul.content.length,
+      maxLength: SOUL_MAX_LENGTH,
     })
   } catch (err) {
     res.status(500).json({ error: 'Failed to get status', details: String(err) })

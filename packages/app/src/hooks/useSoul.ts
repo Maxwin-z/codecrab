@@ -4,33 +4,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { authFetch } from '@/lib/auth'
 
 export interface SoulDocument {
-  identity: {
-    name: string
-    role: string
-    expertise: string[]
-  }
-  preferences: {
-    communicationStyle: string
-    decisionStyle: string
-    riskTolerance: string
-  }
-  values: Record<string, string>
-  context: {
-    activeGoals: string[]
-    domain: string
-    constraints: string[]
-  }
+  content: string
   meta: {
     version: number
     lastUpdated: string
-    evolutionLog: EvolutionEntry[]
   }
 }
 
 export interface EvolutionEntry {
   timestamp: string
-  changes: { path: string; before: string; after: string }[]
-  reasoning: string
+  summary: string
 }
 
 export interface SoulStatus {
@@ -38,6 +21,8 @@ export interface SoulStatus {
   soulVersion: number
   evolutionCount: number
   insightCount: number
+  contentLength: number
+  maxLength: number
 }
 
 export function useSoul(onUnauthorized?: () => void) {

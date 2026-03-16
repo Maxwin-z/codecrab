@@ -1,10 +1,10 @@
-// SoulPage — SOUL Profile detail view with identity, preferences, evolution timeline, and insights
+// SoulPage — SOUL Profile viewer/editor with Markdown content and evolution timeline
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ArrowLeft, Sparkles, Brain, Save, X } from 'lucide-react'
+import { ArrowLeft, Sparkles, Brain, Save, X, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useSoul, type SoulDocument } from '@/hooks/useSoul'
+import { useSoul } from '@/hooks/useSoul'
 import { authFetch } from '@/lib/auth'
 
 interface SoulPageProps {
@@ -22,51 +22,45 @@ function timeAgo(iso: string): string {
   return `${days}d ago`
 }
 
-function formatPath(path: string): string {
-  const parts = path.split('.')
-  return parts[parts.length - 1]
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, (s) => s.toUpperCase())
-    .trim()
-}
-
 export function SoulPage({ onUnauthorized }: SoulPageProps) {
   const navigate = useNavigate()
   const { soul, status, recentEvolution, loading, refresh } = useSoul(onUnauthorized)
   const [editing, setEditing] = useState(false)
-  const [editDraft, setEditDraft] = useState<SoulDocument | null>(null)
+  const [editDraft, setEditDraft] = useState('')
   const [saving, setSaving] = useState(false)
 
   const startEdit = () => {
     if (soul) {
-      setEditDraft(structuredClone(soul))
+      setEditDraft(soul.content)
       setEditing(true)
     }
   }
 
   const cancelEdit = () => {
     setEditing(false)
-    setEditDraft(null)
+    setEditDraft('')
   }
 
   const saveEdit = async () => {
-    if (!editDraft) return
     setSaving(true)
     try {
       const res = await authFetch('/api/soul', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editDraft),
+        body: JSON.stringify({ content: editDraft }),
       }, onUnauthorized)
       if (res.ok) {
         setEditing(false)
-        setEditDraft(null)
+        setEditDraft('')
         refresh()
       }
     } finally {
       setSaving(false)
     }
   }
+
+  const maxLength = status?.maxLength || 4000
+  const overLimit = editDraft.length > maxLength
 
   if (loading) {
     return (
@@ -82,8 +76,7 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
     )
   }
 
-  const current = editing ? editDraft! : soul
-  const hasSoul = status?.hasSoul && soul?.identity?.name
+  const hasSoul = status?.hasSoul
 
   return (
     <div className="min-h-dvh flex flex-col bg-background">
@@ -103,14 +96,17 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
                 <X className="h-4 w-4" />
                 Cancel
               </Button>
-              <Button size="sm" onClick={saveEdit} disabled={saving}>
+              <Button size="sm" onClick={saveEdit} disabled={saving || overLimit}>
                 <Save className="h-4 w-4" />
                 {saving ? 'Saving...' : 'Save'}
               </Button>
             </>
-          ) : hasSoul ? (
-            <Button variant="outline" size="sm" onClick={startEdit}>Edit</Button>
-          ) : null}
+          ) : (
+            <Button variant="outline" size="sm" onClick={startEdit}>
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Button>
+          )}
         </div>
       </header>
 
@@ -131,93 +127,45 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
             </div>
           )}
 
-          {/* Identity */}
-          {(hasSoul || editing) && current && (
-            <Section title="Identity">
-              {editing ? (
-                <div className="flex flex-col gap-3">
-                  <Field label="Name" value={editDraft!.identity.name} onChange={(v) => setEditDraft({ ...editDraft!, identity: { ...editDraft!.identity, name: v } })} />
-                  <Field label="Role" value={editDraft!.identity.role} onChange={(v) => setEditDraft({ ...editDraft!, identity: { ...editDraft!.identity, role: v } })} />
-                  <Field label="Expertise" value={editDraft!.identity.expertise.join(', ')} onChange={(v) => setEditDraft({ ...editDraft!, identity: { ...editDraft!.identity, expertise: v.split(',').map((s) => s.trim()).filter(Boolean) } })} hint="Comma separated" />
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-base font-medium">{current.identity.name}</span>
-                    {current.identity.role && <span className="text-sm text-muted-foreground">{current.identity.role}</span>}
-                  </div>
-                  {current.identity.expertise.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {current.identity.expertise.map((exp) => (
-                        <span key={exp} className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{exp}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
+          {/* Editor mode */}
+          {editing && (
+            <section>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-medium text-muted-foreground">Content</h2>
+                <span className={`text-xs tabular-nums ${overLimit ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                  {editDraft.length} / {maxLength}
+                </span>
+              </div>
+              <textarea
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                className="w-full h-[60vh] rounded-md border bg-background px-4 py-3 text-sm font-mono leading-relaxed outline-none focus:ring-2 focus:ring-ring/50 resize-none"
+                placeholder="# Identity&#10;&#10;(Write about who you are...)&#10;&#10;# Preferences&#10;&#10;(Communication style, decision-making approach...)"
+              />
+              {overLimit && (
+                <p className="mt-1 text-xs text-destructive">
+                  Content exceeds the {maxLength} character limit. Please condense.
+                </p>
               )}
-            </Section>
+            </section>
           )}
 
-          {/* Preferences */}
-          {(hasSoul || editing) && current && (
-            <Section title="Preferences">
-              {editing ? (
-                <div className="flex flex-col gap-3">
-                  <Field label="Communication Style" value={editDraft!.preferences.communicationStyle} onChange={(v) => setEditDraft({ ...editDraft!, preferences: { ...editDraft!.preferences, communicationStyle: v } })} />
-                  <Field label="Decision Style" value={editDraft!.preferences.decisionStyle} onChange={(v) => setEditDraft({ ...editDraft!, preferences: { ...editDraft!.preferences, decisionStyle: v } })} />
-                  <Field label="Risk Tolerance" value={editDraft!.preferences.riskTolerance} onChange={(v) => setEditDraft({ ...editDraft!, preferences: { ...editDraft!.preferences, riskTolerance: v } })} />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <PreferenceItem label="Communication" value={current.preferences.communicationStyle} />
-                  <PreferenceItem label="Decision" value={current.preferences.decisionStyle} />
-                  <PreferenceItem label="Risk" value={current.preferences.riskTolerance} />
+          {/* View mode — render Markdown as styled content */}
+          {!editing && hasSoul && soul && (
+            <section>
+              <SoulMarkdownView content={soul.content} />
+              {status && (
+                <div className="mt-4 text-xs text-muted-foreground/50 tabular-nums">
+                  {status.contentLength} / {status.maxLength} characters
                 </div>
               )}
-            </Section>
-          )}
-
-          {/* Context */}
-          {(hasSoul || editing) && current && (
-            <Section title="Context">
-              {editing ? (
-                <div className="flex flex-col gap-3">
-                  <Field label="Domain" value={editDraft!.context.domain} onChange={(v) => setEditDraft({ ...editDraft!, context: { ...editDraft!.context, domain: v } })} />
-                  <Field label="Active Goals" value={editDraft!.context.activeGoals.join(', ')} onChange={(v) => setEditDraft({ ...editDraft!, context: { ...editDraft!.context, activeGoals: v.split(',').map((s) => s.trim()).filter(Boolean) } })} hint="Comma separated" />
-                  <Field label="Constraints" value={editDraft!.context.constraints.join(', ')} onChange={(v) => setEditDraft({ ...editDraft!, context: { ...editDraft!.context, constraints: v.split(',').map((s) => s.trim()).filter(Boolean) } })} hint="Comma separated" />
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {current.context.domain && (
-                    <div className="text-sm"><span className="text-muted-foreground">Domain:</span> {current.context.domain}</div>
-                  )}
-                  {current.context.activeGoals.length > 0 && (
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Goals:</span>
-                      <ul className="mt-1 ml-4 list-disc text-sm">
-                        {current.context.activeGoals.map((g, i) => <li key={i}>{g}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                  {current.context.constraints.length > 0 && (
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Constraints:</span>
-                      <ul className="mt-1 ml-4 list-disc text-sm text-muted-foreground">
-                        {current.context.constraints.map((c, i) => <li key={i}>{c}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                  {!current.context.domain && current.context.activeGoals.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No active context yet.</p>
-                  )}
-                </div>
-              )}
-            </Section>
+            </section>
           )}
 
           {/* Evolution Timeline */}
           {recentEvolution.length > 0 && !editing && (
-            <Section title="Evolution Timeline">
+            <section>
+              <h2 className="text-sm font-medium text-muted-foreground mb-3">Evolution Timeline</h2>
               <div className="flex flex-col gap-3">
                 {[...recentEvolution].reverse().map((entry, i) => (
                   <div key={i} className="flex gap-3">
@@ -228,27 +176,13 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
                       {i < recentEvolution.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
                     </div>
                     <div className="pb-4 min-w-0">
-                      <p className="text-sm">{entry.reasoning}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-muted-foreground">{timeAgo(entry.timestamp)}</span>
-                      </div>
-                      {entry.changes.length > 0 && (
-                        <div className="mt-2 flex flex-col gap-1">
-                          {entry.changes.map((change, j) => (
-                            <div key={j} className="text-xs text-muted-foreground flex items-center gap-1.5">
-                              <span className="font-mono bg-secondary px-1 rounded">{formatPath(change.path)}</span>
-                              <span className="text-muted-foreground/40 line-through">{change.before || '(empty)'}</span>
-                              <span>→</span>
-                              <span>{change.after}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <p className="text-sm">{entry.summary}</p>
+                      <span className="text-xs text-muted-foreground">{timeAgo(entry.timestamp)}</span>
                     </div>
                   </div>
                 ))}
               </div>
-            </Section>
+            </section>
           )}
 
         </div>
@@ -257,40 +191,83 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
   )
 }
 
-// --- Sub-components ---
+// --- Markdown renderer (lightweight, no dependencies) ---
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className="text-sm font-medium text-muted-foreground mb-3">{title}</h2>
-      {children}
-    </section>
-  )
+function SoulMarkdownView({ content }: { content: string }) {
+  const lines = content.split('\n')
+  const elements: React.ReactNode[] = []
+  let key = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    // Headings
+    if (line.startsWith('# ')) {
+      elements.push(
+        <h2 key={key++} className="text-base font-semibold mt-5 mb-2 first:mt-0">{line.slice(2)}</h2>
+      )
+    } else if (line.startsWith('## ')) {
+      elements.push(
+        <h3 key={key++} className="text-sm font-semibold mt-4 mb-1.5">{line.slice(3)}</h3>
+      )
+    } else if (line.startsWith('### ')) {
+      elements.push(
+        <h4 key={key++} className="text-sm font-medium mt-3 mb-1">{line.slice(4)}</h4>
+      )
+    }
+    // List items
+    else if (line.match(/^\s*[-*]\s/)) {
+      const text = line.replace(/^\s*[-*]\s/, '')
+      elements.push(
+        <li key={key++} className="text-sm ml-4 list-disc leading-relaxed">
+          <InlineMarkdown text={text} />
+        </li>
+      )
+    }
+    // Indented list items (sub-list)
+    else if (line.match(/^\s{2,}[-*]\s/)) {
+      const text = line.replace(/^\s+[-*]\s/, '')
+      elements.push(
+        <li key={key++} className="text-sm ml-8 list-circle leading-relaxed text-muted-foreground">
+          <InlineMarkdown text={text} />
+        </li>
+      )
+    }
+    // Empty line
+    else if (line.trim() === '') {
+      elements.push(<div key={key++} className="h-2" />)
+    }
+    // Regular paragraph
+    else {
+      elements.push(
+        <p key={key++} className="text-sm leading-relaxed">
+          <InlineMarkdown text={line} />
+        </p>
+      )
+    }
+  }
+
+  return <div>{elements}</div>
 }
 
-function PreferenceItem({ label, value }: { label: string; value: string }) {
-  if (!value) return null
+/** Render inline markdown: **bold**, *italic*, `code` */
+function InlineMarkdown({ text }: { text: string }) {
+  // Split on markdown patterns and render styled spans
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/)
   return (
-    <div className="rounded-lg bg-secondary/50 p-3">
-      <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
-      <p className="text-sm font-medium">{value}</p>
-    </div>
-  )
-}
-
-function Field({ label, value, onChange, hint }: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
-  return (
-    <div>
-      <label className="text-xs text-muted-foreground mb-1 block">
-        {label}
-        {hint && <span className="text-muted-foreground/50 ml-1">({hint})</span>}
-      </label>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring/50"
-      />
-    </div>
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>
+        }
+        if (part.startsWith('*') && part.endsWith('*')) {
+          return <em key={i}>{part.slice(1, -1)}</em>
+        }
+        if (part.startsWith('`') && part.endsWith('`')) {
+          return <code key={i} className="rounded bg-secondary px-1 py-0.5 text-xs font-mono">{part.slice(1, -1)}</code>
+        }
+        return <span key={i}>{part}</span>
+      })}
+    </>
   )
 }

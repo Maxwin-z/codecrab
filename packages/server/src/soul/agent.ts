@@ -78,7 +78,7 @@ export async function triggerSoulEvolution(conversations: ConversationTurn[]): P
     projectId: SOUL_PROJECT_ID,
     cwd,
     prompt,
-    maxTurns: 5, // Keep it short — read SOUL.json, maybe edit, done
+    maxTurns: 5, // Keep it short — read SOUL.md, maybe edit, done
   })
 
   if (!result.success) {

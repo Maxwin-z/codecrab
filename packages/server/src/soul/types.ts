@@ -1,37 +1,24 @@
-// SOUL types — User persona model and evolution data structures
+// SOUL types — Markdown-based persona model with evolution tracking
+//
+// The SOUL is stored as a Markdown file with YAML frontmatter for metadata.
+// The content is free-form — the evolution agent can grow and restructure it.
 
+/** Maximum character length for SOUL.md content (excluding frontmatter) */
+export const SOUL_MAX_LENGTH = 4000
+
+/** Parsed representation of a SOUL.md file */
 export interface SoulDocument {
-  identity: {
-    name: string
-    role: string
-    expertise: string[]
-  }
-  preferences: {
-    communicationStyle: string   // "简洁直接" | "详细解释" | ...
-    decisionStyle: string        // "数据驱动" | "直觉导向" | ...
-    riskTolerance: string        // "保守" | "激进" | ...
-  }
-  values: Record<string, string>
-  context: {
-    activeGoals: string[]
-    domain: string
-    constraints: string[]
-  }
-  meta: {
-    version: number
-    lastUpdated: string
-    evolutionLog: EvolutionEntry[]
-  }
+  content: string                // Markdown body (everything after frontmatter)
+  meta: SoulMeta
 }
 
+export interface SoulMeta {
+  version: number
+  lastUpdated: string            // ISO 8601 timestamp
+}
+
+/** Evolution log entry — still structured (stored in evolution-log.jsonl) */
 export interface EvolutionEntry {
   timestamp: string
-  changes: SoulDiff[]
-  reasoning: string
-}
-
-export interface SoulDiff {
-  path: string       // e.g. "preferences.communicationStyle"
-  before: string
-  after: string
+  summary: string                // What changed and why
 }

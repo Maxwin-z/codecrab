@@ -1,4 +1,6 @@
-export type { SoulDocument, EvolutionEntry, SoulDiff } from './types.js'
+export type { SoulDocument, SoulMeta, EvolutionEntry } from './types.js'
+export { SOUL_MAX_LENGTH } from './types.js'
 export { SOUL_PROJECT_ID, ensureSoulProject, getSoulProjectDir } from './project.js'
+export { parseSoulMarkdown, serializeSoulMarkdown, extractSoulSummary } from './markdown.js'
 export { triggerSoulEvolution } from './agent.js'
 export type { ConversationTurn, SoulEvolutionResult } from './agent.js'
