@@ -112,6 +112,8 @@ interface ProjectEntry {
   path: string
   icon: string
   internal?: boolean
+  createdAt?: number
+  updatedAt?: number
 }
 
 /**
@@ -240,13 +242,22 @@ function registerSoulProject(): void {
     // Update path in case it changed
     existing.path = SOUL_DIR
     existing.internal = true
+    // Backfill timestamps if missing
+    if (!existing.createdAt) {
+      const now = Date.now()
+      existing.createdAt = now
+      existing.updatedAt = now
+    }
   } else {
+    const now = Date.now()
     projects.push({
       id: SOUL_PROJECT_ID,
       name: 'SOUL',
       path: SOUL_DIR,
       icon: '🧠',
       internal: true,
+      createdAt: now,
+      updatedAt: now,
     })
   }
 

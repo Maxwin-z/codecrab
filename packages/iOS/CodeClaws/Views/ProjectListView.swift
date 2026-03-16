@@ -97,7 +97,7 @@ struct ProjectListView: View {
     private func fetchProjects() async {
         do {
             let fetched: [Project] = try await APIClient.shared.fetch(path: "/api/projects")
-            self.projects = fetched
+            self.projects = fetched.filter { !$0.id.hasPrefix("__") }
         } catch {
             print("Failed to fetch projects: \(error)")
         }
