@@ -15,49 +15,65 @@ struct ProjectListView: View {
 
     var body: some View {
         List(selection: $selectedProject) {
-            if isLoading && projects.isEmpty {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.automatic)
-            } else if projects.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 48))
-                        .foregroundColor(.gray)
-                    Text("No projects yet")
-                        .font(.headline)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 40)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.automatic)
-            } else {
-                ForEach(projects) { project in
-                    Button {
-                        selectedProject = project
-                    } label: {
-                        ProjectCard(
-                            project: project,
-                            isSelected: selectedProject?.id == project.id,
-                            cronJobs: cronJobsByProject[project.id] ?? []
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
-                    .listRowSeparator(.automatic)
+            // SOUL dashboard card
+            Section {
+                SoulCardView()
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                    .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            deleteProject(project)
+            }
+
+            // Project list
+            Section {
+                if isLoading && projects.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.automatic)
+                } else if projects.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 48))
+                            .foregroundColor(.gray)
+                        Text("No projects yet")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.automatic)
+                } else {
+                    ForEach(projects) { project in
+                        Button {
+                            selectedProject = project
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            ProjectCard(
+                                project: project,
+                                isSelected: selectedProject?.id == project.id,
+                                cronJobs: cronJobsByProject[project.id] ?? []
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                        .listRowSeparator(.automatic)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                deleteProject(project)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
                 }
+            } header: {
+                Text("Projects")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .textCase(nil)
             }
         }
         .listStyle(.plain)
