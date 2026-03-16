@@ -2,21 +2,18 @@ import SwiftUI
 
 struct SoulCardView: View {
     var refreshID = UUID()
+    var onTap: () -> Void = {}
     @State private var soul: SoulDocument?
     @State private var status: SoulStatus?
     @State private var recentEvolution: [EvolutionEntry] = []
-    @State private var showSoulPage = false
 
     var body: some View {
         Button {
-            showSoulPage = true
+            onTap()
         } label: {
             cardContent
         }
         .buttonStyle(.plain)
-        .navigationDestination(isPresented: $showSoulPage) {
-            SoulPageView()
-        }
         .task(id: refreshID) {
             await fetchSoulData()
         }

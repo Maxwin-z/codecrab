@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatView: View {
     let project: Project
+    let initialSessionId: String?
     @Binding var pendingAttachments: [ImageAttachment]
     @Binding var pendingSessionId: String?
     @EnvironmentObject var wsService: WebSocketService
@@ -13,7 +14,6 @@ struct ChatView: View {
     @State private var initializedMcps = false
     @State private var prefillText: String = ""
     @State private var breathe = false
-    @State private var lastSession: SessionInfo?
     @State private var arrowBounce = false
     @State private var execSessionId: String? = nil
     @State private var inputAttachments: [ImageAttachment] = []
@@ -128,8 +128,16 @@ struct ChatView: View {
         }
         .onAppear {
             wsService.switchProject(projectId: project.id, cwd: project.path)
+            if let sessionId = initialSessionId {
+                // Resume the specified session after project switch settles
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    wsService.resumeSession(sessionId)
+                }
+            } else {
+                // New chat — start fresh
+                wsService.newChat()
+            }
             fetchMcps()
-            fetchLastSession()
             handlePendingShare()
         }
         .onChange(of: pendingAttachments) { _, newAttachments in
@@ -322,41 +330,6 @@ struct ChatView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            // Last session card — hide when input is focused to prevent accidental taps
-            if let session = lastSession, !isInputFocused {
-                Button(action: {
-                    wsService.resumeSession(session.sessionId)
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.summary.isEmpty ? (session.firstPrompt ?? "Untitled session") : session.summary)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .lineLimit(1)
-                                .foregroundStyle(.primary)
-                            Text(TimeAgo.format(from: session.lastModified))
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.horizontal, 32)
-                .padding(.top, 28)
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
-            }
-
             // Down arrow indicator
             VStack(spacing: 6) {
                 Image(systemName: "arrow.down")
@@ -373,18 +346,6 @@ struct ChatView: View {
         }
         .padding(.horizontal)
         .animation(.easeInOut(duration: 0.25), value: isInputFocused)
-    }
-
-    private func fetchLastSession() {
-        Task {
-            do {
-                let fetched: [SessionInfo] = try await APIClient.shared.fetch(path: "/api/sessions?projectId=\(project.id)")
-                let sorted = fetched.sorted { $0.lastModified > $1.lastModified }
-                lastSession = sorted.first
-            } catch {
-                // Silently fail — empty state will just not show a session card
-            }
-        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

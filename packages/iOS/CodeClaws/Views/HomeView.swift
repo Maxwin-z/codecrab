@@ -1,11 +1,28 @@
 import SwiftUI
 
+/// What the detail column shows
+enum DetailDestination: Equatable {
+    case project(Project)
+    case soul
+    case cron
+
+    static func == (lhs: DetailDestination, rhs: DetailDestination) -> Bool {
+        switch (lhs, rhs) {
+        case (.project(let a), .project(let b)): return a.id == b.id
+        case (.soul, .soul): return true
+        case (.cron, .cron): return true
+        default: return false
+        }
+    }
+}
+
 struct HomeView: View {
     @EnvironmentObject var wsService: WebSocketService
     @EnvironmentObject var shareHandler: ShareHandler
     @ObservedObject private var pushService = PushNotificationService.shared
 
-    @State private var selectedProject: Project?
+    @State private var detailDestination: DetailDestination?
+    @State private var detailPath = NavigationPath()
     @State private var showCreate = false
     @State private var showSettings = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
@@ -14,10 +31,21 @@ struct HomeView: View {
     @State private var shareAttachments: [ImageAttachment] = []
     @State private var shareSessionId: String? = nil
 
+    /// Currently selected project (derived from detailDestination)
+    private var selectedProjectId: String? {
+        if case .project(let p) = detailDestination { return p.id }
+        return nil
+    }
+
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
-                ProjectListView(selectedProject: $selectedProject)
+                ProjectListView(
+                    selectedProjectId: selectedProjectId,
+                    onSelectProject: { selectProject($0) },
+                    onSoulTapped: { selectSoul() },
+                    onCronTapped: { selectCron() }
+                )
                     .navigationTitle("CodeClaws")
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
@@ -32,25 +60,16 @@ struct HomeView: View {
                         }
                     }
             } detail: {
-                NavigationStack {
-                    if let project = selectedProject {
-                        ChatView(
-                            project: project,
-                            pendingAttachments: $shareAttachments,
-                            pendingSessionId: $shareSessionId
-                        )
-                            .id(project.id)
-                    } else {
-                        VStack(spacing: 20) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 60))
-                                .foregroundColor(.gray.opacity(0.3))
-                            Text("Select a project to start chatting")
-                                .font(.title3)
-                                .foregroundColor(.secondary)
+                NavigationStack(path: $detailPath) {
+                    detailRootView
+                        .navigationDestination(for: ChatRoute.self) { route in
+                            ChatView(
+                                project: route.project,
+                                initialSessionId: route.sessionId,
+                                pendingAttachments: $shareAttachments,
+                                pendingSessionId: $shareSessionId
+                            )
                         }
-                        .navigationTitle("Select Project")
-                    }
                 }
             }
             .sheet(isPresented: $showCreate) {
@@ -87,11 +106,9 @@ struct HomeView: View {
         }
         .task {
             await fetchProjects()
-            // Handle shares that arrived before HomeView appeared (cold start via URL scheme)
             if let projectId = shareHandler.pendingProjectId {
                 handleIncomingShare(projectId: projectId)
             } else {
-                // Also check App Group for unconsumed shares (fallback if URL scheme didn't fire)
                 shareHandler.checkOnActivation()
             }
         }
@@ -101,16 +118,57 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Detail Root
+
+    @ViewBuilder
+    private var detailRootView: some View {
+        switch detailDestination {
+        case .project(let project):
+            SessionListView(project: project)
+                .id(project.id)
+        case .soul:
+            SoulPageView()
+        case .cron:
+            CronPageView()
+        case nil:
+            VStack(spacing: 20) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 60))
+                    .foregroundColor(.gray.opacity(0.3))
+                Text("Select a project to start chatting")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+            }
+            .navigationTitle("Select Project")
+        }
+    }
+
+    // MARK: - Selection Helpers
+
+    private func selectProject(_ project: Project) {
+        detailPath = NavigationPath()
+        detailDestination = .project(project)
+    }
+
+    private func selectSoul() {
+        detailPath = NavigationPath()
+        detailDestination = .soul
+    }
+
+    private func selectCron() {
+        detailPath = NavigationPath()
+        detailDestination = .cron
+    }
+
+    // MARK: - Deep Links
+
     private func handleDeepLink(_ deepLink: PushDeepLink) {
-        // Check if the app is showing the same project+session already
-        if let current = selectedProject,
+        if case .project(let current) = detailDestination,
            current.id == deepLink.projectId,
            wsService.sessionId == deepLink.sessionId {
-            // Already viewing this session — ignore
             return
         }
 
-        // Show toast for foreground; for background tap, navigate directly
         let isAppActive = UIApplication.shared.applicationState == .active
         if isAppActive {
             toastData = PushToastData(
@@ -120,28 +178,26 @@ struct HomeView: View {
                 body: deepLink.body
             )
         } else {
-            // App was in background — navigate immediately
             navigateToDeepLink(projectId: deepLink.projectId, sessionId: deepLink.sessionId)
         }
     }
 
     private func navigateToDeepLink(projectId: String, sessionId: String) {
-        // Find the project from cached list, or create a minimal one
         if let project = projects.first(where: { $0.id == projectId }) {
-            selectedProject = project
+            selectProject(project)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                detailPath.append(ChatRoute(project: project, sessionId: sessionId))
+            }
         } else {
-            // Fetch projects and retry
             Task {
                 await fetchProjects()
                 if let project = projects.first(where: { $0.id == projectId }) {
-                    selectedProject = project
+                    selectProject(project)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        detailPath.append(ChatRoute(project: project, sessionId: sessionId))
+                    }
                 }
             }
-        }
-
-        // Resume the specific session after a brief delay to let project switch complete
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            wsService.resumeSession(sessionId)
         }
     }
 
@@ -154,22 +210,30 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Share Handling
+
     private func handleIncomingShare(projectId: String) {
-        // Find matching project
         if let project = projects.first(where: { $0.id == projectId }) {
-            selectedProject = project
+            let sid = shareHandler.pendingSessionId
             shareAttachments = shareHandler.pendingAttachments
-            shareSessionId = shareHandler.pendingSessionId
+            shareSessionId = sid
             shareHandler.clear()
+            selectProject(project)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                detailPath.append(ChatRoute(project: project, sessionId: sid))
+            }
         } else {
-            // Fetch projects first, then retry
             Task {
                 await fetchProjects()
                 if let project = projects.first(where: { $0.id == projectId }) {
-                    selectedProject = project
+                    let sid = shareHandler.pendingSessionId
                     shareAttachments = shareHandler.pendingAttachments
-                    shareSessionId = shareHandler.pendingSessionId
+                    shareSessionId = sid
                     shareHandler.clear()
+                    selectProject(project)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        detailPath.append(ChatRoute(project: project, sessionId: sid))
+                    }
                 } else {
                     shareHandler.clear()
                 }

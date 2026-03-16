@@ -25,19 +25,16 @@ struct CronSummary: Codable {
 
 struct CronCardView: View {
     var refreshID = UUID()
+    var onTap: () -> Void = {}
     @State private var summary: CronSummary?
-    @State private var showCronPage = false
 
     var body: some View {
         Button {
-            showCronPage = true
+            onTap()
         } label: {
             cardContent
         }
         .buttonStyle(.plain)
-        .navigationDestination(isPresented: $showCronPage) {
-            CronPageView()
-        }
         .task(id: refreshID) {
             await fetchSummary()
         }

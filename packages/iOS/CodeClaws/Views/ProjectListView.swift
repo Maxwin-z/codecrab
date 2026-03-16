@@ -2,7 +2,10 @@ import SwiftUI
 
 struct ProjectListView: View {
     @EnvironmentObject var wsService: WebSocketService
-    @Binding var selectedProject: Project?
+    let selectedProjectId: String?
+    var onSelectProject: (Project) -> Void
+    var onSoulTapped: () -> Void
+    var onCronTapped: () -> Void
     @State private var projects: [Project] = []
     @State private var cronJobs: [CronJob] = []
     @State private var isLoading = false
@@ -15,14 +18,14 @@ struct ProjectListView: View {
     }
 
     var body: some View {
-        List(selection: $selectedProject) {
+        List {
             // Dashboard cards
             Section {
-                SoulCardView(refreshID: cardRefreshID)
+                SoulCardView(refreshID: cardRefreshID, onTap: onSoulTapped)
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                CronCardView(refreshID: cardRefreshID)
+                CronCardView(refreshID: cardRefreshID, onTap: onCronTapped)
                     .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -53,11 +56,11 @@ struct ProjectListView: View {
                 } else {
                     ForEach(projects) { project in
                         Button {
-                            selectedProject = project
+                            onSelectProject(project)
                         } label: {
                             ProjectCard(
                                 project: project,
-                                isSelected: selectedProject?.id == project.id,
+                                isSelected: selectedProjectId == project.id,
                                 cronJobs: cronJobsByProject[project.id] ?? []
                             )
                         }
@@ -123,9 +126,6 @@ struct ProjectListView: View {
             do {
                 try await APIClient.shared.request(path: "/api/projects/\(project.id)", method: "DELETE")
                 projects.removeAll { $0.id == project.id }
-                if selectedProject?.id == project.id {
-                    selectedProject = nil
-                }
             } catch {
                 print("Failed to delete project: \(error)")
             }
@@ -322,7 +322,7 @@ private struct ProjectListPreviewWrapper: View {
     @State private var selectedProject: Project?
 
     var body: some View {
-        List(selection: $selectedProject) {
+        List {
             ForEach(projects) { project in
                 Button {
                     selectedProject = project
