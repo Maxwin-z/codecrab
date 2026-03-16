@@ -13,10 +13,8 @@ struct SoulCardView: View {
             cardContent
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showSoulPage) {
-            NavigationStack {
-                SoulPageView()
-            }
+        .navigationDestination(isPresented: $showSoulPage) {
+            SoulPageView()
         }
         .task {
             await fetchSoulData()
