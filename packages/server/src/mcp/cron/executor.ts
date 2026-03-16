@@ -40,7 +40,7 @@ export class CronExecutor {
         context: {
           projectId: job.context?.projectId,
           clientId: job.context?.clientId,
-          sessionId: job.context?.sessionId,
+          parentSessionId: job.context?.parentSessionId,
           workspace: job.context?.workspace,
         },
         timestamp: new Date().toISOString(),

@@ -117,13 +117,12 @@ ensureToken().then(() => {
 
   // Set up cron execution callback to run prompt in the original session
   cronSystem.setExecuteCallback(async (request) => {
-    const { sessionId, projectId } = request.context
+    const { parentSessionId, projectId } = request.context
 
-    console.log(`[CronExecute] Job: ${request.name} (${request.jobId}), session=${sessionId}, project=${projectId}`)
+    console.log(`[CronExecute] Job: ${request.name} (${request.jobId}), parentSession=${parentSessionId}, project=${projectId}`)
 
     // Execute the prompt via the query queue
-    // If no sessionId, we'll create one for this execution (parent session tracking)
-    const result = await executePromptInSession(sessionId, projectId, request.prompt, request.name, {
+    const result = await executePromptInSession(parentSessionId, projectId, request.prompt, request.name, {
       cronJobId: request.jobId,
       cronRunId: request.runId,
     })

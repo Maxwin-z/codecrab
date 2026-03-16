@@ -145,7 +145,7 @@ CRITICAL - The 'prompt' parameter is the instruction that will be executed when 
         context: {
           projectId,
           clientId,
-          sessionId,
+          parentSessionId: sessionId,
         },
         status: 'pending',
         createdAt: new Date().toISOString(),

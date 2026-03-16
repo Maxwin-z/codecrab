@@ -16,7 +16,7 @@ export type CronJobStatus =
 export interface CronJobContext {
   projectId?: string
   clientId?: string
-  sessionId?: string
+  parentSessionId?: string
   workspace?: string
   [key: string]: unknown
 }

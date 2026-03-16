@@ -1,4 +1,4 @@
-// Tests for cron job context injection — ensures projectId/sessionId
+// Tests for cron job context injection — ensures projectId/parentSessionId
 // are reliably stored in cron jobs even when updateToolInput is unavailable.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -65,7 +65,7 @@ describe('cron_create context injection via setCurrentQueryContext', () => {
     expect(job).toBeDefined()
     expect(job!.context.projectId).toBe('proj-abc')
     expect(job!.context.clientId).toBe('client-xyz')
-    expect(job!.context.sessionId).toBe('sess-123')
+    expect(job!.context.parentSessionId).toBe('sess-123')
     expect(job!.delivery?.target).toBe('sess-123')
   })
 
@@ -95,7 +95,7 @@ describe('cron_create context injection via setCurrentQueryContext', () => {
     // Tool input should take priority
     expect(job!.context.projectId).toBe('proj-new')
     expect(job!.context.clientId).toBe('client-new')
-    expect(job!.context.sessionId).toBe('sess-new')
+    expect(job!.context.parentSessionId).toBe('sess-new')
   })
 
   it('should handle case where neither tool input nor module context has sessionId', async () => {
@@ -117,9 +117,9 @@ describe('cron_create context injection via setCurrentQueryContext', () => {
     const jobs = loadJobs()
     const job = Array.from(jobs.values()).find(j => j.name === 'Reminder no session')
     expect(job).toBeDefined()
-    // projectId should still be set even without sessionId
+    // projectId should still be set even without parentSessionId
     expect(job!.context.projectId).toBe('proj-abc')
-    expect(job!.context.sessionId).toBeUndefined()
+    expect(job!.context.parentSessionId).toBeUndefined()
   })
 
   it('should handle completely empty context gracefully', async () => {
@@ -138,11 +138,11 @@ describe('cron_create context injection via setCurrentQueryContext', () => {
     const job = Array.from(jobs.values()).find(j => j.name === 'Orphan reminder')
     expect(job).toBeDefined()
     expect(job!.context.projectId).toBeUndefined()
-    expect(job!.context.sessionId).toBeUndefined()
+    expect(job!.context.parentSessionId).toBeUndefined()
   })
 })
 
-describe('cron job execution with missing sessionId', () => {
+describe('cron job execution with missing parentSessionId', () => {
   it('executor should pass context to execute callback correctly', async () => {
     let capturedRequest: CronExecutionRequest | null = null
 
@@ -156,7 +156,7 @@ describe('cron job execution with missing sessionId', () => {
       return { success: true, output: 'Reminder sent' }
     })
 
-    // Simulate a job that was created WITH projectId but WITHOUT sessionId
+    // Simulate a job that was created WITH projectId but WITHOUT parentSessionId
     // (the scenario that was failing)
     const job: CronJob = {
       id: 'cron-test-123',
@@ -166,7 +166,7 @@ describe('cron job execution with missing sessionId', () => {
       context: {
         projectId: 'proj-abc',
         clientId: 'client-xyz',
-        // sessionId is undefined — this was causing the bug
+        // parentSessionId is undefined — this was causing the bug
       },
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -179,9 +179,9 @@ describe('cron job execution with missing sessionId', () => {
 
     expect(capturedRequest).not.toBeNull()
     expect(capturedRequest!.context.projectId).toBe('proj-abc')
-    expect(capturedRequest!.context.sessionId).toBeUndefined()
+    expect(capturedRequest!.context.parentSessionId).toBeUndefined()
     // The callback should be able to handle this — executePromptInSession
-    // falls back to projectId lookup when sessionId is missing
+    // creates a new cron parent session when parentSessionId is missing
   })
 
   it('executor should fail with clear error when callback returns failure', async () => {
@@ -192,7 +192,7 @@ describe('cron job execution with missing sessionId', () => {
 
     executor.setExecuteCallback(async (req) => {
       // Simulate: executePromptInSession can't find project
-      if (!req.context.sessionId && !req.context.projectId) {
+      if (!req.context.parentSessionId && !req.context.projectId) {
         return { success: false, error: 'No session or project ID provided for cron job' }
       }
       return { success: true }
@@ -214,7 +214,7 @@ describe('cron job execution with missing sessionId', () => {
       'No session or project ID provided for cron job',
     )
 
-    // But a job with projectId (no sessionId) should succeed
+    // But a job with projectId (no parentSessionId) should succeed
     const jobWithProject: CronJob = {
       ...jobNoContext,
       id: 'cron-with-proj',
@@ -242,7 +242,7 @@ describe('end-to-end: cron create → schedule → execute', () => {
         context: {
           projectId: job.context?.projectId,
           clientId: job.context?.clientId,
-          sessionId: job.context?.sessionId,
+          parentSessionId: job.context?.parentSessionId,
           workspace: job.context?.workspace,
         },
         timestamp: new Date().toISOString(),
@@ -275,7 +275,7 @@ describe('end-to-end: cron create → schedule → execute', () => {
     const job = Array.from(jobs.values()).find(j => j.name === '10秒提醒')
     expect(job).toBeDefined()
     expect(job!.context.projectId).toBe('proj-reminder')
-    expect(job!.context.sessionId).toBe('sess-active')
+    expect(job!.context.parentSessionId).toBe('sess-active')
 
     // 4. Advance time to trigger the job
     await vi.advanceTimersByTimeAsync(11000)
@@ -284,7 +284,7 @@ describe('end-to-end: cron create → schedule → execute', () => {
     expect(executorFn).toHaveBeenCalledOnce()
     expect(executedRequest).not.toBeNull()
     expect(executedRequest!.context.projectId).toBe('proj-reminder')
-    expect(executedRequest!.context.sessionId).toBe('sess-active')
+    expect(executedRequest!.context.parentSessionId).toBe('sess-active')
     expect(executedRequest!.prompt).toContain('push_send')
 
     testScheduler.stop()
@@ -312,13 +312,13 @@ describe('end-to-end: cron create → schedule → execute', () => {
       prompt: 'Notify user',
     })
 
-    // 3. Verify job has projectId even without sessionId
+    // 3. Verify job has projectId even without parentSessionId
     const jobs = loadJobs()
     const job = Array.from(jobs.values()).find(j => j.name === 'Early reminder')
     expect(job).toBeDefined()
     expect(job!.context.projectId).toBe('proj-new')
-    expect(job!.context.sessionId).toBeUndefined()
-    // executePromptInSession will find session via projectId fallback
+    expect(job!.context.parentSessionId).toBeUndefined()
+    // executePromptInSession will create a new cron parent session via projectId
 
     testScheduler.stop()
     vi.useRealTimers()

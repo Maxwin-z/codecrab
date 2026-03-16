@@ -171,7 +171,7 @@ function clearProjectActivity(projectId: string): void {
 // Now enqueues through the query queue instead of executing directly
 // If sessionId is not provided, a new session will be created for the project
 export async function executePromptInSession(
-  sessionId: string | undefined,
+  parentSessionId: string | undefined,
   projectId: string | undefined,
   prompt: string,
   cronJobName?: string,
@@ -180,15 +180,15 @@ export async function executePromptInSession(
   // Find or create parent session
   let parentSession: Session | undefined
 
-  if (sessionId) {
-    parentSession = sessions.get(sessionId)
+  if (parentSessionId) {
+    parentSession = sessions.get(parentSessionId)
   }
 
   // If no session found by sessionId, try to find one by projectId or create new
   if (!parentSession && projectId) {
-    // Try to find an existing session for this project
+    // Only reuse existing cron parent sessions, not user sessions
     for (const s of sessions.values()) {
-      if (s.projectId === projectId) {
+      if (s.projectId === projectId && s.sessionId.startsWith('cron-parent-')) {
         parentSession = s
         break
       }
