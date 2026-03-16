@@ -6,6 +6,7 @@ struct ProjectListView: View {
     @State private var projects: [Project] = []
     @State private var cronJobs: [CronJob] = []
     @State private var isLoading = false
+    @State private var cardRefreshID = UUID()
 
     /// Cron jobs grouped by projectId for quick lookup
     private var cronJobsByProject: [String: [CronJob]] {
@@ -17,11 +18,11 @@ struct ProjectListView: View {
         List(selection: $selectedProject) {
             // Dashboard cards
             Section {
-                SoulCardView()
+                SoulCardView(refreshID: cardRefreshID)
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                CronCardView()
+                CronCardView(refreshID: cardRefreshID)
                     .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -92,6 +93,7 @@ struct ProjectListView: View {
 
     private func fetchAll() async {
         isLoading = true
+        cardRefreshID = UUID()
         async let projectsTask: () = fetchProjects()
         async let cronTask: () = fetchCronJobs()
         _ = await (projectsTask, cronTask)

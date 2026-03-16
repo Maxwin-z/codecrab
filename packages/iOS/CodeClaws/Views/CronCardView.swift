@@ -24,6 +24,7 @@ struct CronSummary: Codable {
 }
 
 struct CronCardView: View {
+    var refreshID = UUID()
     @State private var summary: CronSummary?
     @State private var showCronPage = false
 
@@ -37,7 +38,7 @@ struct CronCardView: View {
         .navigationDestination(isPresented: $showCronPage) {
             CronPageView()
         }
-        .task {
+        .task(id: refreshID) {
             await fetchSummary()
         }
     }

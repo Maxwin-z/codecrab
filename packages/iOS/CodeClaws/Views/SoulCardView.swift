@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SoulCardView: View {
+    var refreshID = UUID()
     @State private var soul: SoulDocument?
     @State private var status: SoulStatus?
     @State private var recentEvolution: [EvolutionEntry] = []
@@ -16,7 +17,7 @@ struct SoulCardView: View {
         .navigationDestination(isPresented: $showSoulPage) {
             SoulPageView()
         }
-        .task {
+        .task(id: refreshID) {
             await fetchSoulData()
         }
     }
