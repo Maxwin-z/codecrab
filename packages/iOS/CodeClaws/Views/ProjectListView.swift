@@ -17,14 +17,24 @@ struct ProjectListView: View {
         List(selection: $selectedProject) {
             // Dashboard cards
             Section {
-                SoulCardView()
+                if UIDevice.current.userInterfaceIdiom == .pad {
+                    HStack(alignment: .top, spacing: 8) {
+                        SoulCardView()
+                        CronCardView()
+                    }
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                CronCardView()
-                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                } else {
+                    SoulCardView()
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    CronCardView()
+                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
             }
 
             // Project list

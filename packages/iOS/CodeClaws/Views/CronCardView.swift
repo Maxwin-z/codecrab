@@ -25,14 +25,18 @@ struct CronSummary: Codable {
 
 struct CronCardView: View {
     @State private var summary: CronSummary?
+    @State private var showCronPage = false
 
     var body: some View {
-        NavigationLink {
-            CronPageView()
+        Button {
+            showCronPage = true
         } label: {
             cardContent
         }
         .buttonStyle(.plain)
+        .navigationDestination(isPresented: $showCronPage) {
+            CronPageView()
+        }
         .task {
             await fetchSummary()
         }
