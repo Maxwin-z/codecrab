@@ -15,10 +15,14 @@ struct ProjectListView: View {
 
     var body: some View {
         List(selection: $selectedProject) {
-            // SOUL dashboard card
+            // Dashboard cards
             Section {
                 SoulCardView()
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                CronCardView()
+                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }

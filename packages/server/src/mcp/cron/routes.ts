@@ -75,9 +75,42 @@ cronRouter.get('/jobs', (_req, res) => {
   const projectId = _req.query.projectId as string | undefined
   const status = _req.query.status as string | undefined
   const limit = _req.query.limit ? parseInt(_req.query.limit as string, 10) : undefined
+  const includeDeprecated = _req.query.includeDeprecated === 'true'
 
-  const jobs = listJobs({ projectId, status, limit })
+  const jobs = listJobs({ projectId, status, limit, includeDeprecated })
   res.json(jobs)
+})
+
+// GET /api/cron/summary — dashboard summary (active count + next job)
+cronRouter.get('/summary', (_req, res) => {
+  // Include deprecated so we can show accurate total and history counts
+  const allJobs = listJobs({ includeDeprecated: true })
+  const nonDeprecated = allJobs.filter((j) => j.status !== 'deprecated')
+
+  const activeJobs = nonDeprecated.filter((j) => j.status === 'pending' || j.status === 'running')
+  const disabledJobs = nonDeprecated.filter((j) => j.status === 'disabled')
+  const failedJobs = nonDeprecated.filter((j) => j.status === 'failed')
+  const completedJobs = nonDeprecated.filter((j) => j.status === 'completed')
+  const deprecatedJobs = allJobs.filter((j) => j.status === 'deprecated')
+
+  // Find next upcoming job (already sorted by nextRunAt from listJobs)
+  const nextJob = activeJobs.find((j) => j.nextRunAt) || null
+
+  res.json({
+    totalActive: activeJobs.length,
+    totalAll: allJobs.length,
+    statusCounts: {
+      pending: activeJobs.filter((j) => j.status === 'pending').length,
+      running: activeJobs.filter((j) => j.status === 'running').length,
+      disabled: disabledJobs.length,
+      failed: failedJobs.length,
+      completed: completedJobs.length,
+      deprecated: deprecatedJobs.length,
+    },
+    nextJob: nextJob
+      ? { id: nextJob.id, name: nextJob.name, nextRunAt: nextJob.nextRunAt, status: nextJob.status }
+      : null,
+  })
 })
 
 // GET /api/cron/health — health check

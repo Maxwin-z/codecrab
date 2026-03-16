@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ProjectList } from '@/components/ProjectList'
 import { Dashboard } from '@/components/Dashboard'
 import { useSoul } from '@/hooks/useSoul'
+import { useCronSummary } from '@/hooks/useCron'
 import type { Project } from '@codeclaws/shared'
 
 interface HomePageProps {
@@ -14,6 +15,7 @@ interface HomePageProps {
 export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
   const navigate = useNavigate()
   const { soul, status, recentEvolution, loading: soulLoading } = useSoul(onUnauthorized)
+  const { summary: cronSummary, loading: cronLoading } = useCronSummary(onUnauthorized)
 
   const handleSelectProject = (project: Project) => {
     navigate(`/chat?project=${encodeURIComponent(project.id)}`)
@@ -34,7 +36,8 @@ export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
         soul={soul}
         soulStatus={status}
         recentEvolution={recentEvolution}
-        loading={soulLoading}
+        cronSummary={cronSummary}
+        loading={soulLoading && cronLoading}
       />
 
       {/* Projects section */}

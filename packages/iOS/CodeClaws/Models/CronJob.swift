@@ -71,6 +71,7 @@ struct CronJob: Codable, Identifiable {
         case "completed": return "checkmark.circle.fill"
         case "failed": return "exclamationmark.triangle.fill"
         case "disabled": return "pause.circle.fill"
+        case "deprecated": return "trash"
         default: return "questionmark.circle"
         }
     }
@@ -82,6 +83,7 @@ struct CronJob: Codable, Identifiable {
         case "completed": return "green"
         case "failed": return "red"
         case "disabled": return "gray"
+        case "deprecated": return "gray"
         default: return "gray"
         }
     }
