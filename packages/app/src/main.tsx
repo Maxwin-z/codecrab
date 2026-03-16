@@ -8,6 +8,7 @@ import { CreateProjectPage } from '@/components/CreateProjectPage'
 import { LoginPage } from '@/components/LoginPage'
 import { ChatPage } from '@/components/ChatPage'
 import { DebugPage } from '@/components/DebugPage'
+import { SoulPage } from '@/components/SoulPage'
 import { WebSocketProvider } from '@/hooks/WebSocketContext'
 import { checkAuthStatus, authFetch, clearToken } from '@/lib/auth'
 import './index.css'
@@ -122,6 +123,11 @@ function AppRoutes() {
       <Route path="/chat" element={
         setupStatus === 'initialized'
           ? <ChatPage onUnauthorized={handleUnauthorized} />
+          : <Navigate to="/setup" replace />
+      } />
+      <Route path="/soul" element={
+        setupStatus === 'initialized'
+          ? <SoulPage onUnauthorized={handleUnauthorized} />
           : <Navigate to="/setup" replace />
       } />
       <Route path="/debug" element={<DebugPage />} />

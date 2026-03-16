@@ -16,6 +16,7 @@ import sessionsRouter from './api/sessions.js'
 import { chromeRouter } from './mcp/chrome/index.js'
 import { cronRouter, initCronSystem } from './mcp/cron/index.js'
 import { pushRouter, initPush } from './mcp/push/index.js'
+import soulRouter from './api/soul.js'
 import { getAvailableMcps } from './mcp/index.js'
 import debugRouter from './api/debug.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
@@ -77,6 +78,7 @@ app.use('/api/sessions', sessionsRouter)
 app.use('/api/chrome', chromeRouter)
 app.use('/api/cron', cronRouter)
 app.use('/api/push', pushRouter)
+app.use('/api/soul', soulRouter)
 
 // MCP registry — list available MCP servers
 app.get('/api/mcps', (_req, res) => {
