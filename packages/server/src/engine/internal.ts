@@ -10,6 +10,9 @@ import {
   buildQueryOptions,
   buildQueryEnv,
   removeAllClientStates,
+  C,
+  logSdkMessage,
+  createStreamLogState,
 } from './claude.js'
 
 export interface InternalQueryOpts {
@@ -47,6 +50,10 @@ export interface InternalQueryResult {
  */
 export async function executeInternalQuery(opts: InternalQueryOpts): Promise<InternalQueryResult> {
   const startTime = Date.now()
+  const isSoul = opts.projectId === '__soul__'
+  const tag = isSoul
+    ? `${C.bgMagenta}${C.bold} 🧬 SOUL ${C.reset}`
+    : `${C.dim}[InternalQuery]${C.reset}`
 
   // Get model configuration
   const modelConfig = getDefaultModelConfig()
@@ -82,7 +89,28 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
   options.abortController = abortController
 
   try {
-    console.log(`[InternalQuery] Starting query for project ${opts.projectId}`)
+    // ── Log: Query Start ──────────────────────────────────────
+    if (isSoul) {
+      console.log('')
+      console.log(`${tag} ${C.magenta}${'━'.repeat(60)}${C.reset}`)
+      console.log(`${tag} ${C.magenta}${C.bold}SOUL Evolution Started${C.reset}`)
+      console.log(`${tag} ${C.magenta}${'━'.repeat(60)}${C.reset}`)
+      console.log(`${tag} ${C.dim}cwd:${C.reset}       ${opts.cwd}`)
+      console.log(`${tag} ${C.dim}model:${C.reset}     ${modelConfig.id}`)
+      console.log(`${tag} ${C.dim}maxTurns:${C.reset}  ${options.maxTurns}`)
+      console.log(`${tag}`)
+      console.log(`${tag} ${C.cyan}${C.bold}📤 Prompt Sent to Agent:${C.reset}`)
+      console.log(`${tag} ${C.cyan}${'─'.repeat(50)}${C.reset}`)
+      const promptLines = opts.prompt.split('\n')
+      for (const line of promptLines) {
+        console.log(`${tag}   ${C.cyan}${line}${C.reset}`)
+      }
+      console.log(`${tag} ${C.cyan}${'─'.repeat(50)}${C.reset}`)
+      console.log(`${tag}`)
+      console.log(`${tag} ${C.yellow}${C.bold}⚙️  Agent SDK Events:${C.reset}`)
+    } else {
+      console.log(`[InternalQuery] Starting query for project ${opts.projectId}`)
+    }
 
     const stream = sdkQuery({ prompt: opts.prompt, options: options as any })
 
@@ -90,12 +118,22 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
     let costUsd: number | undefined
     let durationMs: number | undefined
 
+    // Use stream log state for SOUL to get detailed event logging
+    const streamLog = isSoul ? createStreamLogState() : null
+
     for await (const message of stream) {
+      // Log every SDK event for SOUL
+      if (isSoul && streamLog) {
+        logSdkMessage(tag, message, streamLog)
+      }
+
       // Capture session ID from init
       if (message.type === 'system' && 'subtype' in message && (message as any).subtype === 'init') {
         const newSessionId = (message as any).session_id
         clientState.sessionId = newSessionId
-        console.log(`[InternalQuery] Session initialized: ${newSessionId}`)
+        if (!isSoul) {
+          console.log(`[InternalQuery] Session initialized: ${newSessionId}`)
+        }
       }
 
       // Accumulate text output
@@ -112,7 +150,7 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
 
       // Capture result
       if (message.type === 'result') {
-        costUsd = (message as any).cost_usd
+        costUsd = (message as any).cost_usd ?? (message as any).total_cost_usd
         durationMs = (message as any).duration_ms
         try { stream.close() } catch { /* already closing */ }
         break
@@ -120,7 +158,32 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
     }
 
     const elapsed = Date.now() - startTime
-    console.log(`[InternalQuery] Completed for ${opts.projectId} in ${elapsed}ms (cost: $${costUsd?.toFixed(4) || '?'})`)
+
+    // ── Log: Query Complete ─────────────────────────────────
+    if (isSoul) {
+      console.log(`${tag}`)
+      console.log(`${tag} ${C.green}${C.bold}📥 Evolution Result:${C.reset}`)
+      console.log(`${tag} ${C.green}${'─'.repeat(50)}${C.reset}`)
+      if (output) {
+        const outputLines = output.split('\n')
+        for (const line of outputLines) {
+          console.log(`${tag}   ${C.green}${line}${C.reset}`)
+        }
+      } else {
+        console.log(`${tag}   ${C.dim}(no text output)${C.reset}`)
+      }
+      console.log(`${tag} ${C.green}${'─'.repeat(50)}${C.reset}`)
+      console.log(`${tag}`)
+      console.log(`${tag} ${C.bold}📊 Summary:${C.reset}`)
+      console.log(`${tag}   ${C.dim}status:${C.reset}    ${C.green}${C.bold}✅ success${C.reset}`)
+      console.log(`${tag}   ${C.dim}cost:${C.reset}      ${C.bold}$${costUsd?.toFixed(4) || '?'}${C.reset}`)
+      console.log(`${tag}   ${C.dim}duration:${C.reset}  ${C.bold}${elapsed}ms${C.reset}`)
+      console.log(`${tag}   ${C.dim}sdk time:${C.reset}  ${durationMs ? `${durationMs}ms` : '?'}`)
+      console.log(`${tag} ${C.magenta}${'━'.repeat(60)}${C.reset}`)
+      console.log('')
+    } else {
+      console.log(`[InternalQuery] Completed for ${opts.projectId} in ${elapsed}ms (cost: $${costUsd?.toFixed(4) || '?'})`)
+    }
 
     return {
       success: true,
@@ -130,7 +193,19 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
     }
   } catch (err: any) {
     const elapsed = Date.now() - startTime
-    console.error(`[InternalQuery] Failed for ${opts.projectId} after ${elapsed}ms:`, err.message)
+
+    // ── Log: Query Failed ───────────────────────────────────
+    if (isSoul) {
+      console.log(`${tag}`)
+      console.log(`${tag} ${C.red}${C.bold}❌ Evolution Failed:${C.reset}`)
+      console.log(`${tag}   ${C.red}${err.message}${C.reset}`)
+      console.log(`${tag}   ${C.dim}duration:${C.reset}  ${elapsed}ms`)
+      console.log(`${tag} ${C.magenta}${'━'.repeat(60)}${C.reset}`)
+      console.log('')
+    } else {
+      console.error(`[InternalQuery] Failed for ${opts.projectId} after ${elapsed}ms:`, err.message)
+    }
+
     return {
       success: false,
       output: '',

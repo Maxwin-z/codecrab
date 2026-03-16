@@ -64,11 +64,18 @@ function triggerSoulEvolutionAsync(userMessage: string, assistantResponse: strin
   if (!userMessage.trim() || !assistantResponse.trim()) return
   if (userMessage.length < 10) return
 
+  // Strip [SUMMARY: ...] and [SUGGESTIONS: ...] tags — these are prompt-forced
+  // output markers, not meaningful conversation content for SOUL analysis
+  const cleaned = assistantResponse
+    .replace(/\n?\[SUMMARY:\s*.+?\]/g, '')
+    .replace(/\n?\[SUGGESTIONS:\s*.+?\]/g, '')
+    .trimEnd()
+
   // Truncate long responses to keep the evolution prompt manageable
   const maxLen = 2000
-  const truncated = assistantResponse.length > maxLen
-    ? assistantResponse.slice(0, maxLen) + '\n...(truncated)'
-    : assistantResponse
+  const truncated = cleaned.length > maxLen
+    ? cleaned.slice(0, maxLen) + '\n...(truncated)'
+    : cleaned
 
   triggerSoulEvolution([{
     timestamp: new Date().toISOString(),

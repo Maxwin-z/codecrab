@@ -5,6 +5,9 @@
 
 import { executeInternalQuery } from '../engine/internal.js'
 import { getSoulProjectDir, SOUL_PROJECT_ID, ensureSoulProject } from './project.js'
+import { C } from '../engine/claude.js'
+
+const TAG = `${C.bgMagenta}${C.bold} 🧬 SOUL ${C.reset}`
 
 /** Conversation data extracted from a user query turn */
 export interface ConversationTurn {
@@ -35,14 +38,41 @@ export async function triggerSoulEvolution(conversations: ConversationTurn[]): P
   try {
     ensureSoulProject()
   } catch (err) {
-    console.error('[SoulAgent] Failed to ensure SOUL project:', err)
+    console.error(`${TAG} ${C.red}Failed to ensure SOUL project:${C.reset}`, err)
     return { triggered: false, error: 'Failed to initialize SOUL project' }
   }
 
   const prompt = buildEvolutionPrompt(conversations)
   const cwd = getSoulProjectDir()
 
-  console.log(`[SoulAgent] Triggering evolution with ${conversations.length} conversation(s)`)
+  // ── Log: Conversation Input ───────────────────────────────
+  console.log('')
+  console.log(`${TAG} ${C.blue}${C.bold}📨 Triggering evolution with ${conversations.length} conversation(s)${C.reset}`)
+  for (let i = 0; i < conversations.length; i++) {
+    const c = conversations[i]
+    console.log(`${TAG}`)
+    console.log(`${TAG} ${C.blue}Conversation ${i + 1}${C.reset} ${C.dim}(${c.timestamp})${C.reset}`)
+    // User message preview
+    const userLines = c.userMessage.split('\n')
+    const userPreview = userLines.slice(0, 5)
+    console.log(`${TAG}   ${C.cyan}User:${C.reset}`)
+    for (const line of userPreview) {
+      console.log(`${TAG}     ${C.dim}${line.slice(0, 200)}${C.reset}`)
+    }
+    if (userLines.length > 5) {
+      console.log(`${TAG}     ${C.dim}…(${userLines.length - 5} more lines, ${c.userMessage.length} chars)${C.reset}`)
+    }
+    // Assistant response preview
+    const assistLines = c.assistantResponse.split('\n')
+    const assistPreview = assistLines.slice(0, 5)
+    console.log(`${TAG}   ${C.green}Assistant:${C.reset}`)
+    for (const line of assistPreview) {
+      console.log(`${TAG}     ${C.dim}${line.slice(0, 200)}${C.reset}`)
+    }
+    if (assistLines.length > 5) {
+      console.log(`${TAG}     ${C.dim}…(${assistLines.length - 5} more lines, ${c.assistantResponse.length} chars)${C.reset}`)
+    }
+  }
 
   const result = await executeInternalQuery({
     projectId: SOUL_PROJECT_ID,
@@ -51,10 +81,8 @@ export async function triggerSoulEvolution(conversations: ConversationTurn[]): P
     maxTurns: 5, // Keep it short — read SOUL.json, maybe edit, done
   })
 
-  if (result.success) {
-    console.log(`[SoulAgent] Evolution completed: $${result.costUsd?.toFixed(4) || '?'} | ${result.durationMs}ms`)
-  } else {
-    console.error(`[SoulAgent] Evolution failed: ${result.error}`)
+  if (!result.success) {
+    console.error(`${TAG} ${C.red}${C.bold}Evolution failed: ${result.error}${C.reset}`)
   }
 
   return {

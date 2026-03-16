@@ -163,7 +163,7 @@ function logPrefix(projectId?: string): string {
 }
 
 // ── ANSI colors for terminal output ──────────────────────────
-const C = {
+export const C = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
   dim: '\x1b[2m',
@@ -181,7 +181,7 @@ const C = {
 
 // Formatted SDK message logger
 // Accumulates content_block_delta partials and prints condensed output
-interface StreamLogState {
+export interface StreamLogState {
   /** Accumulating input_json_delta partials per content block index */
   inputJsonAccum: Map<number, string>
   /** Track current tool being streamed */
@@ -192,7 +192,7 @@ interface StreamLogState {
   thinkingAccum: string
 }
 
-function createStreamLogState(): StreamLogState {
+export function createStreamLogState(): StreamLogState {
   return {
     inputJsonAccum: new Map(),
     textAccum: '',
@@ -200,7 +200,7 @@ function createStreamLogState(): StreamLogState {
   }
 }
 
-function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
+export function logSdkMessage(tag: string, msg: any, state: StreamLogState): void {
   const type = msg.type
 
   switch (type) {
