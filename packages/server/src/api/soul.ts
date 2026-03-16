@@ -1,27 +1,50 @@
-// SOUL API — Identity Store and evolution management
+// SOUL API — Read/write SOUL profile and trigger evolution
 //
 // Endpoints:
 //   GET    /api/soul           — Get current SOUL document
 //   PUT    /api/soul           — Update SOUL document manually
-//   POST   /api/soul/evolve    — Trigger SOUL evolution from recent conversations
+//   POST   /api/soul/evolve    — Trigger SOUL evolution via SoulAgent
 //   GET    /api/soul/log       — Get evolution history
-//   GET    /api/soul/status    — Get identity store status
+//   GET    /api/soul/status    — Get SOUL status
 //   GET    /api/soul/insights  — List insights
 //   GET    /api/soul/insights/:topic — Get a specific insight
 
 import { Router, type Router as RouterType } from 'express'
-import { IdentityStore } from '../identity/store.js'
-import { SoulPipeline } from '../pipeline/soul.js'
-import { PromptEvolution } from '../soul/evolution/prompt.js'
-import { getDefaultModelConfig } from '../engine/claude.js'
+import * as fs from 'fs'
+import * as path from 'path'
+import { ensureSoulProject, getSoulProjectDir } from '../soul/project.js'
+import { triggerSoulEvolution } from '../soul/agent.js'
+import type { SoulDocument, EvolutionEntry } from '../soul/types.js'
 
 const router: RouterType = Router()
-const store = new IdentityStore()
+
+function soulPath(): string {
+  return path.join(getSoulProjectDir(), 'SOUL.json')
+}
+
+function logPath(): string {
+  return path.join(getSoulProjectDir(), 'evolution-log.jsonl')
+}
+
+function insightsDir(): string {
+  return path.join(getSoulProjectDir(), 'insights')
+}
+
+function loadSoul(): SoulDocument {
+  ensureSoulProject()
+  const data = fs.readFileSync(soulPath(), 'utf-8')
+  return JSON.parse(data)
+}
+
+function saveSoul(soul: SoulDocument): void {
+  ensureSoulProject()
+  fs.writeFileSync(soulPath(), JSON.stringify(soul, null, 2), 'utf-8')
+}
 
 // GET /api/soul — current SOUL document
-router.get('/', async (_req, res) => {
+router.get('/', (_req, res) => {
   try {
-    const soul = await store.loadSoul()
+    const soul = loadSoul()
     res.json(soul)
   } catch (err) {
     res.status(500).json({ error: 'Failed to load SOUL', details: String(err) })
@@ -29,7 +52,7 @@ router.get('/', async (_req, res) => {
 })
 
 // PUT /api/soul — manual update
-router.put('/', async (req, res) => {
+router.put('/', (req, res) => {
   try {
     const soul = req.body
     if (!soul?.identity || !soul?.preferences || !soul?.meta) {
@@ -37,14 +60,14 @@ router.put('/', async (req, res) => {
       return
     }
     soul.meta.lastUpdated = new Date().toISOString()
-    await store.saveSoul(soul)
+    saveSoul(soul)
     res.json(soul)
   } catch (err) {
     res.status(500).json({ error: 'Failed to save SOUL', details: String(err) })
   }
 })
 
-// POST /api/soul/evolve — trigger evolution
+// POST /api/soul/evolve — trigger evolution via SoulAgent
 router.post('/evolve', async (req, res) => {
   try {
     const { conversations } = req.body
@@ -53,20 +76,14 @@ router.post('/evolve', async (req, res) => {
       return
     }
 
-    const apiKey = resolveApiKey()
-    if (!apiKey) {
-      res.status(500).json({ error: 'No API key configured for SOUL evolution' })
-      return
-    }
-
-    const strategy = new PromptEvolution({ apiKey })
-    const pipeline = new SoulPipeline({ strategy, store, apiKey })
-    const result = await pipeline.run({ conversations })
+    const result = await triggerSoulEvolution(conversations)
 
     res.json({
-      version: result.updatedSoul.meta.version,
-      changes: result.changes,
-      reasoning: result.reasoning,
+      triggered: result.triggered,
+      output: result.output,
+      costUsd: result.costUsd,
+      durationMs: result.durationMs,
+      error: result.error,
     })
   } catch (err) {
     console.error('[SoulAPI] Evolution failed:', err)
@@ -75,30 +92,73 @@ router.post('/evolve', async (req, res) => {
 })
 
 // GET /api/soul/log — evolution history
-router.get('/log', async (req, res) => {
+router.get('/log', (req, res) => {
   try {
+    ensureSoulProject()
     const limit = Number(req.query.limit) || 50
-    const log = await store.getEvolutionLog(limit)
-    res.json(log)
+    const content = fs.readFileSync(logPath(), 'utf-8').trim()
+    if (!content) {
+      res.json([])
+      return
+    }
+    const entries: EvolutionEntry[] = content
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        try { return JSON.parse(line) } catch { return null }
+      })
+      .filter(Boolean) as EvolutionEntry[]
+
+    // Return the most recent entries
+    res.json(entries.slice(-limit))
   } catch (err) {
     res.status(500).json({ error: 'Failed to load evolution log', details: String(err) })
   }
 })
 
-// GET /api/soul/status — identity store status
-router.get('/status', async (_req, res) => {
+// GET /api/soul/status — SOUL status
+router.get('/status', (_req, res) => {
   try {
-    const status = await store.getStatus()
-    res.json(status)
+    ensureSoulProject()
+    const soul = loadSoul()
+    const hasSoul = Boolean(soul.identity?.name)
+
+    // Count evolution log entries
+    let evolutionCount = 0
+    try {
+      const content = fs.readFileSync(logPath(), 'utf-8').trim()
+      if (content) {
+        evolutionCount = content.split('\n').filter(Boolean).length
+      }
+    } catch { /* empty log */ }
+
+    // Count insights
+    let insightCount = 0
+    try {
+      const files = fs.readdirSync(insightsDir())
+      insightCount = files.filter((f) => f.endsWith('.md')).length
+    } catch { /* no insights dir */ }
+
+    res.json({
+      hasSoul,
+      soulVersion: soul.meta?.version || 1,
+      evolutionCount,
+      insightCount,
+    })
   } catch (err) {
     res.status(500).json({ error: 'Failed to get status', details: String(err) })
   }
 })
 
 // GET /api/soul/insights — list all insights
-router.get('/insights', async (_req, res) => {
+router.get('/insights', (_req, res) => {
   try {
-    const topics = await store.listInsights()
+    ensureSoulProject()
+    const dir = insightsDir()
+    const files = fs.readdirSync(dir)
+    const topics = files
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.replace(/\.md$/, ''))
     res.json(topics)
   } catch (err) {
     res.status(500).json({ error: 'Failed to list insights', details: String(err) })
@@ -106,26 +166,19 @@ router.get('/insights', async (_req, res) => {
 })
 
 // GET /api/soul/insights/:topic — get specific insight
-router.get('/insights/:topic', async (req, res) => {
+router.get('/insights/:topic', (req, res) => {
   try {
-    const content = await store.loadInsight(req.params.topic)
-    if (!content) {
+    ensureSoulProject()
+    const filePath = path.join(insightsDir(), `${req.params.topic}.md`)
+    if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'Insight not found' })
       return
     }
+    const content = fs.readFileSync(filePath, 'utf-8')
     res.json({ topic: req.params.topic, content })
   } catch (err) {
     res.status(500).json({ error: 'Failed to load insight', details: String(err) })
   }
 })
-
-function resolveApiKey(): string | null {
-  // Try to get API key from models.json default model config
-  const modelConfig = getDefaultModelConfig()
-  if (modelConfig?.apiKey) return modelConfig.apiKey
-
-  // Fall back to environment variable
-  return process.env.ANTHROPIC_API_KEY || null
-}
 
 export default router

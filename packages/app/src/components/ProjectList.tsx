@@ -49,7 +49,8 @@ export function ProjectList({ onSelect, onUnauthorized }: ProjectListProps) {
       }
       if (!res.ok) throw new Error('Failed to fetch projects')
       const data = await res.json()
-      setProjects(data)
+      // Filter out internal projects (e.g. __soul__)
+      setProjects(data.filter((p: Project) => !p.id.startsWith('__')))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {

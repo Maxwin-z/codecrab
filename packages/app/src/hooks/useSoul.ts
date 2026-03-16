@@ -29,7 +29,6 @@ export interface SoulDocument {
 
 export interface EvolutionEntry {
   timestamp: string
-  strategyUsed: string
   changes: { path: string; before: string; after: string }[]
   reasoning: string
 }

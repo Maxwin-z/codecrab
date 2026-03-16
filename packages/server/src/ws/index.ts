@@ -35,6 +35,7 @@ import {
 } from '../engine/claude.js'
 import { QueryQueue } from '../engine/query-queue.js'
 import { sendQueryCompletionPush } from '../mcp/push/index.js'
+import { triggerSoulEvolution } from '../soul/agent.js'
 import type { QueuedQuery, QueryResult, QueryTimerState } from '../engine/query-queue.js'
 
 // Export for API use
@@ -56,6 +57,27 @@ const queryQueue = new QueryQueue((event) => {
   })
 })
 export { queryQueue }
+
+// SOUL evolution — fire-and-forget async trigger after user queries
+function triggerSoulEvolutionAsync(userMessage: string, assistantResponse: string): void {
+  // Skip trivial interactions
+  if (!userMessage.trim() || !assistantResponse.trim()) return
+  if (userMessage.length < 10) return
+
+  // Truncate long responses to keep the evolution prompt manageable
+  const maxLen = 2000
+  const truncated = assistantResponse.length > maxLen
+    ? assistantResponse.slice(0, maxLen) + '\n...(truncated)'
+    : assistantResponse
+
+  triggerSoulEvolution([{
+    timestamp: new Date().toISOString(),
+    userMessage,
+    assistantResponse: truncated,
+  }]).catch((err) => {
+    console.error('[ws] SOUL evolution trigger failed:', err)
+  })
+}
 
 // Activity heartbeat — throttle to one broadcast per 30s per query
 const HEARTBEAT_THROTTLE_MS = 30_000
@@ -1550,6 +1572,12 @@ async function executeUserQuery(
       })
 
       finalText = assistantMsg.content
+    }
+
+    // Trigger SOUL evolution asynchronously (fire-and-forget)
+    // Skip for internal projects (e.g. __soul__ itself) to avoid infinite loops
+    if (projectId && !projectId.startsWith('__')) {
+      triggerSoulEvolutionAsync(prompt, finalText)
     }
 
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }

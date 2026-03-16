@@ -24,17 +24,8 @@ export interface SoulDocument {
   }
 }
 
-export interface EvolutionEvidence {
-  source: 'conversation' | 'feedback' | 'behavior'
-  timestamp: string
-  content: string
-  signal: string
-  confidence: number  // 0-1
-}
-
 export interface EvolutionEntry {
   timestamp: string
-  strategyUsed: string
   changes: SoulDiff[]
   reasoning: string
 }
@@ -43,37 +34,4 @@ export interface SoulDiff {
   path: string       // e.g. "preferences.communicationStyle"
   before: string
   after: string
-}
-
-export interface ConversationChunk {
-  timestamp: string
-  userMessage: string
-  assistantResponse: string
-  feedbackSignals?: string[]
-}
-
-export function createDefaultSoul(): SoulDocument {
-  return {
-    identity: {
-      name: '',
-      role: '',
-      expertise: [],
-    },
-    preferences: {
-      communicationStyle: '简洁直接',
-      decisionStyle: '数据驱动',
-      riskTolerance: '适中',
-    },
-    values: {},
-    context: {
-      activeGoals: [],
-      domain: '',
-      constraints: [],
-    },
-    meta: {
-      version: 1,
-      lastUpdated: new Date().toISOString(),
-      evolutionLog: [],
-    },
-  }
 }

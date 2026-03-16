@@ -231,7 +231,6 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
                       <p className="text-sm">{entry.reasoning}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-muted-foreground">{timeAgo(entry.timestamp)}</span>
-                        <span className="text-xs text-muted-foreground/50">{entry.strategyUsed}</span>
                       </div>
                       {entry.changes.length > 0 && (
                         <div className="mt-2 flex flex-col gap-1">

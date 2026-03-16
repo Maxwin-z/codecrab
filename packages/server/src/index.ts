@@ -17,6 +17,7 @@ import { chromeRouter } from './mcp/chrome/index.js'
 import { cronRouter, initCronSystem } from './mcp/cron/index.js'
 import { pushRouter, initPush } from './mcp/push/index.js'
 import soulRouter from './api/soul.js'
+import { ensureSoulProject } from './soul/project.js'
 import { getAvailableMcps } from './mcp/index.js'
 import debugRouter from './api/debug.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
@@ -95,6 +96,14 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 ensureToken().then(() => {
   // Initialize push notifications (APNs)
   initPush()
+
+  // Initialize SOUL project (creates directory, CLAUDE.md, registers in projects.json)
+  try {
+    ensureSoulProject()
+    console.log('[server] SOUL project initialized')
+  } catch (err) {
+    console.error('[server] Failed to initialize SOUL project:', err)
+  }
 
   // Setup WebSocket server
   const wss = setupWebSocket(server)

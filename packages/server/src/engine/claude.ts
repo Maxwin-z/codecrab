@@ -1010,7 +1010,7 @@ export function buildQueryOptions(
 
 /** Build per-query env vars from model config.
  *  Extracted so probeSdkInit can reuse it without duplicating logic. */
-function buildQueryEnv(modelConfig: ModelConfig): Record<string, string | undefined> {
+export function buildQueryEnv(modelConfig: ModelConfig): Record<string, string | undefined> {
   const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
 
   const queryEnv: Record<string, string | undefined> = {
