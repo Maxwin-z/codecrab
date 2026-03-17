@@ -250,6 +250,9 @@ struct ChatView: View {
                 .background(Color.green.opacity(0.2))
                 .cornerRadius(4)
                 .padding(.horizontal)
+                .onTapGesture {
+                    wsService.latestSummary = nil
+                }
         }
 
         // Question Form
@@ -369,6 +372,7 @@ struct ChatView: View {
 
     private func handleSend(text: String, images: [ImageAttachment]?, mcps: [String]?) {
         isNearBottom = true
+        wsService.latestSummary = nil
         if text.hasPrefix("/") {
             wsService.sendCommand(text)
         } else {
