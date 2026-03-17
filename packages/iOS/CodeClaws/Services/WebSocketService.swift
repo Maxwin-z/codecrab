@@ -724,10 +724,13 @@ class WebSocketService: ObservableObject {
                 }
             }
 
+            // Strip inline metadata tags from assistant messages (defensive cleanup)
+            let cleanContent = (role == "assistant") ? cleanStreamingText(content) : content
+
             let msg = ChatMessage(
                 id: id,
                 role: role,
-                content: content,
+                content: cleanContent,
                 toolCalls: toolCalls,
                 costUsd: costUsd,
                 durationMs: durationMs,
@@ -853,34 +856,43 @@ class WebSocketService: ObservableObject {
         return SdkEvent(ts: ts, type: eventType, detail: detail, data: eventData)
     }
 
-    /// Strip trailing [SUMMARY: ...] / [SUGGESTIONS: ...] tags from streaming text
+    /// Strip [SUMMARY: ...] / [SUGGESTIONS: ...] tags from streaming text.
+    /// Handles complete tags anywhere in the text, and partial (still-streaming) tags at the end.
     private func getDisplayStreamingText(_ text: String) -> String {
         if text.isEmpty { return text }
 
+        // First strip any complete tags anywhere in the text
+        var result = text
+            .replacingOccurrences(of: "\\n?\\[SUMMARY:[\\s\\S]*?\\]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[\\s\\S]*?\\]", with: "", options: .regularExpression)
+
+        // Then handle incomplete (still-streaming) tags at the end
         let hiddenPrefixes = ["\n[SUMMARY:", "\n[SUGGESTIONS:"]
 
         for prefix in hiddenPrefixes {
-            if let range = text.range(of: prefix, options: .backwards) {
-                return String(text[..<range.lowerBound])
+            if let range = result.range(of: prefix, options: .backwards) {
+                return String(result[..<range.lowerBound])
             }
         }
 
+        // Handle partial prefix at the very end (e.g. "\n[SUM")
         for prefix in hiddenPrefixes {
             for len in (2..<prefix.count).reversed() {
                 let partial = String(prefix.prefix(len))
-                if text.hasSuffix(partial) {
-                    return String(text.prefix(text.count - len))
+                if result.hasSuffix(partial) {
+                    return String(result.prefix(result.count - len))
                 }
             }
         }
 
-        return text
+        return result
     }
 
     private func cleanStreamingText(_ text: String) -> String {
         return text
-            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:.*?\\]\\s*$", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\n?\\[SUMMARY:.*?\\]\\s*$", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[\\s\\S]*?\\]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\n?\\[SUMMARY:[\\s\\S]*?\\]", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func sendWebSocketMessage(_ dict: [String: Any]) {
