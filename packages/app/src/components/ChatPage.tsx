@@ -299,18 +299,21 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   }, [project])
 
   // Fetch sessions for session list view
+  // Use ws.fetchSessions directly (stable useCallback ref) to avoid
+  // re-creating this callback on every render due to `ws` object instability.
+  const wsFetchSessions = ws.fetchSessions
   const fetchSessions = useCallback(async (showLoading = true) => {
     if (!project) return
     if (showLoading) setSessionsLoading(true)
     try {
-      const data = await ws.fetchSessions(project.id)
+      const data = await wsFetchSessions(project.id)
       setSessions(data)
     } catch {
       // ignore
     } finally {
       if (showLoading) setSessionsLoading(false)
     }
-  }, [project, ws])
+  }, [project, wsFetchSessions])
 
   // Fetch on project load
   useEffect(() => {

@@ -150,6 +150,21 @@ export function MessageList({ messages, streamingText, streamingThinking, isRunn
   )
 }
 
+// ─── Streaming Dots (matches iOS StreamingDotsView) ─────────────────────
+
+function StreamingDots() {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="streaming-dots inline-flex items-center gap-[3px]">
+        <span className="w-1 h-1 rounded-full bg-current dot" />
+        <span className="w-1 h-1 rounded-full bg-current dot" />
+        <span className="w-1 h-1 rounded-full bg-current dot" />
+      </span>
+      <span className="text-[10px] text-muted-foreground">Generating…</span>
+    </span>
+  )
+}
+
 // ─── Agent Response View (with message/debug toggle) ────────────────────
 
 const MESSAGE_TYPES = new Set(['thinking', 'text', 'tool_use', 'tool_result', 'cron_task_completed', 'task_started', 'task_progress', 'task_notification'])
@@ -259,8 +274,8 @@ function AgentResponseView({
         })
       )}
 
-      {/* Toggle button */}
-      <div className="flex justify-end">
+      {/* Toggle + streaming indicator */}
+      <div className="flex items-center gap-2">
         <button
           onClick={() => setShowDebug(!showDebug)}
           className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full ${
@@ -272,6 +287,7 @@ function AgentResponseView({
           <span>{showDebug ? '🐛' : '💬'}</span>
           <span>{showDebug ? 'Debug' : 'Message'}</span>
         </button>
+        {!showDebug && isStreaming && <StreamingDots />}
       </div>
     </div>
   )
