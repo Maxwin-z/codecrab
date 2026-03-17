@@ -1,4 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
@@ -219,22 +224,42 @@ struct ModelEditView: View {
     @State private var provider: String = "anthropic"
     @State private var apiKey: String = ""
     @State private var baseUrl: String = ""
-    @State private var configDir: String = ""
-    
+
     @State private var testResult: String = ""
     @State private var isTesting = false
     @State private var isSaving = false
-    
+
+    private let maskedKey: String?
+
     let providers = ["anthropic", "openai", "google", "custom"]
-    
+
+    private var apiKeyPlaceholder: String {
+        if maskedKey != nil {
+            return "Enter new key to replace"
+        }
+        switch provider {
+        case "anthropic": return "sk-ant-..."
+        case "openai": return "sk-..."
+        case "google": return "AIza..."
+        default: return "API Key"
+        }
+    }
+
+    private var maskedKeyDisplay: String? {
+        guard let key = maskedKey, !key.isEmpty else { return nil }
+        let prefix = String(key.prefix(6))
+        return prefix + String(repeating: "•", count: 8)
+    }
+
     init(model: ModelConfig?, isNew: Bool, onSave: @escaping () -> Void) {
         self.modelId = model?.id
         self.isNew = isNew
         self.onSave = onSave
+        let key = model?.apiKey ?? ""
+        self.maskedKey = key.isEmpty ? nil : key
         _name = State(initialValue: model?.name ?? "")
         _provider = State(initialValue: model?.provider ?? "anthropic")
         _baseUrl = State(initialValue: model?.baseUrl ?? "")
-        _configDir = State(initialValue: model?.configDir ?? "")
     }
     
     var body: some View {
@@ -247,14 +272,34 @@ struct ModelEditView: View {
                     }
                 }
                 
-                if provider != "custom" && configDir.isEmpty {
-                    SecureField("API Key (leave blank to keep unchanged)", text: $apiKey)
+                VStack(alignment: .leading, spacing: 6) {
+                    if let masked = maskedKeyDisplay, apiKey.isEmpty {
+                        Text(masked)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                    HStack(spacing: 8) {
+                        SecureField(apiKeyPlaceholder, text: $apiKey)
+                        Button {
+                            #if canImport(UIKit)
+                            if let str = UIPasteboard.general.string {
+                                apiKey = str
+                            }
+                            #elseif canImport(AppKit)
+                            if let str = NSPasteboard.general.string(forType: .string) {
+                                apiKey = str
+                            }
+                            #endif
+                        } label: {
+                            Image(systemName: "doc.on.clipboard")
+                                .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
-                
+
                 if provider == "custom" {
                     TextField("Base URL", text: $baseUrl)
-                        .autocapitalization(.none)
-                    TextField("Config Directory (for CLI)", text: $configDir)
                         .autocapitalization(.none)
                 }
             }
@@ -296,11 +341,9 @@ struct ModelEditView: View {
         isTesting = true
         Task {
             do {
-                struct TestResp: Codable { let ok: Bool; let error: String?; let skipped: Bool? }
+                struct TestResp: Codable { let ok: Bool; let error: String? }
                 let resp: TestResp = try await APIClient.shared.fetch(path: "/api/setup/models/\(id)/test", method: "POST")
-                if resp.skipped == true {
-                    testResult = "⏭️ Skipped (CLI managed)"
-                } else if resp.ok {
+                if resp.ok {
                     testResult = "✅ Success"
                 } else {
                     testResult = "❌ \(resp.error ?? "Unknown error")"
@@ -322,7 +365,6 @@ struct ModelEditView: View {
                 ]
                 if !apiKey.isEmpty { body["apiKey"] = apiKey }
                 if !baseUrl.isEmpty { body["baseUrl"] = baseUrl }
-                if !configDir.isEmpty { body["configDir"] = configDir }
                 
                 if isNew {
                     try await APIClient.shared.request(path: "/api/setup/models", method: "POST", body: body)
