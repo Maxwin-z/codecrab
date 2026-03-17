@@ -7,8 +7,9 @@ import { InputBar, type InputBarHandle } from './InputBar'
 import { QueryQueueBar } from './QueryQueueBar'
 import { UserQuestionForm } from './UserQuestionForm'
 import { ExecSessionSheet } from './ExecSessionSheet'
+import { FileBrowser } from './FileBrowser'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Loader2, Code, ArrowDown, Plus, History, List } from 'lucide-react'
+import { ArrowLeft, Loader2, Code, ArrowDown, Plus, History, FolderOpen } from 'lucide-react'
 import { authFetch } from '@/lib/auth'
 import type { ImageAttachment, McpInfo, SessionInfo } from '@codeclaws/shared'
 
@@ -121,6 +122,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
   const [execSessionId, setExecSessionId] = useState<string | null>(null)
   const [showSessionList, setShowSessionList] = useState(false)
+  const [showFileBrowser, setShowFileBrowser] = useState(false)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessionsNow, setSessionsNow] = useState(Date.now())
@@ -374,6 +376,16 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     )
   }
 
+  // --- File browser view ---
+  if (showFileBrowser && project) {
+    return (
+      <FileBrowser
+        projectPath={project.path}
+        onClose={() => setShowFileBrowser(false)}
+      />
+    )
+  }
+
   // --- Session list view ---
   if (showSessionList) {
     return (
@@ -447,10 +459,10 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setShowSessionList(true)}
-          title="Session list"
+          onClick={() => setShowFileBrowser(true)}
+          title="File browser"
         >
-          <List className="h-5 w-5" />
+          <FolderOpen className="h-5 w-5" />
         </Button>
       </header>
 
