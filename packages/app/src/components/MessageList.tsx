@@ -1,6 +1,7 @@
 // MessageList — renders chat messages with optional SDK event timeline
 import { useState, useMemo } from 'react'
 import type { ChatMessage, DebugEvent } from '@codeclaws/shared'
+import { stripMetaTags } from '@/lib/utils'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -406,7 +407,8 @@ function MessageModeEventView({ event, isStreaming }: { event: DebugEvent; isStr
 }
 
 function MessageModeText({ event }: { event: DebugEvent }) {
-  const content = (event.data?.content as string) || ''
+  const raw = (event.data?.content as string) || ''
+  const content = stripMetaTags(raw)
   if (!content) return null
   return (
     <div className="text-sm font-mono whitespace-pre-wrap break-words">
@@ -649,6 +651,7 @@ function SdkEventInline({ event }: { event: DebugEvent }) {
     if (!event.data) return null
     switch (event.type) {
       case 'text':
+        return stripMetaTags((event.data.content as string) || '') || null
       case 'thinking':
         return (event.data.content as string) || null
       case 'tool_use':

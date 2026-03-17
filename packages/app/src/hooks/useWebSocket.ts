@@ -19,6 +19,7 @@ import type {
 } from '@codeclaws/shared'
 import { getToken, authFetch } from '@/lib/auth'
 import { buildWsUrl } from '@/lib/server'
+import { stripMetaTags } from '@/lib/utils'
 
 const STORAGE_KEY_CLIENT_ID = 'codeclaws_client_id'
 
@@ -268,7 +269,7 @@ export function useWebSocket(): UseWebSocketReturn {
     const base: ChatMessage = {
       id: summary.id,
       role: summary.role,
-      content: summary.content,
+      content: stripMetaTags(summary.content || ''),
       timestamp: summary.timestamp,
     }
     if (summary.costUsd != null) base.costUsd = summary.costUsd
@@ -432,7 +433,7 @@ export function useWebSocket(): UseWebSocketReturn {
           if (target) {
             const { sState } = target
             if (sState.streamingText || sState.streamingThinking) {
-              const cleaned = (sState.streamingText || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+              const cleaned = stripMetaTags(sState.streamingText || '')
               if (cleaned || sState.streamingThinking) {
                 const lastMsg = sState.messages[sState.messages.length - 1]
                 if (sState.streamingThinking && lastMsg?.role === 'assistant' && !cleaned) {
@@ -493,7 +494,7 @@ export function useWebSocket(): UseWebSocketReturn {
             const thinkingToSave = sState.streamingThinking || undefined
             sState.streamingText = ''
             sState.streamingThinking = ''
-            const cleanedText = msg.text.replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+            const cleanedText = stripMetaTags(msg.text)
             sState.messages = [
               ...sState.messages,
               {
@@ -661,7 +662,7 @@ export function useWebSocket(): UseWebSocketReturn {
               const base: ChatMessage = {
                 id: summary.id,
                 role: summary.role,
-                content: summary.content,
+                content: stripMetaTags(summary.content || ''),
                 timestamp: summary.timestamp,
               }
               if (summary.costUsd != null) base.costUsd = summary.costUsd
