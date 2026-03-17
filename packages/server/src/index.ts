@@ -30,6 +30,22 @@ const PORT = Number(process.env.PORT) || 4200
 
 app.use(express.json())
 
+// CORS — allow cross-origin requests (needed when web app connects to a different server)
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
+  }
+  next()
+})
+
 // Request logging
 app.use((req, res, next) => {
   const start = Date.now()

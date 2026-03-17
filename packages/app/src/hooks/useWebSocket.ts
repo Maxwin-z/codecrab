@@ -18,6 +18,7 @@ import type {
   ServerMessage,
 } from '@codeclaws/shared'
 import { getToken, authFetch } from '@/lib/auth'
+import { buildWsUrl } from '@/lib/server'
 
 const STORAGE_KEY_CLIENT_ID = 'codeclaws_client_id'
 
@@ -263,11 +264,10 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [getProjectState])
 
   const connect = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const clientId = clientIdRef.current
     const token = getToken()
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?clientId=${clientId}${tokenParam}`)
+    const ws = new WebSocket(`${buildWsUrl('/ws')}?clientId=${clientId}${tokenParam}`)
     wsRef.current = ws
 
     // Flag to prevent reconnection when closed intentionally (e.g. by React StrictMode cleanup)

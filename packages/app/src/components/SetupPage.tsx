@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Plus, Star, Trash2, Loader2, CircleCheck, CircleX } from 'lucide-react'
+import { Plus, Star, Trash2, Loader2, CircleCheck, CircleX, Wifi, WifiOff, Radar, Server } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { authFetch } from '@/lib/auth'
+import { buildApiUrl, getServerUrl, setServerUrl, clearServerUrl, getServerDisplay } from '@/lib/server'
+import { scanLAN, type DiscoveredServer, type ScanProgress } from '@/lib/lanScanner'
 import type { DetectResult } from '@codeclaws/shared'
 
 const PROVIDERS = [
@@ -54,7 +56,103 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
   const [testStatus, setTestStatus] = useState<Record<string, { status: 'testing' | 'ok' | 'error'; error?: string }>>({})
   const testedRef = useRef<Set<string>>(new Set())
 
+  // Server connection
+  const [serverDisplay, setServerDisplay] = useState(getServerDisplay())
+  const [serverPort, setServerPort] = useState('4200')
+  const [manualAddress, setManualAddress] = useState(getServerUrl() || '')
+  const [scanning, setScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
+  const [discoveredServers, setDiscoveredServers] = useState<DiscoveredServer[]>([])
+  const [serverConnecting, setServerConnecting] = useState(false)
+  const [serverError, setServerError] = useState('')
+  const [serverStatus, setServerStatus] = useState<'unknown' | 'checking' | 'connected' | 'error'>('unknown')
+  const scanAbortRef = useRef<AbortController | null>(null)
+
   const selectedProvider = PROVIDERS.find((p) => p.value === provider)
+
+  // Check current server connectivity on mount
+  useEffect(() => {
+    checkServerConnection()
+  }, [])
+
+  async function checkServerConnection() {
+    setServerStatus('checking')
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 3000)
+      const res = await fetch(buildApiUrl('/api/discovery'), { signal: controller.signal })
+      clearTimeout(timeoutId)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.service === 'CodeClaws') {
+          setServerStatus('connected')
+          return
+        }
+      }
+      setServerStatus('error')
+    } catch {
+      setServerStatus('error')
+    }
+  }
+
+  async function handleConnectServer(url: string) {
+    setServerConnecting(true)
+    setServerError('')
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 3000)
+      const res = await fetch(`${url}/api/discovery`, { signal: controller.signal })
+      clearTimeout(timeoutId)
+      if (!res.ok) throw new Error('Server returned an error')
+      const data = await res.json()
+      if (data.service !== 'CodeClaws') throw new Error('Not a CodeClaws server')
+
+      setServerUrl(url)
+      setServerDisplay(getServerDisplay())
+      setManualAddress(url)
+      setServerStatus('connected')
+      // Reload page to reconnect WebSocket with new server
+      window.location.reload()
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : 'Connection failed')
+      setServerStatus('error')
+    } finally {
+      setServerConnecting(false)
+    }
+  }
+
+  function handleResetServer() {
+    clearServerUrl()
+    setServerDisplay(getServerDisplay())
+    setManualAddress('')
+    setServerStatus('unknown')
+    window.location.reload()
+  }
+
+  function handleStartScan() {
+    scanAbortRef.current?.abort()
+    const controller = new AbortController()
+    scanAbortRef.current = controller
+    setScanning(true)
+    setDiscoveredServers([])
+    setScanProgress(null)
+
+    scanLAN(
+      parseInt(serverPort) || 4200,
+      (progress) => {
+        setScanProgress(progress)
+        setDiscoveredServers(progress.servers)
+      },
+      controller.signal
+    ).then(() => {
+      setScanning(false)
+    })
+  }
+
+  function handleStopScan() {
+    scanAbortRef.current?.abort()
+    setScanning(false)
+  }
 
   // --- Data fetching ---
 
@@ -78,14 +176,14 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
     let cancelled = false
     ;(async () => {
       try {
-        const checkRes = await fetch('/api/setup/detect')
+        const checkRes = await fetch(buildApiUrl('/api/setup/detect'))
         const { claudeCodeInstalled } = await checkRes.json()
         if (cancelled || !claudeCodeInstalled) return
 
         setClaudeFound(true)
         setProbing(true)
 
-        const probeRes = await fetch('/api/setup/detect/probe')
+        const probeRes = await fetch(buildApiUrl('/api/setup/detect/probe'))
         const data: DetectResult = await probeRes.json()
         if (cancelled) return
         setDetect(data)
@@ -236,6 +334,139 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
           <h1 className="text-2xl font-bold tracking-tight">CodeClaws Setup</h1>
           <p className="text-sm text-muted-foreground mt-1">Configure your environment to get started</p>
         </div>
+
+        {/* Server Connection */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Server Connection</CardTitle>
+            <CardDescription>
+              Connect to a CodeClaws server on your local network
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {/* Current connection status */}
+            <div className="flex items-center gap-3 rounded-lg border px-3 py-2.5">
+              {serverStatus === 'checking' ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
+              ) : serverStatus === 'connected' ? (
+                <Wifi className="h-4 w-4 text-emerald-500 shrink-0" />
+              ) : (
+                <WifiOff className="h-4 w-4 text-muted-foreground shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">
+                  {serverStatus === 'connected' ? 'Connected' : serverStatus === 'checking' ? 'Checking...' : 'Not connected'}
+                </div>
+                <div className="text-xs text-muted-foreground font-mono truncate">
+                  {serverDisplay.address}
+                </div>
+              </div>
+              {serverDisplay.isCustom && (
+                <Button variant="ghost" size="sm" onClick={handleResetServer} className="shrink-0 text-xs">
+                  Reset
+                </Button>
+              )}
+            </div>
+
+            {/* Port input + scan button */}
+            <div className="flex gap-2 items-end">
+              <div className="flex flex-col gap-2 flex-1">
+                <Label htmlFor="serverPort">Port</Label>
+                <Input
+                  id="serverPort"
+                  type="number"
+                  placeholder="4200"
+                  value={serverPort}
+                  onChange={(e) => setServerPort(e.target.value)}
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={scanning ? handleStopScan : handleStartScan}
+                disabled={serverConnecting}
+              >
+                {scanning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Radar className="h-4 w-4" />
+                    Scan
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Scan progress */}
+            {scanning && scanProgress && (
+              <div className="flex flex-col gap-1.5">
+                <div className="text-xs text-muted-foreground">
+                  Scanning... {scanProgress.completed}/{scanProgress.total}
+                </div>
+                <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{ width: `${(scanProgress.completed / scanProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Discovered servers */}
+            {discoveredServers.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  Found {discoveredServers.length} server{discoveredServers.length > 1 ? 's' : ''}
+                </div>
+                {discoveredServers.map((s) => (
+                  <button
+                    key={s.url}
+                    type="button"
+                    onClick={() => handleConnectServer(s.url)}
+                    disabled={serverConnecting}
+                    className="flex items-center gap-3 rounded-lg border px-3 py-2.5 hover:bg-accent/50 transition-colors text-left w-full"
+                  >
+                    <Server className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium font-mono truncate">{s.ip}:{s.port}</div>
+                      <div className="text-xs text-muted-foreground">v{s.version}</div>
+                    </div>
+                    <span className="text-xs text-primary">Connect</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Scan complete, no results */}
+            {!scanning && scanProgress && discoveredServers.length === 0 && (
+              <p className="text-xs text-muted-foreground">No servers found on port {serverPort}</p>
+            )}
+
+            {/* Manual address input */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="manualAddress">Server Address</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="manualAddress"
+                  placeholder="http://192.168.1.x:4200"
+                  value={manualAddress}
+                  onChange={(e) => setManualAddress(e.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => handleConnectServer(manualAddress.replace(/\/$/, ''))}
+                  disabled={!manualAddress || serverConnecting}
+                >
+                  {serverConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Connect'}
+                </Button>
+              </div>
+            </div>
+
+            {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+          </CardContent>
+        </Card>
 
         {/* Models section */}
         <Card>

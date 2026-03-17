@@ -1,5 +1,7 @@
 // Auth utility for managing tokens and API requests
 
+import { buildApiUrl, buildWsUrl } from './server'
+
 const TOKEN_KEY = 'codeclaws_token'
 const DEFAULT_TIMEOUT = 10000 // 10 seconds
 
@@ -29,7 +31,7 @@ export async function verifyToken(token: string): Promise<boolean> {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT)
 
-    const res = await fetch('/api/auth/verify', {
+    const res = await fetch(buildApiUrl('/api/auth/verify'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -56,7 +58,7 @@ export async function checkAuthStatus(): Promise<{ configured: boolean; valid: b
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT)
 
-    const res = await fetch('/api/auth/status', {
+    const res = await fetch(buildApiUrl('/api/auth/status'), {
       headers,
       signal: controller.signal,
     })
@@ -88,8 +90,11 @@ export async function authFetch(
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT)
 
+  // Prepend server base URL for relative API paths
+  const resolvedInput = typeof input === 'string' && input.startsWith('/') ? buildApiUrl(input) : input
+
   try {
-    const res = await fetch(input, {
+    const res = await fetch(resolvedInput, {
       ...init,
       headers,
       signal: controller.signal,
@@ -111,9 +116,7 @@ export async function authFetch(
 /** Build WebSocket URL with token */
 export function getWebSocketUrl(path: string): string {
   const token = getToken()
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host
-  const url = new URL(`${protocol}//${host}${path}`)
+  const url = new URL(buildWsUrl(path))
   if (token) {
     url.searchParams.set('token', token)
   }

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router'
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight, Terminal, FileText, Clock, Hash, X, List, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { buildApiUrl } from '@/lib/server'
 import type { SessionInfo, ChatMessage, DebugEvent } from '@codeclaws/shared'
 
 interface ProjectSummary {
@@ -409,7 +410,7 @@ function SessionDetail({
     setMessages(null)
     setDebugEvents([])
 
-    fetch(`/api/debug/sessions/${session.sessionId}/messages`)
+    fetch(buildApiUrl(`/api/debug/sessions/${session.sessionId}/messages`))
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -565,7 +566,7 @@ export function DebugPage() {
     if (showLoading) setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/debug/sessions')
+      const res = await fetch(buildApiUrl('/api/debug/sessions'))
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
       setData(json)
