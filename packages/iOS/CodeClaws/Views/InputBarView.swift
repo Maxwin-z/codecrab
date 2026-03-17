@@ -34,6 +34,7 @@ struct InputBarView: View {
     @FocusState private var isFocused: Bool
 
     // LLM voice recording state
+    @AppStorage("voiceInputMode") private var lastVoiceMode: String = "apple"
     @State private var isLLMRecording = false
     @State private var llmAudioLevel: Float = 0
     @State private var llmRecordingDuration: TimeInterval = 0
@@ -289,6 +290,7 @@ struct InputBarView: View {
                         Menu {
                             // Level 1: LLM Voice
                             Button {
+                                lastVoiceMode = "llm"
                                 startLLMRecording()
                             } label: {
                                 let configured = VoiceModelConfigStore.shared.isConfigured
@@ -305,12 +307,14 @@ struct InputBarView: View {
                             Menu {
                                 let currentId = speechService.selectedLocale.identifier
                                 Button {
+                                    lastVoiceMode = "apple"
                                     speechService.changeLocale(Locale(identifier: "en-US"))
                                     toggleRecording()
                                 } label: {
                                     Label("English", systemImage: currentId.hasPrefix("en") ? "checkmark" : "")
                                 }
                                 Button {
+                                    lastVoiceMode = "apple"
                                     speechService.changeLocale(Locale(identifier: "zh-Hans-CN"))
                                     toggleRecording()
                                 } label: {
@@ -326,10 +330,18 @@ struct InputBarView: View {
                                 Label("Apple Built-in", systemImage: "mic")
                             }
                         } label: {
-                            micButtonLabel
+                            if lastVoiceMode == "llm" {
+                                llmMicButtonLabel
+                            } else {
+                                micButtonLabel
+                            }
                         } primaryAction: {
-                            // Primary tap: use last mode or default to Apple built-in
-                            toggleRecording()
+                            // Primary tap: use last selected voice mode
+                            if lastVoiceMode == "llm" && VoiceModelConfigStore.shared.isConfigured {
+                                startLLMRecording()
+                            } else {
+                                toggleRecording()
+                            }
                         }
                     }
 
@@ -436,9 +448,9 @@ struct InputBarView: View {
         ZStack {
             Image(systemName: "waveform")
                 .font(.system(size: 14))
-                .foregroundColor(.white)
+                .foregroundColor(isLLMRecording ? .white : Color(UIColor.systemBackground))
                 .frame(width: 32, height: 32)
-                .background(Color.red)
+                .background(isLLMRecording ? Color.red : Color.gray.opacity(0.3))
                 .clipShape(Circle())
                 .scaleEffect(micPulse ? 1.15 : 1.0)
         }

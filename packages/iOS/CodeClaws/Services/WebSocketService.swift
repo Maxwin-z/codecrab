@@ -862,7 +862,7 @@ class WebSocketService: ObservableObject {
         if text.isEmpty { return text }
 
         // First strip any complete tags anywhere in the text
-        var result = text
+        let result = text
             .replacingOccurrences(of: "\\n?\\[SUMMARY:[\\s\\S]*?\\]", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[\\s\\S]*?\\]", with: "", options: .regularExpression)
 
