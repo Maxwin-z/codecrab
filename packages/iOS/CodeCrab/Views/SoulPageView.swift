@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SoulPageView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var soul: SoulDocument?
     @State private var status: SoulStatus?
     @State private var recentEvolution: [EvolutionEntry] = []
@@ -51,9 +50,6 @@ struct SoulPageView: View {
         .navigationTitle("SOUL Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Close") { dismiss() }
-            }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
                     Text("SOUL Profile")
