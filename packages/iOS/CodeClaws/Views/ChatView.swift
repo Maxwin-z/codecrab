@@ -166,7 +166,31 @@ struct ChatView: View {
                             }
                         )
                         .padding()
-                        .id("Bottom")
+
+                        // Suggested Replies (vertical, inline with messages)
+                        if !wsService.suggestions.isEmpty && !wsService.isRunning {
+                            VStack(spacing: 8) {
+                                ForEach(wsService.suggestions, id: \.self) { suggestion in
+                                    Button(action: { prefillText = suggestion }) {
+                                        Text(suggestion)
+                                            .font(.caption)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(Color.accentColor.opacity(0.1))
+                                            .foregroundColor(.accentColor)
+                                            .cornerRadius(10)
+                                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                        }
+
+                        Color.clear.frame(height: 1).id("Bottom")
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
@@ -227,29 +251,6 @@ struct ChatView: View {
                 wsService.respondToPermission(requestId: pp.requestId, allow: false)
             }
             .padding(.horizontal)
-            .padding(.vertical, 4)
-        }
-
-        // Suggested Replies
-        if !wsService.suggestions.isEmpty && !wsService.isRunning {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(wsService.suggestions, id: \.self) { suggestion in
-                        Button(action: { prefillText = suggestion }) {
-                            Text(suggestion)
-                                .font(.caption)
-                                .lineLimit(1)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.accentColor.opacity(0.1))
-                                .foregroundColor(.accentColor)
-                                .clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
-                        }
-                    }
-                }
-                .padding(.horizontal)
-            }
             .padding(.vertical, 4)
         }
 
