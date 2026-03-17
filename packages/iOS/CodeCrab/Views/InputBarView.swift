@@ -37,6 +37,7 @@ struct InputBarView: View {
     @AppStorage("voiceInputMode") private var lastVoiceMode: String = "apple"
     @State private var isLLMRecording = false
     @State private var llmAudioLevel: Float = 0
+    @State private var llmAudioLevels: [Float] = []
     @State private var llmPeakAudioLevel: Float = 0
     @State private var llmRecordingDuration: TimeInterval = 0
     @State private var llmRecordingTimer: Timer?
@@ -118,7 +119,7 @@ struct InputBarView: View {
             // LLM recording overlay
             if isLLMRecording {
                 LLMRecordingOverlayView(
-                    audioLevel: llmAudioLevel,
+                    audioLevels: llmAudioLevels,
                     duration: llmRecordingDuration
                 )
                 .padding(.horizontal, 8)
@@ -495,6 +496,12 @@ struct InputBarView: View {
                 if level > self.llmPeakAudioLevel {
                     self.llmPeakAudioLevel = level
                 }
+                // Keep rolling window of recent levels for waveform
+                self.llmAudioLevels.append(level)
+                let maxBars = 40
+                if self.llmAudioLevels.count > maxBars {
+                    self.llmAudioLevels.removeFirst(self.llmAudioLevels.count - maxBars)
+                }
             }
         }
 
@@ -534,6 +541,7 @@ struct InputBarView: View {
         let peakLevel = llmPeakAudioLevel
         isLLMRecording = false
         llmAudioLevel = 0
+        llmAudioLevels = []
         llmRecordingDuration = 0
         llmPeakAudioLevel = 0
         withAnimation(.easeOut(duration: 0.2)) { micPulse = false }
