@@ -41,6 +41,7 @@ enum VoiceProvider: String, Codable, CaseIterable, Identifiable {
         case .dashscope:
             return [
                 VoiceModel(id: "qwen-omni-turbo", displayName: "Qwen Omni Turbo", description: "快速，中英双语"),
+                VoiceModel(id: "qwen3-omni-flash", displayName: "Qwen3 Omni Flash", description: "极速，超低延迟"),
                 VoiceModel(id: "qwen2.5-omni-7b", displayName: "Qwen2.5 Omni 7B", description: "开源模型"),
             ]
         }

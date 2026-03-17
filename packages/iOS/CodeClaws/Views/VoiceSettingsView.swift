@@ -3,71 +3,117 @@ import SwiftUI
 struct VoiceSettingsView: View {
     @StateObject private var configStore = VoiceModelConfigStore.shared
 
-    @State private var showApiKey: [String: Bool] = [:]
+    @State private var editConfig: VoiceModelConfig = .default
+    @State private var showApiKey = false
+    @State private var hasChanges = false
     @State private var testResult: String = ""
     @State private var isTesting = false
+
+    private var currentApiKey: String {
+        editConfig.apiKeys[editConfig.provider.rawValue] ?? ""
+    }
+
+    private var apiKeyBinding: Binding<String> {
+        Binding<String>(
+            get: { editConfig.apiKeys[editConfig.provider.rawValue] ?? "" },
+            set: {
+                editConfig.apiKeys[editConfig.provider.rawValue] = $0
+                hasChanges = true
+            }
+        )
+    }
+
+    private var maskedApiKey: String {
+        let key = currentApiKey
+        guard key.count > 6 else { return key.isEmpty ? "未设置" : key }
+        let visible = String(key.prefix(6))
+        let masked = String(repeating: "•", count: min(key.count - 6, 20))
+        return visible + masked
+    }
 
     var body: some View {
         Form {
             // Provider selection
             Section(header: Text("Provider")) {
-                Picker("Provider", selection: $configStore.config.provider) {
+                Picker("Provider", selection: $editConfig.provider) {
                     ForEach(VoiceProvider.allCases) { provider in
                         Label(provider.displayName, systemImage: provider.icon)
                             .tag(provider)
                     }
                 }
-                .onChange(of: configStore.config.provider) { _, newProvider in
-                    configStore.config.endpoint = newProvider.defaultEndpoint
-                    // Select first model of new provider if current selection doesn't belong
-                    if !newProvider.defaultModels.contains(where: { $0.id == configStore.config.selectedModelId }) {
-                        configStore.config.selectedModelId = newProvider.defaultModels.first?.id ?? ""
+                .onChange(of: editConfig.provider) { _, newProvider in
+                    editConfig.endpoint = newProvider.defaultEndpoint
+                    if !newProvider.defaultModels.contains(where: { $0.id == editConfig.selectedModelId }) {
+                        editConfig.selectedModelId = newProvider.defaultModels.first?.id ?? ""
                     }
+                    showApiKey = false
+                    hasChanges = true
                 }
             }
 
-            // API Keys (per-provider)
-            Section(header: Text("API Keys")) {
-                ForEach(VoiceProvider.allCases) { provider in
-                    let keyBinding = Binding<String>(
-                        get: { configStore.config.apiKeys[provider.rawValue] ?? "" },
-                        set: { configStore.config.apiKeys[provider.rawValue] = $0 }
-                    )
-                    let isVisible = showApiKey[provider.rawValue] ?? false
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(provider.displayName)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        HStack {
-                            if isVisible {
-                                TextField("API Key", text: keyBinding)
-                                    .autocapitalization(.none)
-                                    .disableAutocorrection(true)
-                                    .font(.system(.body, design: .monospaced))
-                            } else {
-                                SecureField("API Key", text: keyBinding)
-                            }
-                            Button(action: {
-                                showApiKey[provider.rawValue] = !isVisible
-                            }) {
-                                Image(systemName: isVisible ? "eye.slash" : "eye")
+            // Connection (API Key + Endpoint) for selected provider only
+            Section(header: Text("Connection")) {
+                // API Key
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("API Key")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    HStack {
+                        if showApiKey || currentApiKey.isEmpty {
+                            TextField("Enter API Key", text: apiKeyBinding)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                                .font(.system(.body, design: .monospaced))
+                        } else {
+                            Text(maskedApiKey)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.primary)
+                                .onTapGesture { showApiKey = true }
+                            Spacer()
+                        }
+                        if !currentApiKey.isEmpty {
+                            Button(action: { showApiKey.toggle() }) {
+                                Image(systemName: showApiKey ? "eye.slash" : "eye")
                                     .foregroundColor(.secondary)
                                     .frame(width: 28, height: 28)
                             }
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.vertical, 2)
                 }
+                .padding(.vertical, 2)
+
+                // Endpoint
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Endpoint")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextField("API Endpoint", text: Binding(
+                        get: { editConfig.endpoint },
+                        set: { editConfig.endpoint = $0; hasChanges = true }
+                    ))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .font(.system(.body, design: .monospaced))
+                    if editConfig.endpoint != editConfig.provider.defaultEndpoint {
+                        Button("Reset to Default") {
+                            editConfig.endpoint = editConfig.provider.defaultEndpoint
+                            hasChanges = true
+                        }
+                        .font(.caption)
+                    }
+                }
+                .padding(.vertical, 2)
             }
 
-            // Model selection
+            // Model selection for selected provider only
             Section(header: Text("Model")) {
-                let provider = configStore.config.provider
-                let models = provider.defaultModels
+                let models = editConfig.provider.defaultModels
 
-                Picker("Model", selection: $configStore.config.selectedModelId) {
+                Picker("Model", selection: Binding(
+                    get: { editConfig.selectedModelId },
+                    set: { editConfig.selectedModelId = $0; hasChanges = true }
+                )) {
                     ForEach(models) { model in
                         VStack(alignment: .leading) {
                             Text(model.displayName)
@@ -83,7 +129,10 @@ struct VoiceSettingsView: View {
                     Text("Custom Model ID (overrides selection above)")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField("e.g. gemini-2.5-flash-preview", text: $configStore.config.customModelId)
+                    TextField("e.g. gemini-2.5-flash-preview", text: Binding(
+                        get: { editConfig.customModelId },
+                        set: { editConfig.customModelId = $0; hasChanges = true }
+                    ))
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .font(.system(.body, design: .monospaced))
@@ -93,23 +142,10 @@ struct VoiceSettingsView: View {
                     Text("Effective Model")
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(configStore.config.effectiveModelId)
+                    Text(editConfig.effectiveModelId)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.primary)
                 }
-            }
-
-            // Endpoint
-            Section(header: Text("Endpoint")) {
-                TextField("API Endpoint", text: $configStore.config.endpoint)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .font(.system(.body, design: .monospaced))
-
-                Button("Reset to Default") {
-                    configStore.config.endpoint = configStore.config.provider.defaultEndpoint
-                }
-                .font(.caption)
             }
 
             // Test
@@ -123,7 +159,7 @@ struct VoiceSettingsView: View {
                         }
                     }
                 }
-                .disabled(isTesting || !configStore.isConfigured)
+                .disabled(isTesting || currentApiKey.trimmingCharacters(in: .whitespaces).isEmpty)
 
                 if !testResult.isEmpty {
                     Text(testResult)
@@ -144,9 +180,27 @@ struct VoiceSettingsView: View {
         }
         .navigationTitle("Voice Input")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    configStore.config = editConfig
+                    hasChanges = false
+                }
+                .fontWeight(.semibold)
+                .disabled(!hasChanges)
+            }
+        }
+        .onAppear {
+            editConfig = configStore.config
+            hasChanges = false
+        }
     }
 
     private func testApiKey() {
+        // Save first so the service uses current edits
+        configStore.config = editConfig
+        hasChanges = false
+
         isTesting = true
         testResult = ""
 
