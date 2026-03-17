@@ -20,21 +20,6 @@ struct SessionListView: View {
 
     var body: some View {
         List {
-            // New Chat
-            NavigationLink(value: ChatRoute(project: project, sessionId: nil)) {
-                HStack(spacing: 12) {
-                    Image(systemName: "plus.message")
-                        .font(.system(size: 16))
-                        .foregroundColor(.accentColor)
-                    Text("New Chat")
-                        .font(.headline)
-                        .foregroundColor(.accentColor)
-                    Spacer()
-                }
-                .padding(.vertical, 8)
-            }
-            .listRowSeparator(.hidden)
-
             // Sessions
             if isLoading && sessions.isEmpty {
                 HStack {
@@ -72,6 +57,14 @@ struct SessionListView: View {
         .listStyle(.plain)
         .navigationTitle("\(project.icon) \(project.name)")
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(value: ChatRoute(project: project, sessionId: nil)) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 16))
+                }
+            }
+        }
         .refreshable {
             await fetchSessions()
         }

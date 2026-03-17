@@ -64,6 +64,25 @@ struct SettingsView: View {
                 .foregroundColor(.red)
             }
             
+            Section(header: Text("Voice Input")) {
+                NavigationLink(destination: VoiceSettingsView()) {
+                    HStack {
+                        Image(systemName: "waveform")
+                        Text("LLM Voice Settings")
+                        Spacer()
+                        if VoiceModelConfigStore.shared.isConfigured {
+                            Text(VoiceModelConfigStore.shared.config.provider.displayName)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Not configured")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+
             Section(header: Text("Default Model")) {
                 if models.isEmpty {
                     Text("No models configured")

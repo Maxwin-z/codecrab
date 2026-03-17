@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// What the detail column shows
-enum DetailDestination: Equatable {
+enum DetailDestination: Hashable {
     case project(Project)
     case soul
     case cron
@@ -12,6 +12,18 @@ enum DetailDestination: Equatable {
         case (.soul, .soul): return true
         case (.cron, .cron): return true
         default: return false
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .project(let p):
+            hasher.combine(0)
+            hasher.combine(p)
+        case .soul:
+            hasher.combine(1)
+        case .cron:
+            hasher.combine(2)
         }
     }
 }
@@ -31,21 +43,10 @@ struct HomeView: View {
     @State private var shareAttachments: [ImageAttachment] = []
     @State private var shareSessionId: String? = nil
 
-    /// Currently selected project (derived from detailDestination)
-    private var selectedProjectId: String? {
-        if case .project(let p) = detailDestination { return p.id }
-        return nil
-    }
-
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
-                ProjectListView(
-                    selectedProjectId: selectedProjectId,
-                    onSelectProject: { selectProject($0) },
-                    onSoulTapped: { selectSoul() },
-                    onCronTapped: { selectCron() }
-                )
+                ProjectListView(selection: $detailDestination)
                     .navigationTitle("CodeClaws")
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
@@ -81,6 +82,9 @@ struct HomeView: View {
                 NavigationStack {
                     SettingsView()
                 }
+            }
+            .onChange(of: detailDestination) { _, _ in
+                detailPath = NavigationPath()
             }
 
             // Toast overlay
@@ -148,16 +152,6 @@ struct HomeView: View {
     private func selectProject(_ project: Project) {
         detailPath = NavigationPath()
         detailDestination = .project(project)
-    }
-
-    private func selectSoul() {
-        detailPath = NavigationPath()
-        detailDestination = .soul
-    }
-
-    private func selectCron() {
-        detailPath = NavigationPath()
-        detailDestination = .cron
     }
 
     // MARK: - Deep Links

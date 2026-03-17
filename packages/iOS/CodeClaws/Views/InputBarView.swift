@@ -33,6 +33,15 @@ struct InputBarView: View {
     @StateObject private var speechService = SpeechService()
     @FocusState private var isFocused: Bool
 
+    // LLM voice recording state
+    @State private var isLLMRecording = false
+    @State private var llmAudioLevel: Float = 0
+    @State private var llmRecordingDuration: TimeInterval = 0
+    @State private var llmRecordingTimer: Timer?
+    @State private var isLLMTranscribing = false
+    private let llmRecorder = LLMAudioRecorderService()
+    private let llmVoiceService = MultimodalVoiceService()
+
     private var isSafe: Bool { permissionMode == "default" }
     private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty }
 
@@ -103,9 +112,33 @@ struct InputBarView: View {
                 }
             }
 
+            // LLM recording overlay
+            if isLLMRecording {
+                LLMRecordingOverlayView(
+                    audioLevel: llmAudioLevel,
+                    duration: llmRecordingDuration,
+                    onStop: { stopLLMRecording() }
+                )
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+            }
+
+            // Transcribing indicator
+            if isLLMTranscribing {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.7)
+                    Text("Transcribing...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+            }
+
             // Text input
             TextField(
-                speechService.isRecording ? "Listening..." : "Send message to \(currentModel.isEmpty ? "Claude Code" : currentModel)",
+                speechService.isRecording ? "Listening..." : (isLLMRecording ? "Recording..." : "Send message to \(currentModel.isEmpty ? "Claude Code" : currentModel)"),
                 text: $text,
                 axis: .vertical
             )
@@ -240,33 +273,62 @@ struct InputBarView: View {
 
                 // Right: voice + send (+ abort when running)
                 HStack(spacing: 8) {
-                    // Voice input
+                    // Voice input — two modes
                     if speechService.isRecording {
+                        // Apple speech is active — tap to stop
                         Button(action: { speechService.stopRecording() }) {
                             micButtonLabel
                         }
+                    } else if isLLMRecording {
+                        // LLM recording is active — tap to stop
+                        Button(action: { stopLLMRecording() }) {
+                            llmMicButtonLabel
+                        }
                     } else {
+                        // Idle — two-level menu
                         Menu {
-                            let currentId = speechService.selectedLocale.identifier
+                            // Level 1: LLM Voice
                             Button {
-                                speechService.changeLocale(Locale(identifier: "en-US"))
+                                startLLMRecording()
                             } label: {
-                                Label("English", systemImage: currentId.hasPrefix("en") ? "checkmark" : "")
+                                let configured = VoiceModelConfigStore.shared.isConfigured
+                                Label(
+                                    configured ? "LLM Voice" : "LLM Voice (not configured)",
+                                    systemImage: "waveform"
+                                )
                             }
-                            Button {
-                                speechService.changeLocale(Locale(identifier: "zh-Hans-CN"))
-                            } label: {
-                                Label("简体中文", systemImage: currentId.hasPrefix("zh-Hans") ? "checkmark" : "")
-                            }
+                            .disabled(!VoiceModelConfigStore.shared.isConfigured)
+
                             Divider()
-                            Button {
-                                showLocalePicker = true
+
+                            // Level 2: Apple Built-in (with language sub-menu)
+                            Menu {
+                                let currentId = speechService.selectedLocale.identifier
+                                Button {
+                                    speechService.changeLocale(Locale(identifier: "en-US"))
+                                    toggleRecording()
+                                } label: {
+                                    Label("English", systemImage: currentId.hasPrefix("en") ? "checkmark" : "")
+                                }
+                                Button {
+                                    speechService.changeLocale(Locale(identifier: "zh-Hans-CN"))
+                                    toggleRecording()
+                                } label: {
+                                    Label("简体中文", systemImage: currentId.hasPrefix("zh-Hans") ? "checkmark" : "")
+                                }
+                                Divider()
+                                Button {
+                                    showLocalePicker = true
+                                } label: {
+                                    Label("More Languages...", systemImage: "globe")
+                                }
                             } label: {
-                                Label("More Languages...", systemImage: "globe")
+                                Label("Apple Built-in", systemImage: "mic")
                             }
                         } label: {
                             micButtonLabel
                         } primaryAction: {
+                            // Primary tap: use last mode or default to Apple built-in
                             toggleRecording()
                         }
                     }
@@ -369,6 +431,19 @@ struct InputBarView: View {
         }
     }
 
+    @ViewBuilder
+    private var llmMicButtonLabel: some View {
+        ZStack {
+            Image(systemName: "waveform")
+                .font(.system(size: 14))
+                .foregroundColor(.white)
+                .frame(width: 32, height: 32)
+                .background(Color.red)
+                .clipShape(Circle())
+                .scaleEffect(micPulse ? 1.15 : 1.0)
+        }
+    }
+
     private func toggleRecording() {
         switch speechService.authorizationStatus {
         case .notDetermined:
@@ -380,6 +455,104 @@ struct InputBarView: View {
         }
     }
 
+    // MARK: - LLM Voice Recording
+
+    private func startLLMRecording() {
+        guard !isLLMRecording else { return }
+
+        llmRecorder.onAudioLevel = { [self] level in
+            Task { @MainActor in
+                self.llmAudioLevel = level
+            }
+        }
+
+        do {
+            try llmRecorder.startRecording()
+            isLLMRecording = true
+            llmRecordingDuration = 0
+
+            // Duration timer
+            llmRecordingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                Task { @MainActor in
+                    self.llmRecordingDuration = self.llmRecorder.duration
+                    // Auto-stop at max duration
+                    if self.llmRecordingDuration >= LLMAudioRecorderService.maxDuration {
+                        self.stopLLMRecording()
+                    }
+                }
+            }
+
+            // Pulse animation
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                micPulse = true
+            }
+        } catch {
+            print("LLM recording start failed: \(error)")
+        }
+    }
+
+    private func stopLLMRecording() {
+        guard isLLMRecording else { return }
+
+        llmRecordingTimer?.invalidate()
+        llmRecordingTimer = nil
+        let samples = llmRecorder.stopRecording()
+        let duration = llmRecordingDuration
+        isLLMRecording = false
+        llmAudioLevel = 0
+        llmRecordingDuration = 0
+        withAnimation(.easeOut(duration: 0.2)) { micPulse = false }
+
+        guard !samples.isEmpty else { return }
+
+        // Start streaming transcription
+        isLLMTranscribing = true
+        let configStore = VoiceModelConfigStore.shared
+        let contextStore = VoiceContextStore.shared
+        let contextLevel = VoiceContextLevel.forDuration(duration)
+
+        // Extract project name from projectPath
+        let projectName = projectPath.isEmpty ? nil : (projectPath as NSString).lastPathComponent
+
+        let systemPrompt = MultimodalVoiceService.buildSystemPrompt(
+            projectName: projectName,
+            contextLevel: contextLevel,
+            contextStore: contextStore
+        )
+
+        // Capture the text that existed before transcription starts
+        let textBeforeTranscription = text
+        let separator = textBeforeTranscription.isEmpty ? "" :
+            (textBeforeTranscription.hasSuffix(" ") ? "" : " ")
+
+        Task {
+            var accumulated = ""
+            do {
+                let stream = llmVoiceService.stream(
+                    audioSamples: samples,
+                    systemPrompt: systemPrompt,
+                    config: configStore.config
+                )
+                for try await chunk in stream {
+                    accumulated += chunk
+                    // Replace the transcription portion while preserving pre-existing text
+                    let cleaned = MultimodalVoiceService.stripTranscriptionTags(accumulated)
+                    text = textBeforeTranscription + separator + cleaned
+                }
+            } catch {
+                print("LLM transcription error: \(error)")
+            }
+
+            isLLMTranscribing = false
+
+            // Record utterance for context accumulation
+            let finalText = MultimodalVoiceService.stripTranscriptionTags(accumulated)
+            if !finalText.isEmpty {
+                VoiceContextService.shared.recordUtterance(finalText)
+            }
+        }
+    }
+
     private func localeDisplayName(_ locale: Locale) -> String {
         Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
     }
@@ -387,6 +560,9 @@ struct InputBarView: View {
     private func send() {
         if speechService.isRecording {
             speechService.stopRecording()
+        }
+        if isLLMRecording {
+            stopLLMRecording()
         }
         showFileMention = false
         mentionStartIndex = nil

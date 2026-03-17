@@ -2,14 +2,16 @@ import SwiftUI
 
 struct ProjectListView: View {
     @EnvironmentObject var wsService: WebSocketService
-    let selectedProjectId: String?
-    var onSelectProject: (Project) -> Void
-    var onSoulTapped: () -> Void
-    var onCronTapped: () -> Void
+    @Binding var selection: DetailDestination?
     @State private var projects: [Project] = []
     @State private var cronJobs: [CronJob] = []
     @State private var isLoading = false
     @State private var cardRefreshID = UUID()
+
+    private var selectedProjectId: String? {
+        if case .project(let p) = selection { return p.id }
+        return nil
+    }
 
     /// Cron jobs grouped by projectId for quick lookup
     private var cronJobsByProject: [String: [CronJob]] {
@@ -18,14 +20,18 @@ struct ProjectListView: View {
     }
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             // Dashboard cards
             Section {
-                SoulCardView(refreshID: cardRefreshID, onTap: onSoulTapped)
+                SoulCardView(refreshID: cardRefreshID)
+                    .allowsHitTesting(false)
+                    .tag(DetailDestination.soul)
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                CronCardView(refreshID: cardRefreshID, onTap: onCronTapped)
+                CronCardView(refreshID: cardRefreshID)
+                    .allowsHitTesting(false)
+                    .tag(DetailDestination.cron)
                     .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -55,16 +61,12 @@ struct ProjectListView: View {
                     .listRowSeparator(.automatic)
                 } else {
                     ForEach(projects) { project in
-                        Button {
-                            onSelectProject(project)
-                        } label: {
-                            ProjectCard(
-                                project: project,
-                                isSelected: selectedProjectId == project.id,
-                                cronJobs: cronJobsByProject[project.id] ?? []
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        ProjectCard(
+                            project: project,
+                            isSelected: selectedProjectId == project.id,
+                            cronJobs: cronJobsByProject[project.id] ?? []
+                        )
+                        .tag(DetailDestination.project(project))
                         .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
                         .listRowSeparator(.automatic)
                         .listRowBackground(Color.clear)
@@ -126,6 +128,9 @@ struct ProjectListView: View {
             do {
                 try await APIClient.shared.request(path: "/api/projects/\(project.id)", method: "DELETE")
                 projects.removeAll { $0.id == project.id }
+                if case .project(let p) = selection, p.id == project.id {
+                    selection = nil
+                }
             } catch {
                 print("Failed to delete project: \(error)")
             }

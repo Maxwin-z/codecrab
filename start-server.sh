@@ -6,6 +6,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="codeclaws-server"
 PORT="${PORT:-42001}"  # Production port, overrides .env
+lsof -t -i:${PORT} | xargs kill
 
 cd "$SCRIPT_DIR"
 
