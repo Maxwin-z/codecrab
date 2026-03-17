@@ -10,9 +10,36 @@ import { ChatPage } from '@/components/ChatPage'
 import { DebugPage } from '@/components/DebugPage'
 import { SoulPage } from '@/components/SoulPage'
 import { CronPage } from '@/components/CronPage'
+import { AppSidebar } from '@/components/AppSidebar'
 import { WebSocketProvider } from '@/hooks/WebSocketContext'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { checkAuthStatus, authFetch, clearToken } from '@/lib/auth'
 import './index.css'
+
+function AppLayout({
+  children,
+  showSidebar,
+  onOpenSetup,
+  onUnauthorized,
+}: {
+  children: React.ReactNode
+  showSidebar: boolean
+  onOpenSetup: () => void
+  onUnauthorized?: () => void
+}) {
+  const isDesktop = useIsDesktop()
+
+  return (
+    <div className="h-dvh flex">
+      {isDesktop && showSidebar && (
+        <AppSidebar onOpenSetup={onOpenSetup} onUnauthorized={onUnauthorized} />
+      )}
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {children}
+      </main>
+    </div>
+  )
+}
 
 function AppRoutes() {
   const navigate = useNavigate()
@@ -103,47 +130,53 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<Navigate to="/" replace />} />
-      <Route path="/setup" element={
-        <SetupPage
-          onComplete={() => {
-            if (setupStatus === 'uninitialized') {
-              setSetupStatus('initialized')
-            }
-            navigate('/')
-          }}
-          onUnauthorized={handleUnauthorized}
-        />
-      } />
-      <Route path="/projects/new" element={
-        setupStatus === 'initialized'
-          ? <CreateProjectPage onUnauthorized={handleUnauthorized} />
-          : <Navigate to="/setup" replace />
-      } />
-      <Route path="/chat" element={
-        setupStatus === 'initialized'
-          ? <ChatPage onUnauthorized={handleUnauthorized} />
-          : <Navigate to="/setup" replace />
-      } />
-      <Route path="/soul" element={
-        setupStatus === 'initialized'
-          ? <SoulPage onUnauthorized={handleUnauthorized} />
-          : <Navigate to="/setup" replace />
-      } />
-      <Route path="/cron" element={
-        setupStatus === 'initialized'
-          ? <CronPage onUnauthorized={handleUnauthorized} />
-          : <Navigate to="/setup" replace />
-      } />
-      <Route path="/debug" element={<DebugPage />} />
-      <Route path="/" element={
-        setupStatus === 'initialized'
-          ? <HomePage onOpenSetup={() => navigate('/setup')} onUnauthorized={handleUnauthorized} />
-          : <Navigate to="/setup" replace />
-      } />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <AppLayout
+      showSidebar={setupStatus === 'initialized'}
+      onOpenSetup={() => navigate('/setup')}
+      onUnauthorized={handleUnauthorized}
+    >
+      <Routes>
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/setup" element={
+          <SetupPage
+            onComplete={() => {
+              if (setupStatus === 'uninitialized') {
+                setSetupStatus('initialized')
+              }
+              navigate('/')
+            }}
+            onUnauthorized={handleUnauthorized}
+          />
+        } />
+        <Route path="/projects/new" element={
+          setupStatus === 'initialized'
+            ? <CreateProjectPage onUnauthorized={handleUnauthorized} />
+            : <Navigate to="/setup" replace />
+        } />
+        <Route path="/chat" element={
+          setupStatus === 'initialized'
+            ? <ChatPage onUnauthorized={handleUnauthorized} />
+            : <Navigate to="/setup" replace />
+        } />
+        <Route path="/soul" element={
+          setupStatus === 'initialized'
+            ? <SoulPage onUnauthorized={handleUnauthorized} />
+            : <Navigate to="/setup" replace />
+        } />
+        <Route path="/cron" element={
+          setupStatus === 'initialized'
+            ? <CronPage onUnauthorized={handleUnauthorized} />
+            : <Navigate to="/setup" replace />
+        } />
+        <Route path="/debug" element={<DebugPage />} />
+        <Route path="/" element={
+          setupStatus === 'initialized'
+            ? <HomePage onOpenSetup={() => navigate('/setup')} onUnauthorized={handleUnauthorized} />
+            : <Navigate to="/setup" replace />
+        } />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AppLayout>
   )
 }
 

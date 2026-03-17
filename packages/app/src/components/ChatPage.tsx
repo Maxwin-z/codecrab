@@ -244,14 +244,14 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
   if (loadingProject) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-full flex flex-col bg-background">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b shrink-0">
         <div className="flex items-center gap-3 min-w-0">

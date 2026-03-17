@@ -64,7 +64,7 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
 
   if (loading) {
     return (
-      <div className="min-h-dvh flex flex-col bg-background">
+      <div className="flex-1 flex flex-col bg-background overflow-y-auto">
         <header className="flex items-center gap-3 px-4 py-3 border-b">
           <Button variant="ghost" size="icon-sm" onClick={() => navigate('/')}>
             <ArrowLeft className="h-4 w-4" />
@@ -79,7 +79,7 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
   const hasSoul = status?.hasSoul
 
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
+    <div className="flex-1 flex flex-col bg-background overflow-y-auto">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-3">
