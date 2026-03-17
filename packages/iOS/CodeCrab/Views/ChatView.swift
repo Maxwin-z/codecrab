@@ -16,6 +16,8 @@ struct ChatView: View {
     @State private var arrowBounce = false
     @State private var execSessionId: String? = nil
     @State private var inputAttachments: [ImageAttachment] = []
+    @State private var isNearBottom: Bool = true
+    @State private var scrollViewHeight: CGFloat = 0
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -190,9 +192,27 @@ struct ChatView: View {
                             .padding(.bottom, 8)
                         }
 
-                        Color.clear.frame(height: 1).id("Bottom")
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: BottomOffsetKey.self,
+                                value: geo.frame(in: .named("chatScroll")).minY
+                            )
+                        }
+                        .frame(height: 1)
+                        .id("Bottom")
                     }
                     .scrollDismissesKeyboard(.interactively)
+                    .coordinateSpace(name: "chatScroll")
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { scrollViewHeight = geo.size.height }
+                                .onChange(of: geo.size.height) { _, h in scrollViewHeight = h }
+                        }
+                    )
+                    .onPreferenceChange(BottomOffsetKey.self) { bottomY in
+                        isNearBottom = bottomY <= scrollViewHeight + 150
+                    }
                     .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
                     .onChange(of: wsService.sdkEvents.count) { scrollToBottom(proxy) }
                     .onChange(of: wsService.displayStreamingText) { scrollToBottom(proxy) }
@@ -200,12 +220,12 @@ struct ChatView: View {
                     .onChange(of: isInputFocused) { scrollToBottom(proxy) }
                     .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            scrollToBottom(proxy)
+                            scrollToBottom(proxy, force: true)
                         }
                     }
                     .onChange(of: wsService.sessionId) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            scrollToBottom(proxy)
+                            scrollToBottom(proxy, force: true)
                         }
                     }
                 }
@@ -340,13 +360,15 @@ struct ChatView: View {
         .animation(.easeInOut(duration: 0.25), value: isInputFocused)
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, force: Bool = false) {
+        guard force || isNearBottom else { return }
         withAnimation {
             proxy.scrollTo("Bottom", anchor: .bottom)
         }
     }
 
     private func handleSend(text: String, images: [ImageAttachment]?, mcps: [String]?) {
+        isNearBottom = true
         if text.hasPrefix("/") {
             wsService.sendCommand(text)
         } else {
@@ -444,5 +466,12 @@ struct ChatView: View {
             get: { execSessionId != nil },
             set: { if !$0 { execSessionId = nil } }
         )
+    }
+}
+
+private struct BottomOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
