@@ -6,7 +6,6 @@ struct ChatView: View {
     @Binding var pendingAttachments: [ImageAttachment]
     @Binding var pendingSessionId: String?
     @EnvironmentObject var wsService: WebSocketService
-    @State private var showSidebar = false
     @State private var showFileBrowser = false
     @State private var customMcps: [McpInfo] = []
     @State private var enabledIds: Set<String> = []
@@ -105,18 +104,10 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    Button(action: { showFileBrowser = true }) {
-                        Image(systemName: "folder")
-                    }
-                    Button(action: { showSidebar = true }) {
-                        Image(systemName: "list.bullet")
-                    }
+                Button(action: { showFileBrowser = true }) {
+                    Image(systemName: "folder")
                 }
             }
-        }
-        .sheet(isPresented: $showSidebar) {
-            SessionSidebarView(projectId: project.id)
         }
         .sheet(isPresented: $showFileBrowser) {
             FileBrowserView(projectPath: project.path)
