@@ -23,7 +23,7 @@ const router: RouterType = Router()
 // List all sessions grouped by project, with session status
 router.get('/sessions', async (_req, res) => {
   const projects = await readProjects()
-  const allSessions = getSessionsList()
+  const allSessions = await getSessionsList()
 
   // Group sessions by projectId
   const sessionsByProject = new Map<string, typeof allSessions>()

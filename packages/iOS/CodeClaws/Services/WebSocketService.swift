@@ -475,6 +475,8 @@ class WebSocketService: ObservableObject {
                     projectStates[pid]!.sessionId = sid
                     projectStates[pid]!.awaitingSessionSwitch = false
                 }
+                // Fetch session history via HTTP (server no longer sends it over WS)
+                fetchSessionHistory(sessionId: sid)
             }
         case "message_history":
             guard let pid = projectId, isCurrentProject else { break }
@@ -573,6 +575,8 @@ class WebSocketService: ObservableObject {
                     self.sessionId = sid
                     projectStates[pid]!.sessionId = sid
                     projectStates[pid]!.awaitingSessionSwitch = false
+                    // Fetch session history via HTTP (server no longer sends it over WS)
+                    fetchSessionHistory(sessionId: sid)
                 }
                 if let tools = json["tools"] as? [String] { self.sdkTools = tools }
                 if let skillsJson = json["sdkSkills"] as? [[String: Any]] {
@@ -758,6 +762,81 @@ class WebSocketService: ObservableObject {
         return .null
     }
 
+    /// Fetch session history via HTTP with incremental support.
+    /// If the session has cached data, sends afterTurn to only fetch new turns.
+    private func fetchSessionHistory(sessionId sid: String) {
+        Task { @MainActor in
+            do {
+                guard let serverURL = UserDefaults.standard.string(forKey: "codeclaws_server_url") else { return }
+
+                // Find last cached user message timestamp for incremental fetch
+                let cachedMessages: [ChatMessage]
+                if sid == self.sessionId {
+                    cachedMessages = self.messages
+                } else if let pid = self.activeProjectId,
+                          let state = projectStates[pid]?.sessionStates[sid] {
+                    cachedMessages = state.messages
+                } else {
+                    cachedMessages = []
+                }
+                let lastUserTs = cachedMessages.last(where: { $0.role == "user" })?.timestamp
+
+                var urlStr = "\(serverURL)/api/sessions/\(sid)/history"
+                if let ts = lastUserTs {
+                    urlStr += "?afterTurn=\(Int(ts))"
+                }
+                guard let url = URL(string: urlStr) else { return }
+
+                var request = URLRequest(url: url)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                if let token = KeychainHelper.shared.getToken() {
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                }
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else { return }
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+                let isIncremental = lastUserTs != nil
+
+                // Parse and merge messages
+                if let messagesJson = json["messages"] as? [[String: Any]], !messagesJson.isEmpty {
+                    let newMessages = parseMessageHistory(messagesJson)
+                    if sid == self.sessionId {
+                        self.messages = isIncremental ? self.messages + newMessages : newMessages
+                    } else if let pid = self.activeProjectId {
+                        modifySessionState(projectId: pid, sessionId: sid) {
+                            $0.messages = isIncremental ? $0.messages + newMessages : newMessages
+                        }
+                    }
+                }
+
+                // Parse and merge SDK events
+                if let eventsArray = json["sdkEvents"] as? [[String: Any]], !eventsArray.isEmpty {
+                    let newEvents = eventsArray.compactMap { parseSdkEvent($0) }
+                    if sid == self.sessionId {
+                        self.sdkEvents = isIncremental ? self.sdkEvents + newEvents : newEvents
+                    } else if let pid = self.activeProjectId {
+                        modifySessionState(projectId: pid, sessionId: sid) {
+                            $0.sdkEvents = isIncremental ? $0.sdkEvents + newEvents : newEvents
+                        }
+                    }
+                }
+
+                // Summary and suggestions always reflect latest state
+                if sid == self.sessionId {
+                    if let summary = json["summary"] as? String, !summary.isEmpty {
+                        self.latestSummary = summary
+                    }
+                    if let suggestions = json["suggestions"] as? [String], !suggestions.isEmpty {
+                        self.suggestions = suggestions
+                    }
+                }
+            } catch {
+                print("[ws] Failed to fetch session history: \(error)")
+            }
+        }
+    }
+
     /// Parse a single SDK event dictionary into an SdkEvent
     private func parseSdkEvent(_ eventDict: [String: Any]) -> SdkEvent? {
         let ts = eventDict["ts"] as? Double ?? 0
@@ -867,15 +946,13 @@ class WebSocketService: ObservableObject {
         // Switch viewing session
         self.sessionId = newSessionId
         projectStates[projectId]!.sessionId = newSessionId
-        // Load cached state for new session (if any), otherwise clear
+        // Load cached state for instant rendering; HTTP fetch will merge incremental data
         if let cached = projectStates[projectId]?.sessionStates[newSessionId] {
             loadSessionState(cached)
         } else {
             clearSessionPublished()
+            projectStates[projectId]!.sessionStates[newSessionId] = SessionChatState()
         }
-        // Clear cached state — server will send fresh message_history
-        projectStates[projectId]!.sessionStates[newSessionId] = SessionChatState()
-        clearSessionPublished()
         runningProjectIds.remove(projectId)
         sendWebSocketMessage([
             "type": "resume_session",

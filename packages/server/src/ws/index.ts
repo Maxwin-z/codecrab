@@ -690,6 +690,93 @@ export function getSessionDebugEvents(sessionId: string): import('@codeclaws/sha
   return turnsToDebugEvents(session.turns)
 }
 
+// Get session history optimized for client consumption (HTTP endpoint).
+// Returns user messages + high-value SDK events (much smaller than full debugEvents).
+// If the session is processing, excludes the last (in-progress) turn.
+// Supports incremental fetch: if afterTurn is provided, only returns turns newer than that timestamp.
+export async function getSessionHistory(sessionId: string, afterTurn?: number): Promise<{
+  messages: import('@codeclaws/shared').ChatMessageSummary[]
+  sdkEvents: import('@codeclaws/shared').DebugEvent[]
+  status: string
+  summary?: string
+  suggestions?: string[]
+} | null> {
+  // Try memory first, then disk
+  let session = sessions.get(sessionId)
+  if (!session) {
+    try {
+      const filePath = path.join(SESSIONS_DIR, `${sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`)
+      const content = await fs.readFile(filePath, 'utf-8')
+      const data = JSON.parse(content)
+      if (data.sessionId) {
+        session = {
+          sessionId: data.sessionId,
+          sdkSessionId: data.sdkSessionId,
+          projectId: data.projectId,
+          cwd: data.cwd,
+          turns: data.turns || [],
+          status: 'idle',
+          lastModified: data.lastModified || Date.now(),
+          summary: data.summary,
+          firstPrompt: data.firstPrompt,
+          pendingQuestion: data.pendingQuestion || null,
+          pendingPermissionRequest: data.pendingPermissionRequest || null,
+        }
+        sessions.set(session.sessionId, session)
+      }
+    } catch {
+      // not found
+    }
+  }
+  if (!session) return null
+
+  // If processing, exclude the last (in-progress) turn
+  const isProcessing = session.status === 'processing'
+  let turns = isProcessing && session.turns.length > 0
+    ? session.turns.slice(0, -1)
+    : session.turns
+
+  // Incremental fetch: only return turns after the given timestamp
+  if (afterTurn) {
+    turns = turns.filter(t => t.timestamp > afterTurn)
+  }
+
+  // User messages as summaries
+  const messages = turnsToMessages(turns).map(toMessageSummary)
+
+  // High-value SDK events only (from turn.agent.messages, NOT debugEvents)
+  const sdkEvents: import('@codeclaws/shared').DebugEvent[] = []
+  for (const turn of turns) {
+    sdkEvents.push(...turn.agent.messages)
+  }
+
+  // Extract suggestions from last text event (always from full session, not just delta)
+  let suggestions: string[] | undefined
+  const allTurns = isProcessing && session.turns.length > 0
+    ? session.turns.slice(0, -1)
+    : session.turns
+  for (let i = allTurns.length - 1; i >= 0; i--) {
+    const msgs = allTurns[i].agent.messages
+    const textEvt = [...msgs].reverse().find(e => e.type === 'text' && e.data?.content)
+    if (textEvt) {
+      const textContent = textEvt.data?.content as string
+      const sugMatch = textContent.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+      if (sugMatch) {
+        suggestions = sugMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+      }
+      break
+    }
+  }
+
+  return {
+    messages,
+    sdkEvents,
+    status: session.status,
+    summary: session.summary,
+    suggestions,
+  }
+}
+
 /** Derive flat ChatMessage[] from turns (for API/web compat) */
 function turnsToMessages(turns: import('@codeclaws/shared').SessionTurn[]): ChatMessage[] {
   const messages: ChatMessage[] = []
@@ -864,8 +951,37 @@ function generateSessionIdLocal(): string {
 }
 
 // Resume an existing session
-function resumeSessionForProject(client: Client, projectId: string, sessionId: string): Session | null {
-  const session = sessions.get(sessionId)
+async function resumeSessionForProject(client: Client, projectId: string, sessionId: string): Promise<Session | null> {
+  let session = sessions.get(sessionId)
+
+  // If not in memory, try loading from disk (multi-process scenario)
+  if (!session) {
+    try {
+      const filePath = path.join(SESSIONS_DIR, `${sessionId}.json`)
+      const content = await fs.readFile(filePath, 'utf-8')
+      const data = JSON.parse(content)
+      if (data.sessionId) {
+        const turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
+        session = {
+          sessionId: data.sessionId,
+          sdkSessionId: data.sdkSessionId,
+          projectId: data.projectId,
+          cwd: data.cwd,
+          turns,
+          status: 'idle',
+          lastModified: data.lastModified || Date.now(),
+          summary: data.summary,
+          firstPrompt: data.firstPrompt,
+          pendingQuestion: data.pendingQuestion || null,
+          pendingPermissionRequest: data.pendingPermissionRequest || null,
+        }
+        sessions.set(session.sessionId, session)
+      }
+    } catch {
+      // File doesn't exist or is unreadable
+    }
+  }
+
   if (!session) return null
 
   // Session must belong to the same project
@@ -884,8 +1000,65 @@ function resumeSessionForProject(client: Client, projectId: string, sessionId: s
   return session
 }
 
+// Sync any new/updated sessions from disk into the in-memory cache.
+// This handles multi-process scenarios where another server instance
+// may have created sessions that this process doesn't know about.
+async function syncSessionsFromDisk() {
+  try {
+    await ensureSessionsDir()
+    const files = await fs.readdir(SESSIONS_DIR)
+    let synced = 0
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      try {
+        const filePath = path.join(SESSIONS_DIR, file)
+        const stat = await fs.stat(filePath)
+        const sessionId = file.replace('.json', '')
+        const existing = sessions.get(sessionId)
+
+        // Skip if already in memory and disk file is not newer
+        if (existing && existing.lastModified >= stat.mtimeMs) continue
+
+        const content = await fs.readFile(filePath, 'utf-8')
+        const data = JSON.parse(content)
+        if (!data.sessionId) continue
+
+        // Skip if already in memory and memory version is newer or equal
+        if (existing && existing.lastModified >= (data.lastModified || 0)) continue
+
+        const turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
+        const session: Session = {
+          sessionId: data.sessionId,
+          sdkSessionId: data.sdkSessionId,
+          projectId: data.projectId,
+          cwd: data.cwd,
+          turns,
+          status: 'idle',
+          lastModified: data.lastModified || Date.now(),
+          summary: data.summary,
+          firstPrompt: data.firstPrompt,
+          pendingQuestion: data.pendingQuestion || null,
+          pendingPermissionRequest: data.pendingPermissionRequest || null,
+        }
+        sessions.set(session.sessionId, session)
+        synced++
+      } catch {
+        // Skip unreadable files
+      }
+    }
+    if (synced > 0) {
+      console.log(`[sessions] Synced ${synced} sessions from disk`)
+    }
+  } catch {
+    // Non-fatal
+  }
+}
+
 // Get all sessions for a project or globally
-export function getSessionsList(projectId?: string, cwd?: string): SessionInfo[] {
+export async function getSessionsList(projectId?: string, cwd?: string): Promise<SessionInfo[]> {
+  // Re-sync from disk to pick up sessions created by other processes
+  await syncSessionsFromDisk()
+
   const result: SessionInfo[] = []
 
   for (const session of sessions.values()) {
@@ -1677,22 +1850,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       })
     }
 
-    // Send session history from turns
-    if (session && session.turns.length > 0) {
-      const derivedMessages = turnsToMessages(session.turns)
-      if (derivedMessages.length > 0) {
-        sendMessageHistoryInChunks(client, projectId, session.sessionId, derivedMessages)
-      }
-      const derivedEvents = turnsToDebugEvents(session.turns)
-      if (derivedEvents.length > 0) {
-        sendToClient(client, {
-          type: 'sdk_event_history',
-          projectId,
-          sessionId: session.sessionId,
-          events: derivedEvents,
-        })
-      }
-    }
+    // History is now loaded via HTTP GET /api/sessions/:id/history
+    // to avoid large WebSocket frames that crash mobile clients.
 
     // If a query is running on this project, tell the client
     const projectState = getProjectState(projectId)
@@ -2019,7 +2178,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     }
 
     case 'resume_session': {
-      const resumedSession = resumeSessionForProject(client, projectId, msg.sessionId)
+      const resumedSession = await resumeSessionForProject(client, projectId, msg.sessionId)
       if (resumedSession) {
         clientState.sessionId = resumedSession.sdkSessionId
         const projState = getOrCreateProjectState(projectId)
@@ -2029,20 +2188,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           projectId,
           sessionId: resumedSession.sessionId,
         })
-        // Send session history from turns
-        const derivedMessages = turnsToMessages(resumedSession.turns)
-        if (derivedMessages.length > 0) {
-          sendMessageHistoryInChunks(client, projectId, resumedSession.sessionId, derivedMessages)
-        }
-        const derivedEvents = turnsToDebugEvents(resumedSession.turns)
-        if (derivedEvents.length > 0) {
-          sendToClient(client, {
-            type: 'sdk_event_history',
-            projectId,
-            sessionId: resumedSession.sessionId,
-            events: derivedEvents,
-          })
-        }
+        // History is now loaded via HTTP GET /api/sessions/:id/history
+        // to avoid large WebSocket frames that crash mobile clients.
         const models = getCachedModels()
         if (models && models.length > 0) {
           sendToClient(client, {
@@ -2082,31 +2229,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           })
         }
 
-        // Re-send last summary and suggestions from session history
-        if (resumedSession.summary) {
-          sendToClient(client, {
-            type: 'query_summary',
-            summary: resumedSession.summary,
-            projectId,
-            sessionId: resumedSession.sessionId,
-          })
-        }
-        // Re-extract suggestions from last text event in turns
-        const allEvents = turnsToDebugEvents(resumedSession.turns)
-        const lastTextEvent = [...allEvents].reverse().find(e => e.type === 'text' && e.data?.content)
-        if (lastTextEvent) {
-          const textContent = lastTextEvent.data?.content as string
-          const sugMatch = textContent.match(/\[SUGGESTIONS:\s*(.+?)\]/)
-          if (sugMatch) {
-            const suggestions = sugMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
-            sendToClient(client, {
-              type: 'query_suggestions',
-              suggestions,
-              projectId,
-              sessionId: resumedSession.sessionId,
-            })
-          }
-        }
+        // Summary and suggestions are now included in HTTP history response
 
         // Send updated project statuses
         sendToClient(client, {

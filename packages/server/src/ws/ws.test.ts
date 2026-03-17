@@ -7,18 +7,18 @@ import { getSessionsList, deleteSession } from './index.js'
 // stored in a module-level Map, we test via the exported functions.
 
 describe('getSessionsList', () => {
-  it('should return an array', () => {
-    const sessions = getSessionsList()
+  it('should return an array', async () => {
+    const sessions = await getSessionsList()
     expect(Array.isArray(sessions)).toBe(true)
   })
 
-  it('should return empty list when filtering by nonexistent project', () => {
-    const sessions = getSessionsList('nonexistent-project-xyz-12345')
+  it('should return empty list when filtering by nonexistent project', async () => {
+    const sessions = await getSessionsList('nonexistent-project-xyz-12345')
     expect(sessions).toEqual([])
   })
 
-  it('should return SessionInfo objects with required fields', () => {
-    const sessions = getSessionsList()
+  it('should return SessionInfo objects with required fields', async () => {
+    const sessions = await getSessionsList()
     for (const s of sessions) {
       expect(s).toHaveProperty('sessionId')
       expect(s).toHaveProperty('summary')
@@ -28,8 +28,8 @@ describe('getSessionsList', () => {
     }
   })
 
-  it('should sort sessions by lastModified descending', () => {
-    const sessions = getSessionsList()
+  it('should sort sessions by lastModified descending', async () => {
+    const sessions = await getSessionsList()
     for (let i = 1; i < sessions.length; i++) {
       expect(sessions[i - 1].lastModified).toBeGreaterThanOrEqual(sessions[i].lastModified)
     }

@@ -263,6 +263,74 @@ export function useWebSocket(): UseWebSocketReturn {
     return getProjectState(pid)
   }, [getProjectState])
 
+  // Parse a ChatMessageSummary from the server into a ChatMessage
+  const parseSummaryToMessage = (summary: any): ChatMessage => {
+    const base: ChatMessage = {
+      id: summary.id,
+      role: summary.role,
+      content: summary.content,
+      timestamp: summary.timestamp,
+    }
+    if (summary.costUsd != null) base.costUsd = summary.costUsd
+    if (summary.durationMs != null) base.durationMs = summary.durationMs
+    if (summary.toolCalls?.length) {
+      base.toolCalls = summary.toolCalls.map((tc: any) => ({
+        name: tc.name,
+        id: tc.id,
+        input: tc.inputSummary || '',
+        result: tc.resultPreview,
+        isError: tc.isError,
+      }))
+    }
+    return base
+  }
+
+  // Fetch session history via HTTP with incremental support.
+  // If the session has cached data, sends afterTurn to only fetch new turns.
+  const fetchSessionHistoryRef = useRef(async (projectId: string, sessionId: string) => {
+    try {
+      const pState = getProjectState(projectId)
+      const sState = getSessionState(pState, sessionId)
+
+      // Find last cached user message timestamp for incremental fetch
+      const lastUserMsg = [...sState.messages].reverse().find(m => m.role === 'user')
+      const afterTurn = lastUserMsg?.timestamp
+      const url = afterTurn
+        ? `/api/sessions/${encodeURIComponent(sessionId)}/history?afterTurn=${afterTurn}`
+        : `/api/sessions/${encodeURIComponent(sessionId)}/history`
+
+      const res = await authFetch(url)
+      if (!res.ok) return
+      const data = await res.json()
+
+      // Append new messages and events (incremental) or set (full load)
+      if (data.messages?.length) {
+        const newMessages = data.messages.map(parseSummaryToMessage)
+        if (afterTurn) {
+          sState.messages = [...sState.messages, ...newMessages]
+        } else {
+          sState.messages = newMessages
+        }
+      }
+
+      if (data.sdkEvents?.length) {
+        if (afterTurn) {
+          sState.sdkEvents = [...sState.sdkEvents, ...data.sdkEvents]
+        } else {
+          sState.sdkEvents = data.sdkEvents
+        }
+      }
+
+      // Summary and suggestions always reflect latest state
+      if (data.summary) sState.latestSummary = data.summary
+      if (data.suggestions) sState.suggestions = data.suggestions
+
+      triggerRender()
+    } catch (err) {
+      console.error('[ws] Failed to fetch session history:', err)
+    }
+  })
+
   const connect = useCallback(() => {
     const clientId = clientIdRef.current
     const token = getToken()
@@ -578,6 +646,10 @@ export function useWebSocket(): UseWebSocketReturn {
             pState.awaitingSessionSwitch = false
             needsRender = true
           }
+          // Fetch session history via HTTP (server no longer sends it over WS)
+          if (msg.sessionId && msgProjectId) {
+            fetchSessionHistoryRef.current(msgProjectId, msg.sessionId)
+          }
           break
 
         case 'message_history': {
@@ -667,6 +739,10 @@ export function useWebSocket(): UseWebSocketReturn {
             if (msg.sessionId && pState.awaitingSessionSwitch) {
               pState.sessionId = msg.sessionId
               pState.awaitingSessionSwitch = false
+              // Fetch session history via HTTP (server no longer sends it over WS)
+              if (msgProjectId) {
+                fetchSessionHistoryRef.current(msgProjectId, msg.sessionId)
+              }
             }
             if (msg.sdkMcpServers) pState.sdkMcpServers = msg.sdkMcpServers
             if (msg.sdkSkills) pState.sdkSkills = msg.sdkSkills
@@ -897,11 +973,13 @@ export function useWebSocket(): UseWebSocketReturn {
     const pid = activeProjectIdRef.current
     if (!pid) return
     const pState = getProjectState(pid)
-    // Switch viewing session and clear cached state (server will send fresh message_history)
     // Cancel any pending switch_project session assignment — this explicit resume takes priority
     pState.awaitingSessionSwitch = false
     pState.sessionId = sessionId
-    pState.sessionStates.set(sessionId, createEmptySessionState())
+    // Keep existing cached state for instant rendering; HTTP fetch will merge incremental data
+    if (!pState.sessionStates.has(sessionId)) {
+      pState.sessionStates.set(sessionId, createEmptySessionState())
+    }
     triggerRender()
     sendWithProject({ type: 'resume_session', sessionId })
   }, [getProjectState, sendWithProject, triggerRender])
