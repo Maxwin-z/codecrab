@@ -37,9 +37,11 @@ struct InputBarView: View {
     @AppStorage("voiceInputMode") private var lastVoiceMode: String = "apple"
     @State private var isLLMRecording = false
     @State private var llmAudioLevel: Float = 0
+    @State private var llmPeakAudioLevel: Float = 0
     @State private var llmRecordingDuration: TimeInterval = 0
     @State private var llmRecordingTimer: Timer?
     @State private var isLLMTranscribing = false
+    @State private var voiceHint: String? = nil
     private let llmRecorder = LLMAudioRecorderService()
     private let llmVoiceService = MultimodalVoiceService()
 
@@ -117,11 +119,26 @@ struct InputBarView: View {
             if isLLMRecording {
                 LLMRecordingOverlayView(
                     audioLevel: llmAudioLevel,
-                    duration: llmRecordingDuration,
-                    onStop: { stopLLMRecording() }
+                    duration: llmRecordingDuration
                 )
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
+            }
+
+            // Voice hint (no voice detected / too short)
+            if let hint = voiceHint {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.slash")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .transition(.opacity)
             }
 
             // Transcribing indicator
@@ -475,6 +492,9 @@ struct InputBarView: View {
         llmRecorder.onAudioLevel = { [self] level in
             Task { @MainActor in
                 self.llmAudioLevel = level
+                if level > self.llmPeakAudioLevel {
+                    self.llmPeakAudioLevel = level
+                }
             }
         }
 
@@ -482,6 +502,7 @@ struct InputBarView: View {
             try llmRecorder.startRecording()
             isLLMRecording = true
             llmRecordingDuration = 0
+            llmPeakAudioLevel = 0
 
             // Duration timer
             llmRecordingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
@@ -510,12 +531,23 @@ struct InputBarView: View {
         llmRecordingTimer = nil
         let samples = llmRecorder.stopRecording()
         let duration = llmRecordingDuration
+        let peakLevel = llmPeakAudioLevel
         isLLMRecording = false
         llmAudioLevel = 0
         llmRecordingDuration = 0
+        llmPeakAudioLevel = 0
         withAnimation(.easeOut(duration: 0.2)) { micPulse = false }
 
         guard !samples.isEmpty else { return }
+
+        print("[Voice] duration=\(String(format: "%.2f", duration))s, samples=\(samples.count), peakRMS=\(String(format: "%.6f", peakLevel))")
+
+        // Short recording with no significant voice → skip transcription (saves tokens)
+        if duration < 3 && peakLevel < 0.01 {
+            print("[Voice] SKIP: short recording (\(String(format: "%.1f", duration))s) with no voice (peak: \(String(format: "%.6f", peakLevel)))")
+            showVoiceHint("No voice detected, please try again")
+            return
+        }
 
         // Start streaming transcription
         isLLMTranscribing = true
@@ -561,6 +593,17 @@ struct InputBarView: View {
             let finalText = MultimodalVoiceService.stripTranscriptionTags(accumulated)
             if !finalText.isEmpty {
                 VoiceContextService.shared.recordUtterance(finalText)
+            }
+        }
+    }
+
+    private func showVoiceHint(_ message: String) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            voiceHint = message
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            withAnimation(.easeIn(duration: 0.3)) {
+                voiceHint = nil
             }
         }
     }
