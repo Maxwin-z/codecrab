@@ -1,4 +1,4 @@
-// ChatPage — Main chat interface
+// ChatPage — Main chat interface with session list view
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
@@ -6,10 +6,9 @@ import { MessageList } from './MessageList'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { QueryQueueBar } from './QueryQueueBar'
 import { UserQuestionForm } from './UserQuestionForm'
-import { SessionSidebar } from './SessionSidebar'
 import { ExecSessionSheet } from './ExecSessionSheet'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Menu, Loader2, Code, ArrowDown } from 'lucide-react'
+import { ArrowLeft, Loader2, Code, ArrowDown, Plus, History, List } from 'lucide-react'
 import { authFetch } from '@/lib/auth'
 import type { ImageAttachment, McpInfo, SessionInfo } from '@codeclaws/shared'
 
@@ -24,19 +23,107 @@ interface ChatPageProps {
   onUnauthorized?: () => void
 }
 
+// --- Session List View (inline, not sidebar) ---
+
+function SessionStatusBadge({ status, isActive }: { status?: 'idle' | 'processing' | 'error'; isActive?: boolean }) {
+  if (status === 'processing') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-500/20 text-yellow-600 dark:text-yellow-400">
+        <span className="w-1 h-1 rounded-full bg-yellow-500 animate-pulse" />
+        processing
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-600 dark:text-red-400">
+        error
+      </span>
+    )
+  }
+  if (isActive) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-500/20 text-green-600 dark:text-green-400">
+        idle
+      </span>
+    )
+  }
+  return null
+}
+
+interface SessionListViewProps {
+  sessions: SessionInfo[]
+  loading: boolean
+  now: number
+  onResume: (session: SessionInfo) => void
+  onNewChat: () => void
+}
+
+function SessionListView({ sessions, loading, now, onResume, onNewChat }: SessionListViewProps) {
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="px-4 pt-4 pb-2">
+        <Button onClick={onNewChat} className="w-full" size="sm">
+          <Plus className="h-4 w-4 mr-1.5" />
+          New Chat
+        </Button>
+      </div>
+
+      <div className="px-2 pb-4">
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {!loading && sessions.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <History className="h-8 w-8 mb-3 opacity-30" />
+            <p className="text-sm">No sessions yet</p>
+            <p className="text-xs mt-1">Start a new chat to begin</p>
+          </div>
+        )}
+        {sessions.map((session) => (
+          <div
+            key={session.sessionId}
+            onClick={() => onResume(session)}
+            className="group flex items-start gap-3 px-3 py-3 rounded-lg cursor-pointer hover:bg-accent transition-colors mb-0.5"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-sm truncate">
+                {session.summary || session.firstPrompt || 'Untitled session'}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-xs text-muted-foreground">{formatTimeAgo(session.lastModified, now)}</p>
+                <span className="text-muted-foreground/50">·</span>
+                <p className="text-xs text-muted-foreground/50 font-mono">{session.sessionId.slice(-6)}</p>
+                <SessionStatusBadge status={session.status} isActive={session.isActive} />
+              </div>
+            </div>
+            <span className="text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors mt-0.5">›</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// --- Main ChatPage ---
+
 export function ChatPage({ onUnauthorized }: ChatPageProps) {
   const ws = useWs()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputBarRef = useRef<InputBarHandle>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(false)
   const [customMcps, setCustomMcps] = useState<McpInfo[]>([])
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set())
-  const [lastSession, setLastSession] = useState<SessionInfo | null>(null)
   const [execSessionId, setExecSessionId] = useState<string | null>(null)
+  const [showSessionList, setShowSessionList] = useState(false)
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionsNow, setSessionsNow] = useState(Date.now())
   // Track whether we've initialized enabledIds from the first data load
   const initializedRef = useRef(false)
   // Track whether we've already handled the initial session param from the URL
@@ -137,6 +224,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
   // Auto-scroll to bottom when messages change or project loads
   useEffect(() => {
+    if (showSessionList) return
     const el = scrollRef.current
     if (el) {
       // Use requestAnimationFrame to ensure DOM has updated
@@ -144,7 +232,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         el.scrollTop = el.scrollHeight
       })
     }
-  }, [ws.messages, ws.streamingText, ws.streamingThinking, ws.sdkEvents, project?.id])
+  }, [ws.messages, ws.streamingText, ws.streamingThinking, ws.sdkEvents, project?.id, showSessionList])
 
   // Handle project (and optional session) query params
   useEffect(() => {
@@ -168,6 +256,10 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
           if (sessionParam && !initialSessionHandledRef.current) {
             initialSessionHandledRef.current = true
             ws.resumeSession(sessionParam)
+          } else if (!initialSessionHandledRef.current) {
+            // No explicit session — show session list instead of auto-resuming
+            initialSessionHandledRef.current = true
+            setShowSessionList(true)
           }
         })
         .catch((err) => {
@@ -186,13 +278,13 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
   // Sync session ID to URL (replaceState to avoid polluting history)
   useEffect(() => {
-    if (!project || !ws.sessionId) return
+    if (!project || !ws.sessionId || showSessionList) return
     const url = new URL(window.location.href)
     if (url.searchParams.get('session') !== ws.sessionId) {
       url.searchParams.set('session', ws.sessionId)
       window.history.replaceState(null, '', url.toString())
     }
-  }, [project, ws.sessionId])
+  }, [project, ws.sessionId, showSessionList])
 
   // Update document title when project changes
   useEffect(() => {
@@ -204,19 +296,51 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     }
   }, [project])
 
-  // Fetch last session for the empty state (mirrors iOS fetchLastSession)
-  useEffect(() => {
+  // Fetch sessions for session list view
+  const fetchSessions = useCallback(async (showLoading = true) => {
     if (!project) return
-    authFetch(`/api/sessions?projectId=${project.id}`, {}, onUnauthorized)
-      .then((r) => r.json())
-      .then((data: SessionInfo[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          const sorted = [...data].sort((a, b) => b.lastModified - a.lastModified)
-          setLastSession(sorted[0])
-        }
-      })
-      .catch(() => {})
-  }, [project, onUnauthorized])
+    if (showLoading) setSessionsLoading(true)
+    try {
+      const data = await ws.fetchSessions(project.id)
+      setSessions(data)
+    } catch {
+      // ignore
+    } finally {
+      if (showLoading) setSessionsLoading(false)
+    }
+  }, [project, ws])
+
+  // Fetch on project load
+  useEffect(() => {
+    if (project) fetchSessions(true)
+  }, [project, fetchSessions])
+
+  // Auto-refresh sessions while session list is visible
+  useEffect(() => {
+    if (!showSessionList) return
+    const interval = setInterval(() => {
+      fetchSessions(false)
+      setSessionsNow(Date.now())
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [showSessionList, fetchSessions])
+
+  // Update time display every minute in session list view
+  useEffect(() => {
+    if (!showSessionList) return
+    const interval = setInterval(() => setSessionsNow(Date.now()), 60000)
+    return () => clearInterval(interval)
+  }, [showSessionList])
+
+  const handleResumeFromList = useCallback((session: SessionInfo) => {
+    ws.resumeSession(session.sessionId)
+    setShowSessionList(false)
+  }, [ws])
+
+  const handleNewChatFromList = useCallback(() => {
+    ws.newChat()
+    setShowSessionList(false)
+  }, [ws])
 
   const showEmptyState = ws.messages.length === 0 && !ws.streamingText && !ws.streamingThinking && !ws.isRunning
 
@@ -250,6 +374,51 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     )
   }
 
+  // --- Session list view ---
+  if (showSessionList) {
+    return (
+      <div className="h-full flex flex-col bg-background">
+        {/* Header */}
+        <header className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate('/')}
+              className="shrink-0"
+              title="Back to projects"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            {project && (
+              <div className="min-w-0 overflow-hidden">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{project.icon || '📁'}</span>
+                  <h2 className="text-sm font-medium truncate">{project.name}</h2>
+                </div>
+                <p className="text-xs text-muted-foreground truncate max-w-[200px]">{project.path}</p>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <History className="h-3.5 w-3.5" />
+            <span>Sessions</span>
+          </div>
+        </header>
+
+        {/* Session list */}
+        <SessionListView
+          sessions={sessions}
+          loading={sessionsLoading}
+          now={sessionsNow}
+          onResume={handleResumeFromList}
+          onNewChat={handleNewChatFromList}
+        />
+      </div>
+    )
+  }
+
+  // --- Chat detail view ---
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Header */}
@@ -258,9 +427,9 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate('/')}
+            onClick={() => setShowSessionList(true)}
             className="shrink-0"
-            title="Back to projects"
+            title="Back to sessions"
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -278,10 +447,10 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setSidebarOpen(true)}
-          title="Session history"
+          onClick={() => setShowSessionList(true)}
+          title="Session list"
         >
-          <Menu className="h-5 w-5" />
+          <List className="h-5 w-5" />
         </Button>
       </header>
 
@@ -336,28 +505,9 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
                 <p className="text-sm text-muted-foreground mt-1">Your AI coding companion</p>
               </div>
 
-              {/* Last session card */}
-              {lastSession && (
-                <button
-                  onClick={() => ws.resumeSession(lastSession.sessionId)}
-                  className="mt-4 w-full max-w-xs flex items-center gap-3 px-4 py-3 rounded-xl bg-muted hover:bg-muted/80 transition-colors text-left"
-                >
-                  <span className="text-muted-foreground shrink-0">🕐</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {lastSession.summary || lastSession.firstPrompt || 'Untitled session'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatTimeAgo(lastSession.lastModified)}
-                    </p>
-                  </div>
-                  <span className="text-xs text-muted-foreground/50">›</span>
-                </button>
-              )}
-
               <div className="flex flex-col items-center gap-1.5 mt-4 text-muted-foreground/50">
                 <ArrowDown className="h-4 w-4 animate-bounce" />
-                <p className="text-xs">Send a message to start a new session</p>
+                <p className="text-xs">Send a message to start</p>
               </div>
             </div>
           </div>
@@ -476,9 +626,6 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         onProbeSdk={ws.probeSdk}
       />
 
-      {/* Session History Sidebar */}
-      <SessionSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} projectId={project?.id} />
-
       {/* Exec Session Sheet */}
       {execSessionId && (
         <ExecSessionSheet sessionId={execSessionId} onClose={() => setExecSessionId(null)} />
@@ -487,9 +634,9 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   )
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const now = Date.now()
-  const diff = now - timestamp
+function formatTimeAgo(timestamp: number, now?: number): string {
+  const ref = now ?? Date.now()
+  const diff = ref - timestamp
   const seconds = Math.floor(diff / 1000)
   const minutes = Math.floor(seconds / 60)
   const hours = Math.floor(minutes / 60)
