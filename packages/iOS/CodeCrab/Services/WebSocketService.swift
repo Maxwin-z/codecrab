@@ -528,8 +528,16 @@ class WebSocketService: ObservableObject {
         case "cleared":
             if isCurrentProject {
                 clearSessionPublished()
+                self.sessionId = ""
                 self.pendingPermission = nil
-                if let pid = projectId { runningProjectIds.remove(pid) }
+                if let pid = projectId {
+                    runningProjectIds.remove(pid)
+                    // After /clear, server sends a new system init with the new session ID.
+                    // Re-enable awaitingSessionSwitch so we pick it up.
+                    ensureProjectState(pid)
+                    projectStates[pid]!.sessionId = ""
+                    projectStates[pid]!.awaitingSessionSwitch = true
+                }
                 self.isAborting = false
             }
         case "aborted":
