@@ -121,7 +121,7 @@ struct LaunchScreen: View {
             VStack(spacing: 32) {
                 Spacer()
 
-                // Animated lobster
+                // Animated logo
                 ZStack {
                     // Glow effect
                     Circle()
@@ -129,8 +129,10 @@ struct LaunchScreen: View {
                         .frame(width: 180, height: 180)
                         .scaleEffect(lobsterScale * 1.2)
 
-                    Text("\u{1F99E}")
-                        .font(.system(size: 100))
+                    Image("CodeCrabLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 120, height: 120)
                         .scaleEffect(lobsterScale)
                         .rotationEffect(.degrees(lobsterRotation))
                 }

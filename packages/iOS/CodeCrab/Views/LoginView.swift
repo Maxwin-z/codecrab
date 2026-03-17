@@ -34,13 +34,10 @@ struct LoginView: View {
         ScrollView {
             VStack(spacing: 0) {
                 // Header
-                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: 48, weight: .thin))
-                    .foregroundStyle(.linearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
+                Image("CodeCrabLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
                     .padding(.top, 60)
                     .padding(.bottom, 20)
 
