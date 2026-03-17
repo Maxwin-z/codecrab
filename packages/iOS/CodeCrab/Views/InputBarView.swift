@@ -120,7 +120,9 @@ struct InputBarView: View {
             if isLLMRecording {
                 LLMRecordingOverlayView(
                     audioLevels: llmAudioLevels,
-                    duration: llmRecordingDuration
+                    duration: llmRecordingDuration,
+                    maxDuration: LLMAudioRecorderService.maxDuration,
+                    onCancel: { cancelLLMRecording() }
                 )
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
@@ -529,6 +531,21 @@ struct InputBarView: View {
         } catch {
             print("LLM recording start failed: \(error)")
         }
+    }
+
+    /// Cancel recording without transcription
+    private func cancelLLMRecording() {
+        guard isLLMRecording else { return }
+
+        llmRecordingTimer?.invalidate()
+        llmRecordingTimer = nil
+        _ = llmRecorder.stopRecording()
+        isLLMRecording = false
+        llmAudioLevel = 0
+        llmAudioLevels = []
+        llmRecordingDuration = 0
+        llmPeakAudioLevel = 0
+        withAnimation(.easeOut(duration: 0.2)) { micPulse = false }
     }
 
     private func stopLLMRecording() {
