@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight, Terminal, FileText, Clock, Hash, X, List, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { buildApiUrl } from '@/lib/server'
-import type { SessionInfo, ChatMessage, DebugEvent } from '@codeclaws/shared'
+import type { SessionInfo, ChatMessage, DebugEvent } from '@codecrab/shared'
 
 interface ProjectSummary {
   project: {

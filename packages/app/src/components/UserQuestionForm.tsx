@@ -1,6 +1,6 @@
 // UserQuestionForm — Claude asks user questions with tabs UI
 import { useState, useRef, useEffect, useCallback } from 'react'
-import type { Question } from '@codeclaws/shared'
+import type { Question } from '@codecrab/shared'
 import { ChevronLeft, ChevronRight, Check, CircleAlert } from 'lucide-react'
 
 interface Props {

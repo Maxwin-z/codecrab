@@ -1,4 +1,4 @@
-// @codeclaws/relay — Public network relay server
+// @codecrab/relay — Public network relay server
 //
 // Architecture:
 //   [User Browser] ←WSS→ [Relay Server] ←WSS→ [User's LAN Server]

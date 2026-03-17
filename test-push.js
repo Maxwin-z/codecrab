@@ -71,4 +71,4 @@ req.on("end", () => {
   if (responseData) console.log("Response:", responseData);
   session.close();
 });
-req.end(JSON.stringify({ aps: { alert: { title: "CodeClaws", body: message }, sound: "default" } }));
+req.end(JSON.stringify({ aps: { alert: { title: "CodeCrab", body: message }, sound: "default" } }));

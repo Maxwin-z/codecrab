@@ -5,7 +5,7 @@ import * as fs from 'fs'
 import * as http from 'http'
 
 const CHROME_DEBUG_PORT = 9222
-const USER_DATA_DIR = path.join(os.homedir(), '.codeclaws', 'chrome-profile')
+const USER_DATA_DIR = path.join(os.homedir(), '.codecrab', 'chrome-profile')
 
 let chromeProcess: ChildProcess | null = null
 

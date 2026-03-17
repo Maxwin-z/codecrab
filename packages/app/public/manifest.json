@@ -1,6 +1,6 @@
 {
-  "name": "CodeClaws",
-  "short_name": "CodeClaws",
+  "name": "CodeCrab",
+  "short_name": "CodeCrab",
   "description": "AI-powered coding engine",
   "start_url": "/",
   "display": "standalone",

@@ -1,6 +1,6 @@
 // MessageList — renders chat messages with optional SDK event timeline
 import { useState, useMemo } from 'react'
-import type { ChatMessage, DebugEvent } from '@codeclaws/shared'
+import type { ChatMessage, DebugEvent } from '@codecrab/shared'
 import { stripMetaTags } from '@/lib/utils'
 
 interface MessageListProps {

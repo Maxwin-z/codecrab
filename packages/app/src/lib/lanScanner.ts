@@ -1,4 +1,4 @@
-// LAN scanner — discovers CodeClaws servers on the local network
+// LAN scanner — discovers CodeCrab servers on the local network
 // Scans the same subnet as the browser's host address via /api/discovery
 
 export interface DiscoveredServer {
@@ -50,7 +50,7 @@ async function probe(url: string, signal?: AbortSignal): Promise<DiscoveredServe
 
     if (!res.ok) return null
     const data = await res.json()
-    if (data.service !== 'CodeClaws') return null
+    if (data.service !== 'CodeCrab') return null
 
     const parsed = new URL(url)
     return {
@@ -65,7 +65,7 @@ async function probe(url: string, signal?: AbortSignal): Promise<DiscoveredServe
 }
 
 /**
- * Scan the local subnet for CodeClaws servers.
+ * Scan the local subnet for CodeCrab servers.
  * Uses the browser's current hostname to determine the subnet.
  */
 export function scanLAN(

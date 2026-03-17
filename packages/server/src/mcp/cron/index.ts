@@ -2,7 +2,7 @@
 //
 // Components:
 //   types.ts      — Type definitions
-//   store.ts      — JSON file persistence (~/.codeclaws/cron/)
+//   store.ts      — JSON file persistence (~/.codecrab/cron/)
 //   scheduler.ts  — node-cron task scheduling
 //   executor.ts   — WebSocket-based execution dispatch
 //   tools.ts      — MCP tool definitions for Claude Agent SDK

@@ -18,7 +18,7 @@ vi.mock('../../engine/internal.js', () => ({
 import { executeInternalQuery } from '../../engine/internal.js'
 const mockExecuteInternalQuery = vi.mocked(executeInternalQuery)
 
-const SOUL_DIR = path.join(os.homedir(), '.codeclaws', 'soul')
+const SOUL_DIR = path.join(os.homedir(), '.codecrab', 'soul')
 const SOUL_MD = path.join(SOUL_DIR, 'SOUL.md')
 const CLAUDE_MD = path.join(SOUL_DIR, 'CLAUDE.md')
 const EVOLUTION_LOG = path.join(SOUL_DIR, 'evolution-log.jsonl')
@@ -185,7 +185,7 @@ describe('ensureSoulProject', () => {
 
   it('should register __soul__ in projects.json', () => {
     ensureSoulProject()
-    const projectsFile = path.join(os.homedir(), '.codeclaws', 'projects.json')
+    const projectsFile = path.join(os.homedir(), '.codecrab', 'projects.json')
     const projects = JSON.parse(fs.readFileSync(projectsFile, 'utf-8'))
     const soul = projects.find((p: any) => p.id === '__soul__')
     expect(soul).toBeDefined()

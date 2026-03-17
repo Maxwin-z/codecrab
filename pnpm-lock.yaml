@@ -14,7 +14,7 @@ importers:
 
   packages/app:
     dependencies:
-      '@codeclaws/shared':
+      '@codecrab/shared':
         specifier: workspace:*
         version: link:../shared
       '@tailwindcss/typography':
@@ -75,10 +75,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@codeclaws/server':
+      '@codecrab/server':
         specifier: workspace:*
         version: link:../server
-      '@codeclaws/shared':
+      '@codecrab/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -91,7 +91,7 @@ importers:
 
   packages/relay:
     dependencies:
-      '@codeclaws/shared':
+      '@codecrab/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -107,7 +107,7 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.74
         version: 0.2.74(zod@4.3.6)
-      '@codeclaws/shared':
+      '@codecrab/shared':
         specifier: workspace:*
         version: link:../shared
       chrono-node:

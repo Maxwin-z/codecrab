@@ -16,7 +16,7 @@ struct SharedFileInfo: Codable {
 
 class SharedDataManager {
     static let shared = SharedDataManager()
-    static let appGroupId = "group.cn.byutech.codeclaws"
+    static let appGroupId = "group.cn.byutech.codecrab"
 
     private var sharedDefaults: UserDefaults? {
         UserDefaults(suiteName: Self.appGroupId)
@@ -40,7 +40,7 @@ class SharedDataManager {
 
     /// Sync main app credentials to App Group for extension access
     func syncCredentials() {
-        serverURL = UserDefaults.standard.string(forKey: "codeclaws_server_url")
+        serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url")
         authToken = KeychainHelper.shared.getToken()
     }
 

@@ -148,7 +148,7 @@ describe('cron job execution with missing parentSessionId', () => {
 
     const executor = new CronExecutor({
       mainAppUrl: 'http://localhost:4200/api/cron',
-      configDir: '/tmp/test-codeclaws',
+      configDir: '/tmp/test-codecrab',
     })
 
     executor.setExecuteCallback(async (req) => {
@@ -187,7 +187,7 @@ describe('cron job execution with missing parentSessionId', () => {
   it('executor should fail with clear error when callback returns failure', async () => {
     const executor = new CronExecutor({
       mainAppUrl: 'http://localhost:4200/api/cron',
-      configDir: '/tmp/test-codeclaws',
+      configDir: '/tmp/test-codecrab',
     })
 
     executor.setExecuteCallback(async (req) => {

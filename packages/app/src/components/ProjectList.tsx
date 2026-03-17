@@ -4,7 +4,7 @@ import { Plus, Trash2, FolderOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { authFetch } from '@/lib/auth'
 import { useWs } from '@/hooks/WebSocketContext'
-import type { Project } from '@codeclaws/shared'
+import type { Project } from '@codecrab/shared'
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, {

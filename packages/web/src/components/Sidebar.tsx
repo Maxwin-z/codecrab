@@ -21,7 +21,7 @@ export function Sidebar() {
   return (
     <aside className="w-72 h-full flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shrink-0">
       <div className="px-4 pt-4 pb-1">
-        <h1 className="text-xl font-bold tracking-tight">CodeClaws</h1>
+        <h1 className="text-xl font-bold tracking-tight">CodeCrab</h1>
       </div>
 
       <div className="px-3 py-2">

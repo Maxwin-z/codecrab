@@ -6,7 +6,7 @@ import { Dashboard } from '@/components/Dashboard'
 import { useSoul } from '@/hooks/useSoul'
 import { useCronSummary } from '@/hooks/useCron'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import type { Project } from '@codeclaws/shared'
+import type { Project } from '@codecrab/shared'
 
 interface HomePageProps {
   onOpenSetup: () => void
@@ -28,7 +28,7 @@ export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
       {/* Header — only on mobile (desktop has sidebar) */}
       {!isDesktop && (
         <header className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-          <h1 className="text-lg font-semibold tracking-tight">CodeClaws</h1>
+          <h1 className="text-lg font-semibold tracking-tight">CodeCrab</h1>
           <Button variant="ghost" size="icon-sm" onClick={onOpenSetup} aria-label="Settings">
             <Settings className="h-4 w-4" />
           </Button>

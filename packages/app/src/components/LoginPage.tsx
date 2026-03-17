@@ -39,11 +39,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl">Welcome to CodeClaws</CardTitle>
+          <CardTitle className="text-2xl">Welcome to CodeCrab</CardTitle>
           <CardDescription>
             Enter your access token to continue. The token is stored in{' '}
             <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
-              ~/.codeclaws/config.json
+              ~/.codecrab/config.json
             </code>
           </CardDescription>
         </CardHeader>

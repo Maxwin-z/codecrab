@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import type { Request, Response, NextFunction } from 'express'
 
-const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
+const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
 
 export interface ServerConfig {
@@ -19,7 +19,7 @@ export function generateToken(): string {
   return crypto.randomBytes(32).toString('hex')
 }
 
-/** Read server config from ~/.codeclaws/config.json */
+/** Read server config from ~/.codecrab/config.json */
 export async function readConfig(): Promise<ServerConfig> {
   try {
     const data = await fs.readFile(CONFIG_FILE, 'utf-8')
@@ -29,7 +29,7 @@ export async function readConfig(): Promise<ServerConfig> {
   }
 }
 
-/** Write server config to ~/.codeclaws/config.json */
+/** Write server config to ~/.codecrab/config.json */
 export async function writeConfig(config: ServerConfig): Promise<void> {
   await fs.mkdir(CONFIG_DIR, { recursive: true })
   await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2))

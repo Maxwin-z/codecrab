@@ -2,7 +2,7 @@
 //
 // Auth is always handled by the Claude Code CLI via ~/.claude (OAuth session).
 // CLAUDE_CONFIG_DIR always points to ~/.claude so skills, commands, settings,
-// and auth are shared seamlessly between Claude Code CLI and CodeClaws.
+// and auth are shared seamlessly between Claude Code CLI and CodeCrab.
 //
 // For 3rd-party models, apiKey + baseUrl override the API endpoint while
 // still using ~/.claude for SDK runtime (skills, commands, etc.).

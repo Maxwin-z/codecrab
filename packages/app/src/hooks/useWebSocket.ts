@@ -16,12 +16,12 @@ import type {
   SdkMcpServer,
   SdkSkill,
   ServerMessage,
-} from '@codeclaws/shared'
+} from '@codecrab/shared'
 import { getToken, authFetch } from '@/lib/auth'
 import { buildWsUrl } from '@/lib/server'
 import { stripMetaTags } from '@/lib/utils'
 
-const STORAGE_KEY_CLIENT_ID = 'codeclaws_client_id'
+const STORAGE_KEY_CLIENT_ID = 'codecrab_client_id'
 
 let msgIdCounter = 0
 function genId(): string {
@@ -224,7 +224,7 @@ export interface UseWebSocketReturn {
   setPermissionMode: (mode: PermissionMode) => void
   respondToPermission: (requestId: string, allow: boolean) => void
   dequeueQuery: (queryId: string) => void
-  fetchSessions: () => Promise<import('@codeclaws/shared').SessionInfo[]>
+  fetchSessions: () => Promise<import('@codecrab/shared').SessionInfo[]>
 }
 
 export function useWebSocket(): UseWebSocketReturn {
@@ -1068,7 +1068,7 @@ export function useWebSocket(): UseWebSocketReturn {
     sendWithProject({ type: 'probe_sdk' })
   }, [sendWithProject])
 
-  const fetchSessions = useCallback(async (): Promise<import('@codeclaws/shared').SessionInfo[]> => {
+  const fetchSessions = useCallback(async (): Promise<import('@codecrab/shared').SessionInfo[]> => {
     try {
       const params = new URLSearchParams()
       const pid = activeProjectIdRef.current

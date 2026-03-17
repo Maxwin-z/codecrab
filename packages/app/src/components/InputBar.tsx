@@ -1,6 +1,6 @@
 // InputBar — user text input with image upload and drag & drop support
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import type { ImageAttachment, McpInfo, PermissionMode } from '@codeclaws/shared'
+import type { ImageAttachment, McpInfo, PermissionMode } from '@codecrab/shared'
 
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const MAX_LONG_EDGE = 1568

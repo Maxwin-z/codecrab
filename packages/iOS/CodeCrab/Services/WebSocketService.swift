@@ -115,11 +115,11 @@ class WebSocketService: ObservableObject {
     private var recentlyEndedProjectIds = Set<String>()
 
     init() {
-        if let savedId = UserDefaults.standard.string(forKey: "codeclaws_client_id") {
+        if let savedId = UserDefaults.standard.string(forKey: "codecrab_client_id") {
             self.clientId = savedId
         } else {
             let newId = "client-\(Int(Date().timeIntervalSince1970 * 1000))-\(Int.random(in: 1000...9999))"
-            UserDefaults.standard.set(newId, forKey: "codeclaws_client_id")
+            UserDefaults.standard.set(newId, forKey: "codecrab_client_id")
             self.clientId = newId
         }
     }
@@ -183,7 +183,7 @@ class WebSocketService: ObservableObject {
     func connect() {
         Task { @MainActor in
             guard !self.connected else { return }
-            guard let serverURLStr = UserDefaults.standard.string(forKey: "codeclaws_server_url"),
+            guard let serverURLStr = UserDefaults.standard.string(forKey: "codecrab_server_url"),
                   let token = KeychainHelper.shared.getToken() else { return }
 
             let wsURLStr = serverURLStr.replacingOccurrences(of: "http://", with: "ws://")
@@ -770,7 +770,7 @@ class WebSocketService: ObservableObject {
     private func fetchSessionHistory(sessionId sid: String) {
         Task { @MainActor in
             do {
-                guard let serverURL = UserDefaults.standard.string(forKey: "codeclaws_server_url") else { return }
+                guard let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url") else { return }
 
                 // Find last cached user message timestamp for incremental fetch
                 let cachedMessages: [ChatMessage]

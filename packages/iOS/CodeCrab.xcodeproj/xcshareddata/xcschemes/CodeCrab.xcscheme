@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "C197DCD72F618361007C38AC"
-               BuildableName = "CodeClaws.app"
-               BlueprintName = "CodeClaws"
-               ReferencedContainer = "container:CodeClaws.xcodeproj">
+               BuildableName = "CodeCrab.app"
+               BlueprintName = "CodeCrab"
+               ReferencedContainer = "container:CodeCrab.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "C197DCD72F618361007C38AC"
-            BuildableName = "CodeClaws.app"
-            BlueprintName = "CodeClaws"
-            ReferencedContainer = "container:CodeClaws.xcodeproj">
+            BuildableName = "CodeCrab.app"
+            BlueprintName = "CodeCrab"
+            ReferencedContainer = "container:CodeCrab.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,9 +62,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "C197DCD72F618361007C38AC"
-            BuildableName = "CodeClaws.app"
-            BlueprintName = "CodeClaws"
-            ReferencedContainer = "container:CodeClaws.xcodeproj">
+            BuildableName = "CodeCrab.app"
+            BlueprintName = "CodeCrab"
+            ReferencedContainer = "container:CodeCrab.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

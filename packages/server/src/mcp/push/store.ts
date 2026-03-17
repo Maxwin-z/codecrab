@@ -1,6 +1,6 @@
 // Push device token storage — JSON file persistence
 //
-// Stores APNs device tokens in ~/.codeclaws/push-devices.json
+// Stores APNs device tokens in ~/.codecrab/push-devices.json
 
 import fs from 'fs'
 import path from 'path'
@@ -12,7 +12,7 @@ export interface PushDevice {
   registeredAt: string
 }
 
-const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
+const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
 const DEVICES_FILE = path.join(CONFIG_DIR, 'push-devices.json')
 
 function ensureDir(): void {

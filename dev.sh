@@ -2,7 +2,7 @@
 
 PORTS=(4200 5730 5731)
 
-echo "=== CodeClaws Dev ==="
+echo "=== CodeCrab Dev ==="
 
 for port in "${PORTS[@]}"; do
   pid=$(lsof -ti :$port 2>/dev/null)

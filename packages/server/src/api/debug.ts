@@ -3,10 +3,10 @@ import { Router, type Router as RouterType } from 'express'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import type { Project } from '@codeclaws/shared'
+import type { Project } from '@codecrab/shared'
 import { getSessionsList, getSessionMessages, getSessionDebugEvents } from '../ws/index.js'
 
-const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
+const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
 const PROJECTS_FILE = path.join(CONFIG_DIR, 'projects.json')
 
 async function readProjects(): Promise<Project[]> {

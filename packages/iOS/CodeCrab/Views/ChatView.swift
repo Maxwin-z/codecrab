@@ -313,7 +313,7 @@ struct ChatView: View {
                 .padding(.bottom, 16)
 
             // Title
-            Text("CodeClaws")
+            Text("CodeCrab")
                 .font(.system(size: 28, weight: .bold))
                 .padding(.bottom, 6)
 

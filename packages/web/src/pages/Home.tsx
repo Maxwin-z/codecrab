@@ -32,7 +32,7 @@ export function Home() {
     <div className="flex-1 overflow-y-auto">
       <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-xl shrink-0">
         <div className="px-4 pt-safe-top pb-1">
-          <h1 className="text-[28px] font-bold tracking-tight pt-10 pb-1">CodeClaws</h1>
+          <h1 className="text-[28px] font-bold tracking-tight pt-10 pb-1">CodeCrab</h1>
         </div>
       </header>
 

@@ -8,7 +8,7 @@ import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { chromeTools } from './chrome/index.js'
 import { cronTools } from './cron/index.js'
 import { pushTools } from './push/index.js'
-import type { McpInfo } from '@codeclaws/shared'
+import type { McpInfo } from '@codecrab/shared'
 
 export interface McpDefinition {
   id: string

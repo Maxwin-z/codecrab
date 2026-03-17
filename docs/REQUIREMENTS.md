@@ -1,4 +1,4 @@
-# CodeClaws — 产品需求文档 (PRD)
+# CodeCrab — 产品需求文档 (PRD)
 
 > 版本：1.0 | 日期：2026-03-10
 
@@ -6,7 +6,7 @@
 
 ## 一、产品概述
 
-CodeClaws 是一个将 AI 编程引擎封装为一体化服务的产品。当前基于 Claude Code SDK 构建，未来可扩展支持 OpenCore 等其他底层驱动引擎。用户通过 NPM 安装后即可在本地或远程使用全部能力，包括代码编辑、浏览器自动化、定时任务、消息推送等。
+CodeCrab 是一个将 AI 编程引擎封装为一体化服务的产品。当前基于 Claude Code SDK 构建，未来可扩展支持 OpenCore 等其他底层驱动引擎。用户通过 NPM 安装后即可在本地或远程使用全部能力，包括代码编辑、浏览器自动化、定时任务、消息推送等。
 
 产品由三大模块组成：
 
@@ -27,13 +27,13 @@ CodeClaws 是一个将 AI 编程引擎封装为一体化服务的产品。当前
 项目以 NPM 包形式发布，用户直接安装：
 
 ```bash
-npm install -g codeclaws
+npm install -g codecrab
 ```
 
 安装完成后，通过命令启动配置：
 
 ```bash
-codeclaws setup
+codecrab setup
 ```
 
 #### 2.2 启动本地服务
@@ -42,7 +42,7 @@ codeclaws setup
 
 - Token 采用密码学安全的随机生成机制（`crypto.randomBytes`）
 - 支持用户输入自定义字符串作为盐值（salt）进行混合生成
-- Token 持久化存储在本地配置目录（`~/.codeclaws/config.json`）
+- Token 持久化存储在本地配置目录（`~/.codecrab/config.json`）
 
 #### 2.3 选择访问方式
 
@@ -146,7 +146,7 @@ codeclaws setup
 ### 3.2 现有文件结构
 
 ```
-codeclaws/
+codecrab/
 ├── server/
 │   ├── index.ts              # Express 入口，路由注册，WebSocket 升级
 │   ├── engine/               # AI 引擎适配层（可插拔）
@@ -311,7 +311,7 @@ codeclaws/
 
 ### 4.4 默认工程
 
-- 在用户根目录（`~/codeclaws-workspace`）创建默认项目
+- 在用户根目录（`~/codecrab-workspace`）创建默认项目
 - 作为用户的初始工作空间
 - 包含示例文件和快速入门指引
 - 用户可在此空间内执行各种操作
@@ -359,7 +359,7 @@ VAPID_PRIVATE_KEY=...
 VAPID_EMAIL=mailto:admin@example.com
 
 # 模型配置（可选，也可通过 UI 配置）
-# 模型以 JSON 形式存储在后端：~/.codeclaws/models.json
+# 模型以 JSON 形式存储在后端：~/.codecrab/models.json
 # 支持通过环境变量预设模型
 MODEL_DEFAULT=claude        # 全局默认模型标识
 # 各模型的 API Key 和 Base URL 通过 UI 或配置文件管理
@@ -375,8 +375,8 @@ PUSH_AUTH_TOKEN=...
 
 ### Phase 1 — 基础安装与网络（新增）
 
-- [ ] NPM 全局安装包封装（`codeclaws` CLI）
-- [ ] `codeclaws setup` 配置向导命令
+- [ ] NPM 全局安装包封装（`codecrab` CLI）
+- [ ] `codecrab setup` 配置向导命令
 - [ ] Token 生成与持久化（crypto.randomBytes + 用户盐值）
 - [ ] 局域网访问模式
 - [ ] 连接认证中间件（Token 校验）
@@ -407,7 +407,7 @@ PUSH_AUTH_TOKEN=...
 
 ### Phase 5 — 默认工程与健康检查（新增）
 
-- [ ] 默认工作空间创建（`~/codeclaws-workspace`）
+- [ ] 默认工作空间创建（`~/codecrab-workspace`）
 - [ ] 项目健康检查（配置、网络、依赖、服务状态）
 - [ ] 快速入门示例
 

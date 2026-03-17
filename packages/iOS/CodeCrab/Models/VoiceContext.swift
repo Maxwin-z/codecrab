@@ -27,7 +27,7 @@ struct VoiceLongTermProfile: Codable, Equatable {
     var primaryDomains: [String]?
     /// Language habits (e.g. "混合中英文, technical terms in English")
     var languageHabits: String?
-    /// Frequently mentioned entities (e.g. ["CodeClaws", "Xcode", "SwiftUI"])
+    /// Frequently mentioned entities (e.g. ["CodeCrab", "Xcode", "SwiftUI"])
     var fixedEntities: [String]?
 
     var isEmpty: Bool {

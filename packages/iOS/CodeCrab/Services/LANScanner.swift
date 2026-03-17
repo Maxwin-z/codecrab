@@ -89,7 +89,7 @@ class LANScanner: ObservableObject {
             }
 
             let body = try JSONDecoder().decode(DiscoveryResponse.self, from: data)
-            guard body.service == "CodeClaws" else { return nil }
+            guard body.service == "CodeCrab" else { return nil }
 
             return DiscoveredServer(
                 ip: ip,

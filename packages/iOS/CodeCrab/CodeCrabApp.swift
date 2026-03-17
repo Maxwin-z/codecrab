@@ -23,7 +23,7 @@ class ShareHandler: ObservableObject {
     @Published var pendingAttachments: [ImageAttachment] = []
 
     func handleURL(_ url: URL) {
-        guard url.scheme == "codeclaws", url.host == "share" else { return }
+        guard url.scheme == "codecrab", url.host == "share" else { return }
         consumeShare()
     }
 
@@ -49,7 +49,7 @@ class ShareHandler: ObservableObject {
 }
 
 @main
-struct CodeClawsApp: App {
+struct CodeCrabApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject var authService = AuthService()
     @StateObject var webSocketService = WebSocketService()
@@ -137,7 +137,7 @@ struct LaunchScreen: View {
 
                 // App name
                 VStack(spacing: 8) {
-                    Text("CodeClaws")
+                    Text("CodeCrab")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(Color(red: 0.35, green: 0.25, blue: 0.20))
 

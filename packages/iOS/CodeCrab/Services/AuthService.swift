@@ -7,7 +7,7 @@ class AuthService: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var isLoading: Bool = true
     
-    private let serverURLKey = "codeclaws_server_url"
+    private let serverURLKey = "codecrab_server_url"
     
     func getToken() -> String? {
         return KeychainHelper.shared.getToken()

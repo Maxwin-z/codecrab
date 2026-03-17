@@ -23,7 +23,7 @@ lastUpdated: 2026-03-17T12:30:00Z
 # Skills & Expertise
 
 - **Full-stack TypeScript** — monorepo architecture, Express, React, Vite, WebSocket protocols
-- **iOS / Swift / SwiftUI** — native app development (CodeClaws iOS client)
+- **iOS / Swift / SwiftUI** — native app development (CodeCrab iOS client)
 - **AI/LLM integration** — Claude Agent SDK, multi-model orchestration, streaming protocols
 - **DevOps & Automation** — cron scheduling, pipeline orchestration, automated publishing
 
@@ -35,8 +35,8 @@ lastUpdated: 2026-03-17T12:30:00Z
 
 # Active Context
 
-- **CodeClaws** — AI-powered coding engine, the main project (monorepo: server, app, iOS, web, relay, CLI, shared)
-- **SOUL system** — designing user persona evolution for CodeClaws (as of 2026-03-17)
+- **CodeCrab** — AI-powered coding engine, the main project (monorepo: server, app, iOS, web, relay, CLI, shared)
+- **SOUL system** — designing user persona evolution for CodeCrab (as of 2026-03-17)
 - **词根视频** — English word root video series, 4th iteration pipeline, automated TikTok publishing
 
 # Observations

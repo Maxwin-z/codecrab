@@ -1,6 +1,6 @@
 // SOUL Project — Initializes and manages the __soul__ internal project
 //
-// Creates ~/.codeclaws/soul/ directory with CLAUDE.md and default SOUL.md,
+// Creates ~/.codecrab/soul/ directory with CLAUDE.md and default SOUL.md,
 // and registers it as an internal project in projects.json.
 
 import * as fs from 'fs'
@@ -8,9 +8,9 @@ import * as path from 'path'
 import * as os from 'os'
 import { SOUL_MAX_LENGTH } from './types.js'
 
-const CODECLAWS_DIR = path.join(os.homedir(), '.codeclaws')
-const SOUL_DIR = path.join(CODECLAWS_DIR, 'soul')
-const PROJECTS_FILE = path.join(CODECLAWS_DIR, 'projects.json')
+const CODECRAB_DIR = path.join(os.homedir(), '.codecrab')
+const SOUL_DIR = path.join(CODECRAB_DIR, 'soul')
+const PROJECTS_FILE = path.join(CODECRAB_DIR, 'projects.json')
 
 export const SOUL_PROJECT_ID = '__soul__'
 

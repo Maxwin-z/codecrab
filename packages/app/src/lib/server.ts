@@ -1,6 +1,6 @@
 // Server address management — stores custom server URL in localStorage
 
-const SERVER_URL_KEY = 'codeclaws_server_url'
+const SERVER_URL_KEY = 'codecrab_server_url'
 
 /** Get the stored custom server URL (e.g. "http://192.168.1.50:4200") or null for same-origin */
 export function getServerUrl(): string | null {

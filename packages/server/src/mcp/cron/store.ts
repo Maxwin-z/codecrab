@@ -1,11 +1,11 @@
-// Cron job storage — JSON file based persistence (~/.codeclaws/cron/)
+// Cron job storage — JSON file based persistence (~/.codecrab/cron/)
 
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import type { CronJob, CronJobRun } from './types.js'
 
-let CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
+let CRON_DIR = path.join(os.homedir(), '.codecrab', 'cron')
 let JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
 let RUNS_DIR = path.join(CRON_DIR, 'runs')
 
@@ -18,7 +18,7 @@ export function setCronDir(dir: string): void {
 
 /** Reset to the default cron data directory. */
 export function resetCronDir(): void {
-  CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
+  CRON_DIR = path.join(os.homedir(), '.codecrab', 'cron')
   JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
   RUNS_DIR = path.join(CRON_DIR, 'runs')
 }

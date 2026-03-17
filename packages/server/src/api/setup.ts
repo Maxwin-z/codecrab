@@ -3,11 +3,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import crypto from 'node:crypto'
-import type { ModelConfig, ModelSettings, SetupStatus } from '@codeclaws/shared'
+import type { ModelConfig, ModelSettings, SetupStatus } from '@codecrab/shared'
 
 const router: RouterType = Router()
 
-const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
+const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
 const MODELS_FILE = path.join(CONFIG_DIR, 'models.json')
 const CLAUDE_DIR = path.join(os.homedir(), '.claude')
 

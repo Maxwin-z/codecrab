@@ -6,7 +6,7 @@ import { cronTools, initializeCronTools } from '../tools.js'
 import { CronScheduler } from '../scheduler.js'
 import type { CronJob } from '../types.js'
 
-const CRON_DIR = path.join(os.homedir(), '.codeclaws', 'cron')
+const CRON_DIR = path.join(os.homedir(), '.codecrab', 'cron')
 const JOBS_FILE = path.join(CRON_DIR, 'jobs.json')
 
 // Helper to execute a tool by name

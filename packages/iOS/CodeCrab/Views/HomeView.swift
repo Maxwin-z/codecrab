@@ -47,7 +47,7 @@ struct HomeView: View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 ProjectListView(selection: $detailDestination)
-                    .navigationTitle("CodeClaws")
+                    .navigationTitle("CodeCrab")
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             HStack {

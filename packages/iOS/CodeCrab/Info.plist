@@ -11,10 +11,10 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>codeclaws</string>
+				<string>codecrab</string>
 			</array>
 			<key>CFBundleURLName</key>
-			<string>cn.byutech.codeclaws</string>
+			<string>cn.byutech.codecrab</string>
 		</dict>
 	</array>
 </dict>

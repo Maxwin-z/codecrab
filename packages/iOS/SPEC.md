@@ -1,10 +1,10 @@
-# CodeClaws iOS App — 实现规格文档
+# CodeCrab iOS App — 实现规格文档
 
 本文档为 iOS 原生客户端的完整实现规格，功能对标 `packages/app` React Web 端。
-目标：使用 **SwiftUI** 构建，连接现有 CodeClaws Server (`packages/server`) 的 REST API 和 WebSocket。
+目标：使用 **SwiftUI** 构建，连接现有 CodeCrab Server (`packages/server`) 的 REST API 和 WebSocket。
 
 > **当前状态：** Xcode 模板项目（SwiftData 示例代码），需要完全重写。
-> **保留：** `CodeClawsApp.swift` 作为入口（需重写内容），删除 `Item.swift` 和模板 `ContentView.swift`。
+> **保留：** `CodeCrabApp.swift` 作为入口（需重写内容），删除 `Item.swift` 和模板 `ContentView.swift`。
 
 ---
 
@@ -34,8 +34,8 @@
 ## 1. 项目结构
 
 ```
-CodeClaws/
-├── CodeClawsApp.swift              # App 入口，注入环境对象
+CodeCrab/
+├── CodeCrabApp.swift              # App 入口，注入环境对象
 ├── Models/                         # 数据模型
 │   ├── Project.swift
 │   ├── Session.swift
@@ -297,9 +297,9 @@ class AuthService: ObservableObject {
 ### Keychain 存储
 
 使用 Security framework 存储 token：
-- Service: `"com.codeclaws.token"`
+- Service: `"com.codecrab.token"`
 - Account: `"access_token"`
-- 另存服务器地址到 UserDefaults key: `"codeclaws_server_url"`
+- 另存服务器地址到 UserDefaults key: `"codecrab_server_url"`
 
 ---
 
@@ -505,7 +505,7 @@ func cleanStreamingText(_ text: String) -> String {
 
 ```swift
 @main
-struct CodeClawsApp: App {
+struct CodeCrabApp: App {
     @StateObject var authService = AuthService()
     @StateObject var webSocketService = WebSocketService()
 
@@ -555,7 +555,7 @@ HomeView (项目列表)
 
 **UI 布局：**
 - 垂直居中的卡片
-- 标题: "Welcome to CodeClaws"
+- 标题: "Welcome to CodeCrab"
 - 副标题: "Enter your access token to continue"
 - 服务器地址输入框（首次需要，如 `http://192.168.1.x:4200`）
 - Token 输入框（SecureField）
@@ -587,7 +587,7 @@ HomeView (项目列表)
 ### HomeView
 
 **UI 布局：**
-- NavigationStack 标题: "CodeClaws"
+- NavigationStack 标题: "CodeCrab"
 - toolbar:
   - 右上: "+" 按钮（创建项目）+ 齿轮按钮（设置）
 - 内容: ProjectListView
@@ -745,7 +745,7 @@ func handleSend(text: String, images: [ImageAttachment]?) {
 
 ### MessageListView
 
-**空状态：** 居中显示 "CodeClaws" 大标题 + "Send a message to start" 副标题
+**空状态：** 居中显示 "CodeCrab" 大标题 + "Send a message to start" 副标题
 
 **消息渲染（按 role 区分）：**
 

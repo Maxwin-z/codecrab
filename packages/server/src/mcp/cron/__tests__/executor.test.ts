@@ -27,7 +27,7 @@ describe('CronExecutor', () => {
   beforeEach(() => {
     executor = new CronExecutor({
       mainAppUrl: 'http://localhost:4200/api/cron',
-      configDir: '/tmp/test-codeclaws',
+      configDir: '/tmp/test-codecrab',
     })
   })
 

@@ -5,7 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'os'
 import type { Request, Response } from 'express'
-import type { DetectResult } from '@codeclaws/shared'
+import type { DetectResult } from '@codecrab/shared'
 
 const execFileAsync = promisify(execFile)
 

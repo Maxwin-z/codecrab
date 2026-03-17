@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useWs } from '@/hooks/WebSocketContext'
 import { Button } from '@/components/ui/button'
 import { X, Plus, History } from 'lucide-react'
-import type { SessionInfo } from '@codeclaws/shared'
+import type { SessionInfo } from '@codecrab/shared'
 
 function StatusBadge({ status, isActive }: { status?: 'idle' | 'processing' | 'error'; isActive?: boolean }) {
   if (status === 'processing') {

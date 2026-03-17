@@ -1,4 +1,4 @@
-// @codeclaws/shared — Shared types, protocols, and utilities
+// @codecrab/shared — Shared types, protocols, and utilities
 
 // WebSocket message protocol
 export * from './protocol'

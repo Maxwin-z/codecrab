@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Start CodeClaws server with PM2
+# Start CodeCrab server with PM2
 # Usage: ./start-server.sh [start|stop|restart|logs|status]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="codeclaws-server"
+APP_NAME="codecrab-server"
 PORT="${PORT:-42001}"  # Production port, overrides .env
 lsof -t -i:${PORT} | xargs kill
 

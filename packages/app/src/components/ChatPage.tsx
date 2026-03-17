@@ -11,7 +11,7 @@ import { FileBrowser } from './FileBrowser'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Loader2, Code, ArrowDown, Plus, History, FolderOpen } from 'lucide-react'
 import { authFetch } from '@/lib/auth'
-import type { ImageAttachment, McpInfo, SessionInfo } from '@codeclaws/shared'
+import type { ImageAttachment, McpInfo, SessionInfo } from '@codecrab/shared'
 
 interface Project {
   id: string
@@ -292,9 +292,9 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   useEffect(() => {
     if (project) {
       const icon = project.icon || '🚀'
-      document.title = `${icon} ${project.name} - CodeClaws`
+      document.title = `${icon} ${project.name} - CodeCrab`
     } else {
-      document.title = 'CodeClaws'
+      document.title = 'CodeCrab'
     }
   }, [project])
 
@@ -516,7 +516,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
             <div className="flex flex-col items-center gap-4">
               <Code className="h-10 w-10 text-muted-foreground/30" />
               <div className="text-center">
-                <p className="text-xl font-bold">CodeClaws</p>
+                <p className="text-xl font-bold">CodeCrab</p>
                 <p className="text-sm text-muted-foreground mt-1">Your AI coding companion</p>
               </div>
 

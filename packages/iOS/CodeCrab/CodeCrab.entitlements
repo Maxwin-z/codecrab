@@ -6,7 +6,7 @@
 	<string>development</string>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.cn.byutech.codeclaws</string>
+		<string>group.cn.byutech.codecrab</string>
 	</array>
 </dict>
 </plist>

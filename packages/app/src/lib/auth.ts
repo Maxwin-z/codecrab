@@ -2,7 +2,7 @@
 
 import { buildApiUrl, buildWsUrl } from './server'
 
-const TOKEN_KEY = 'codeclaws_token'
+const TOKEN_KEY = 'codecrab_token'
 const DEFAULT_TIMEOUT = 10000 // 10 seconds
 
 /** Get the stored token from localStorage */

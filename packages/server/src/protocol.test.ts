@@ -6,7 +6,7 @@ import type {
   ImageAttachment,
   ClientMessage,
   ServerMessage,
-} from '@codeclaws/shared'
+} from '@codecrab/shared'
 
 describe('Protocol types — ImageAttachment', () => {
   it('should accept valid JPEG image attachment', () => {

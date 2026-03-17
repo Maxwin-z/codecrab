@@ -67,7 +67,7 @@ async function main() {
   const pattern = process.argv[2]?.toLowerCase()
 
   console.log('╔════════════════════════════════════════════════════════════╗')
-  console.log('║              CodeClaws Test Runner                         ║')
+  console.log('║              CodeCrab Test Runner                         ║')
   console.log('╚════════════════════════════════════════════════════════════╝')
   console.log()
 

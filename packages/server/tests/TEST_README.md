@@ -1,6 +1,6 @@
-# CodeClaws 测试用例
+# CodeCrab 测试用例
 
-本目录包含针对 CodeClaws 服务器的各种测试用例。
+本目录包含针对 CodeCrab 服务器的各种测试用例。
 
 ## 测试项目
 
@@ -77,7 +77,7 @@ node test-runner.mjs parallel
 $ node test-runner.mjs
 
 ╔════════════════════════════════════════════════════════════╗
-║              CodeClaws Test Runner                         ║
+║              CodeCrab Test Runner                         ║
 ╚════════════════════════════════════════════════════════════╝
 
 Running 10 test(s)...

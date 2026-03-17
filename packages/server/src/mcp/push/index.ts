@@ -2,7 +2,7 @@
 //
 // Components:
 //   apns.ts   — HTTP/2 client for direct APNs communication (JWT auth)
-//   store.ts  — Device token persistence (~/.codeclaws/push-devices.json)
+//   store.ts  — Device token persistence (~/.codecrab/push-devices.json)
 //   tools.ts  — MCP tool definitions (push_send)
 //   routes.ts — REST endpoints (/api/push/*)
 
@@ -12,7 +12,7 @@ import os from 'os'
 import { initApns, isApnsConfigured, broadcastPush } from './apns.js'
 import { getDeviceTokens } from './store.js'
 
-const PROJECTS_FILE = path.join(os.homedir(), '.codeclaws', 'projects.json')
+const PROJECTS_FILE = path.join(os.homedir(), '.codecrab', 'projects.json')
 
 /** Initialize APNs. Call once at server startup. */
 export function initPush(): boolean {
@@ -29,7 +29,7 @@ function getProjectDisplayName(projectId: string): string {
       return project.icon ? `${project.icon} ${project.name}` : project.name
     }
   } catch {}
-  return 'CodeClaws'
+  return 'CodeCrab'
 }
 
 /** Send push notification when a query completes with a summary.

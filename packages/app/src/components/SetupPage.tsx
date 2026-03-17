@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { authFetch } from '@/lib/auth'
 import { buildApiUrl, getServerUrl, setServerUrl, clearServerUrl, getServerDisplay } from '@/lib/server'
 import { scanLAN, type DiscoveredServer, type ScanProgress } from '@/lib/lanScanner'
-import type { DetectResult } from '@codeclaws/shared'
+import type { DetectResult } from '@codecrab/shared'
 
 const PROVIDERS = [
   { value: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...' },
@@ -84,7 +84,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
       clearTimeout(timeoutId)
       if (res.ok) {
         const data = await res.json()
-        if (data.service === 'CodeClaws') {
+        if (data.service === 'CodeCrab') {
           setServerStatus('connected')
           return
         }
@@ -105,7 +105,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
       clearTimeout(timeoutId)
       if (!res.ok) throw new Error('Server returned an error')
       const data = await res.json()
-      if (data.service !== 'CodeClaws') throw new Error('Not a CodeClaws server')
+      if (data.service !== 'CodeCrab') throw new Error('Not a CodeCrab server')
 
       setServerUrl(url)
       setServerDisplay(getServerDisplay())
@@ -331,7 +331,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
       <div className="w-full max-w-lg flex flex-col gap-6">
         {/* Page header */}
         <div className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight">CodeClaws Setup</h1>
+          <h1 className="text-2xl font-bold tracking-tight">CodeCrab Setup</h1>
           <p className="text-sm text-muted-foreground mt-1">Configure your environment to get started</p>
         </div>
 
@@ -340,7 +340,7 @@ export function SetupPage({ onComplete, onUnauthorized }: SetupPageProps) {
           <CardHeader>
             <CardTitle>Server Connection</CardTitle>
             <CardDescription>
-              Connect to a CodeClaws server on your local network
+              Connect to a CodeCrab server on your local network
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">

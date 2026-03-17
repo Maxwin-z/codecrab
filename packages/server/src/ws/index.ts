@@ -11,7 +11,7 @@ import type {
   ChatMessage,
   SessionInfo,
   ProjectStatus,
-} from '@codeclaws/shared'
+} from '@codecrab/shared'
 import { getToken } from '../auth/index.js'
 import {
   executeQuery,
@@ -292,8 +292,8 @@ async function executeCronQuery(
 
   // Debug event logger — stores events in exec session turn and broadcasts to both sessions
   const currentTurn = execSession.turns[execSession.turns.length - 1]
-  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => {
-    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data, ...(parentToolUseId != null ? { parentToolUseId } : {}), ...(taskId ? { taskId } : {}) }
+  const logEvent = (type: import('@codecrab/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => {
+    const event: import('@codecrab/shared').DebugEvent = { ts: Date.now(), type, detail, data, ...(parentToolUseId != null ? { parentToolUseId } : {}), ...(taskId ? { taskId } : {}) }
     if (currentTurn) {
       currentTurn.agent.debugEvents.push(event)
       if (HIGH_VALUE_EVENT_TYPES.has(type)) {
@@ -625,7 +625,7 @@ async function executeCronQuery(
   const execTurnMessages = currentTurn?.agent.messages || []
 
   // Append a final result event with execSessionId reference
-  const resultEvent: import('@codeclaws/shared').DebugEvent = {
+  const resultEvent: import('@codecrab/shared').DebugEvent = {
     ts: now, type: 'result', detail: resultSummary,
     data: { costUsd: clientState.currentCostUsd, durationMs, execSessionId },
   }
@@ -684,7 +684,7 @@ export function getSessionMessages(sessionId: string): ChatMessage[] | null {
 }
 
 // Get debug events for a session (derived from turns)
-export function getSessionDebugEvents(sessionId: string): import('@codeclaws/shared').DebugEvent[] | null {
+export function getSessionDebugEvents(sessionId: string): import('@codecrab/shared').DebugEvent[] | null {
   const session = sessions.get(sessionId)
   if (!session) return null
   return turnsToDebugEvents(session.turns)
@@ -695,8 +695,8 @@ export function getSessionDebugEvents(sessionId: string): import('@codeclaws/sha
 // If the session is processing, excludes the last (in-progress) turn.
 // Supports incremental fetch: if afterTurn is provided, only returns turns newer than that timestamp.
 export async function getSessionHistory(sessionId: string, afterTurn?: number): Promise<{
-  messages: import('@codeclaws/shared').ChatMessageSummary[]
-  sdkEvents: import('@codeclaws/shared').DebugEvent[]
+  messages: import('@codecrab/shared').ChatMessageSummary[]
+  sdkEvents: import('@codecrab/shared').DebugEvent[]
   status: string
   summary?: string
   suggestions?: string[]
@@ -745,7 +745,7 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
   const messages = turnsToMessages(turns).map(toMessageSummary)
 
   // High-value SDK events only (from turn.agent.messages, NOT debugEvents)
-  const sdkEvents: import('@codeclaws/shared').DebugEvent[] = []
+  const sdkEvents: import('@codecrab/shared').DebugEvent[] = []
   for (const turn of turns) {
     sdkEvents.push(...turn.agent.messages)
   }
@@ -778,7 +778,7 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
 }
 
 /** Derive flat ChatMessage[] from turns (for API/web compat) */
-function turnsToMessages(turns: import('@codeclaws/shared').SessionTurn[]): ChatMessage[] {
+function turnsToMessages(turns: import('@codecrab/shared').SessionTurn[]): ChatMessage[] {
   const messages: ChatMessage[] = []
   for (const turn of turns) {
     // User/cron prompt as a ChatMessage
@@ -794,8 +794,8 @@ function turnsToMessages(turns: import('@codeclaws/shared').SessionTurn[]): Chat
 }
 
 /** Derive flat DebugEvent[] from turns (for API/web compat) */
-function turnsToDebugEvents(turns: import('@codeclaws/shared').SessionTurn[]): import('@codeclaws/shared').DebugEvent[] {
-  const events: import('@codeclaws/shared').DebugEvent[] = []
+function turnsToDebugEvents(turns: import('@codecrab/shared').SessionTurn[]): import('@codecrab/shared').DebugEvent[] {
+  const events: import('@codecrab/shared').DebugEvent[] = []
   for (const turn of turns) {
     events.push(...turn.agent.debugEvents)
   }
@@ -803,7 +803,7 @@ function turnsToDebugEvents(turns: import('@codeclaws/shared').SessionTurn[]): i
 }
 
 // --- Session persistence ---
-const SESSIONS_DIR = path.join(os.homedir(), '.codeclaws', 'sessions')
+const SESSIONS_DIR = path.join(os.homedir(), '.codecrab', 'sessions')
 
 async function ensureSessionsDir() {
   await fs.mkdir(SESSIONS_DIR, { recursive: true })
@@ -856,7 +856,7 @@ async function loadPersistedSessions() {
         const content = await fs.readFile(path.join(SESSIONS_DIR, file), 'utf-8')
         const data = JSON.parse(content)
         if (data.sessionId && !sessions.has(data.sessionId)) {
-          const turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
+          const turns: import('@codecrab/shared').SessionTurn[] = data.turns || []
 
           const session: Session = {
             sessionId: data.sessionId,
@@ -907,7 +907,7 @@ interface Session {
   sdkSessionId?: string  // Claude SDK session ID (for resume)
   projectId?: string
   cwd?: string
-  turns: import('@codeclaws/shared').SessionTurn[]
+  turns: import('@codecrab/shared').SessionTurn[]
   status: 'idle' | 'processing' | 'error'
   lastModified: number
   summary?: string
@@ -961,7 +961,7 @@ async function resumeSessionForProject(client: Client, projectId: string, sessio
       const content = await fs.readFile(filePath, 'utf-8')
       const data = JSON.parse(content)
       if (data.sessionId) {
-        const turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
+        const turns: import('@codecrab/shared').SessionTurn[] = data.turns || []
         session = {
           sessionId: data.sessionId,
           sdkSessionId: data.sdkSessionId,
@@ -1026,7 +1026,7 @@ async function syncSessionsFromDisk() {
         // Skip if already in memory and memory version is newer or equal
         if (existing && existing.lastModified >= (data.lastModified || 0)) continue
 
-        const turns: import('@codeclaws/shared').SessionTurn[] = data.turns || []
+        const turns: import('@codecrab/shared').SessionTurn[] = data.turns || []
         const session: Session = {
           sessionId: data.sessionId,
           sdkSessionId: data.sdkSessionId,
@@ -1136,7 +1136,7 @@ const MAX_TOOL_RESULT_PREVIEW_LENGTH = 100
 
 // Convert ChatMessage to summary for initial history load
 // Assistant and user messages are sent in full; only tool call results are truncated
-function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').ChatMessageSummary {
+function toMessageSummary(message: ChatMessage): import('@codecrab/shared').ChatMessageSummary {
   const content = (message.content || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
   const hasToolCalls = !!(message.toolCalls && message.toolCalls.length > 0)
   const hasImages = !!(message.images && message.images.length > 0)
@@ -1146,7 +1146,7 @@ function toMessageSummary(message: ChatMessage): import('@codeclaws/shared').Cha
   const isTruncated = false // We no longer truncate content text
 
   // Build tool call summaries - preserve input object for structured display
-  let toolCalls: import('@codeclaws/shared').ChatMessageSummary['toolCalls']
+  let toolCalls: import('@codecrab/shared').ChatMessageSummary['toolCalls']
   if (message.toolCalls && message.toolCalls.length > 0) {
     toolCalls = message.toolCalls.map((tc) => {
       const inputStr = typeof tc.input === 'string' ? tc.input : JSON.stringify(tc.input)
@@ -1492,13 +1492,13 @@ async function executeUserQuery(
   clientState: import('../engine/claude.js').ClientState,
   projectId: string,
   prompt: string,
-  images: import('@codeclaws/shared').ImageAttachment[] | undefined,
+  images: import('@codecrab/shared').ImageAttachment[] | undefined,
   enabledMcps: string[] | undefined,
   disabledSdkServers: string[] | undefined,
   disabledSkills: string[] | undefined,
   queuedQuery: QueuedQuery,
   userMsg: ChatMessage,
-  turn: import('@codeclaws/shared').SessionTurn,
+  turn: import('@codecrab/shared').SessionTurn,
 ): Promise<QueryResult> {
   // Link queue abort to engine abort
   queuedQuery.abortController.signal.addEventListener('abort', () => {
@@ -1523,8 +1523,8 @@ async function executeUserQuery(
 
   // Debug event logger for this query — uses the captured turn reference
   const currentTurn = turn
-  const logEvent = (type: import('@codeclaws/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => {
-    const event: import('@codeclaws/shared').DebugEvent = { ts: Date.now(), type, detail, data, ...(parentToolUseId != null ? { parentToolUseId } : {}), ...(taskId ? { taskId } : {}) }
+  const logEvent = (type: import('@codecrab/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => {
+    const event: import('@codecrab/shared').DebugEvent = { ts: Date.now(), type, detail, data, ...(parentToolUseId != null ? { parentToolUseId } : {}), ...(taskId ? { taskId } : {}) }
     if (currentTurn) {
       currentTurn.agent.debugEvents.push(event)
       if (HIGH_VALUE_EVENT_TYPES.has(type)) {

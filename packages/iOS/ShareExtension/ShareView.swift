@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 // MARK: - Models (self-contained for extension target)
 
-private let appGroupId = "group.cn.byutech.codeclaws"
+private let appGroupId = "group.cn.byutech.codecrab"
 
 private struct ShareProject: Codable, Identifiable, Hashable {
     let id: String
@@ -142,7 +142,7 @@ struct ShareNavigationView: View {
                             .foregroundColor(.green)
                         Text("Shared successfully!")
                             .font(.headline)
-                        Text("Switch to CodeClaws to continue")
+                        Text("Switch to CodeCrab to continue")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -328,7 +328,7 @@ struct ShareNavigationView: View {
 
         guard let serverURL = ShareDataManager.shared.serverURL,
               let token = ShareDataManager.shared.authToken else {
-            errorMessage = "Not configured.\nOpen CodeClaws app first and log in."
+            errorMessage = "Not configured.\nOpen CodeCrab app first and log in."
             isLoadingProjects = false
             return
         }
@@ -430,7 +430,7 @@ struct ShareNavigationView: View {
 
             isSending = false
 
-            if let url = URL(string: "codeclaws://share?id=\(shareId)") {
+            if let url = URL(string: "codecrab://share?id=\(shareId)") {
                 onOpenApp(url)
                 // Give system time to open, then show fallback if still here
                 try? await Task.sleep(nanoseconds: 1_500_000_000)

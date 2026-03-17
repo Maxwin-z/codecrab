@@ -16,7 +16,7 @@ import type {
   ModelInfo,
   PermissionMode,
   SdkSkill,
-} from '@codeclaws/shared'
+} from '@codecrab/shared'
 
 // Re-export types for convenience
 export type { ChatMessage, Question, ModelInfo, PermissionMode }
@@ -126,11 +126,11 @@ let messageIdCounter = 0
 
 // Config paths
 // ~/.claude  — SDK runtime: auth (OAuth), skills, commands, settings (shared with CLI)
-// ~/.codeclaws — CodeClaws-specific: models.json, projects.json, sessions, cron, etc.
+// ~/.codecrab — CodeCrab-specific: models.json, projects.json, sessions, cron, etc.
 const CLAUDE_DIR = path.join(os.homedir(), '.claude')
-const CODECLAWS_DIR = path.join(os.homedir(), '.codeclaws')
-const MODELS_FILE = path.join(CODECLAWS_DIR, 'models.json')
-const PROJECTS_FILE = path.join(CODECLAWS_DIR, 'projects.json')
+const CODECRAB_DIR = path.join(os.homedir(), '.codecrab')
+const MODELS_FILE = path.join(CODECRAB_DIR, 'models.json')
+const PROJECTS_FILE = path.join(CODECRAB_DIR, 'projects.json')
 
 // Look up project from projects.json
 interface ProjectInfo {

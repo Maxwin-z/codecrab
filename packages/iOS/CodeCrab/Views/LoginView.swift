@@ -44,7 +44,7 @@ struct LoginView: View {
                     .padding(.top, 60)
                     .padding(.bottom, 20)
 
-                Text("CodeClaws")
+                Text("CodeCrab")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .padding(.bottom, 8)
 

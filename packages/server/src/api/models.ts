@@ -10,4 +10,4 @@
 //   GET    /api/models/project/:id  — Get project-specific model
 //   PUT    /api/models/project/:id  — Set project-specific model
 //
-// Storage: ~/.codeclaws/models.json
+// Storage: ~/.codecrab/models.json

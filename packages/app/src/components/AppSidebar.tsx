@@ -4,7 +4,7 @@ import { Search, Brain, Clock, Settings, Plus, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { authFetch } from '@/lib/auth'
 import { useWs } from '@/hooks/WebSocketContext'
-import type { Project } from '@codeclaws/shared'
+import type { Project } from '@codecrab/shared'
 
 interface AppSidebarProps {
   onOpenSetup: () => void
@@ -62,7 +62,7 @@ export function AppSidebar({ onOpenSetup, onUnauthorized }: AppSidebarProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
         <button onClick={() => navigate('/')} className="text-lg font-bold tracking-tight hover:opacity-80 transition-opacity">
-          CodeClaws
+          CodeCrab
         </button>
         <button
           onClick={onOpenSetup}

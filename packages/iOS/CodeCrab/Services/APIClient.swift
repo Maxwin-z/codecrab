@@ -32,7 +32,7 @@ class APIClient {
     }
     
     private func makeRequest(path: String, method: String = "GET", body: Data? = nil, isPublic: Bool = false) throws -> URLRequest {
-        guard let serverURL = UserDefaults.standard.string(forKey: "codeclaws_server_url") else {
+        guard let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url") else {
             throw APIError.noServerURL
         }
         guard let url = URL(string: "\(serverURL)\(path)") else {

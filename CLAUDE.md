@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CodeClaws is an AI-powered coding engine — a monorepo with 6 TypeScript packages and a native iOS app, providing a server, React chat UI, iOS chat UI, documentation site, relay server, CLI, and shared library.
+CodeCrab is an AI-powered coding engine — a monorepo with 6 TypeScript packages and a native iOS app, providing a server, React chat UI, iOS chat UI, documentation site, relay server, CLI, and shared library.
 
 ## Commands
 
@@ -98,7 +98,7 @@ const ws = new WebSocket(`ws://host/ws?token=${getToken()}`)
 
 ## Configuration Files
 
-User config stored in `~/.codeclaws/`:
+User config stored in `~/.codecrab/`:
 - `config.json` — access token, network mode
 - `models.json` — model configurations (API keys, base URLs)
 - `projects.json` — project definitions

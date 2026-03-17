@@ -4,7 +4,7 @@ import { X, Loader2, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MessageList } from './MessageList'
 import { authFetch } from '@/lib/auth'
-import type { ChatMessage, DebugEvent } from '@codeclaws/shared'
+import type { ChatMessage, DebugEvent } from '@codecrab/shared'
 
 interface ExecSessionSheetProps {
   sessionId: string

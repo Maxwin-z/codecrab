@@ -9,7 +9,7 @@
 // Features:
 //   - Lazy startup: Chrome only starts when needed
 //   - Remote debugging port (9222)
-//   - Persistent profile (~/.codeclaws/chrome-profile/)
+//   - Persistent profile (~/.codecrab/chrome-profile/)
 //   - macOS + Linux platform detection
 //   - 10 browser automation tools via CDP
 

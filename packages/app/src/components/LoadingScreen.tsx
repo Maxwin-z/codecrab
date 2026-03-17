@@ -8,7 +8,7 @@ export function LoadingScreen() {
           <div className="absolute inset-0 rounded-full border-2 border-t-primary animate-spin" />
         </div>
         <div className="flex flex-col items-center gap-1">
-          <h1 className="text-xl font-semibold tracking-tight">CodeClaws</h1>
+          <h1 className="text-xl font-semibold tracking-tight">CodeCrab</h1>
           <p className="text-sm text-muted-foreground animate-pulse">Loading...</p>
         </div>
       </div>

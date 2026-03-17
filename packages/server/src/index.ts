@@ -65,7 +65,7 @@ app.get('/api/health', (_req, res) => {
 
 // Service discovery endpoint (no auth required, used by LAN scanner)
 app.get('/api/discovery', (_req, res) => {
-  res.json({ service: 'CodeClaws', version: '0.1.0' })
+  res.json({ service: 'CodeCrab', version: '0.1.0' })
 })
 
 // Public routes (no token required)
@@ -125,7 +125,7 @@ ensureToken().then(() => {
   const wss = setupWebSocket(server)
 
   // Initialize cron system
-  const CONFIG_DIR = path.join(os.homedir(), '.codeclaws')
+  const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
   const cronSystem = initCronSystem({
     configDir: CONFIG_DIR,
     mainAppUrl: `http://localhost:${PORT}/api/cron`,
