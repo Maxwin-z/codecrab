@@ -320,22 +320,6 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
     if (project) fetchSessions(true)
   }, [project, fetchSessions])
 
-  // Auto-refresh sessions while session list is visible
-  useEffect(() => {
-    if (!showSessionList) return
-    const interval = setInterval(() => {
-      fetchSessions(false)
-      setSessionsNow(Date.now())
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [showSessionList, fetchSessions])
-
-  // Update time display every minute in session list view
-  useEffect(() => {
-    if (!showSessionList) return
-    const interval = setInterval(() => setSessionsNow(Date.now()), 60000)
-    return () => clearInterval(interval)
-  }, [showSessionList])
 
   const handleResumeFromList = useCallback((session: SessionInfo) => {
     ws.resumeSession(session.sessionId)
