@@ -16,7 +16,7 @@ struct SessionListView: View {
     @State private var now = Date()
 
     let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-    let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    let refreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         List {
