@@ -26,6 +26,12 @@ export interface InternalQueryOpts {
   maxTurns?: number
   /** Model override (uses default model if not specified) */
   model?: string
+  /**
+   * Whitelist of allowed tools. When set, only these tools are available
+   * and all others are implicitly denied. When not set, all tools are
+   * available (bypassPermissions mode).
+   */
+  allowedTools?: string[]
 }
 
 export interface InternalQueryResult {
@@ -44,7 +50,8 @@ export interface InternalQueryResult {
  * Execute a query silently without WebSocket broadcasting.
  * Creates a temporary client state, runs the query, and returns the result.
  *
- * - Always runs in bypassPermissions mode
+ * - Runs in bypassPermissions mode by default, or default mode with allowedTools whitelist
+ * - No MCP servers or skills loaded
  * - No WebSocket events emitted
  * - Creates a new session each time (no resume)
  */
@@ -73,16 +80,31 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
     clientState.model = opts.model
   }
 
-  // Build options — no MCP servers, no disabled tools for internal agents
+  // Build options — no MCP servers, no skills for internal agents
   const options = buildQueryOptions(clientState, queryEnv)
 
   // Override settings for internal agents
   options.maxTurns = opts.maxTurns ?? 10
-  options.permissionMode = 'bypassPermissions'
-  options.allowDangerouslySkipPermissions = true
 
   // No MCP servers for internal queries (keep it lightweight)
   options.mcpServers = {}
+
+  // No skills — don't load from .claude/skills/ or ~/.claude/skills/
+  options.settingSources = []
+
+  // Tool restrictions
+  if (opts.allowedTools) {
+    // When a tool whitelist is specified, use default permission mode
+    // so only the listed tools are auto-approved. Without a canUseTool
+    // callback, all other tools will be denied by the SDK.
+    options.permissionMode = 'default'
+    options.allowDangerouslySkipPermissions = false
+    options.allowedTools = opts.allowedTools
+  } else {
+    // No whitelist — keep full access via bypassPermissions
+    options.permissionMode = 'bypassPermissions'
+    options.allowDangerouslySkipPermissions = true
+  }
 
   // Create abort controller
   const abortController = new AbortController()
@@ -98,6 +120,9 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
       console.log(`${tag} ${C.dim}cwd:${C.reset}       ${opts.cwd}`)
       console.log(`${tag} ${C.dim}model:${C.reset}     ${modelConfig.id}`)
       console.log(`${tag} ${C.dim}maxTurns:${C.reset}  ${options.maxTurns}`)
+      if (opts.allowedTools) {
+        console.log(`${tag} ${C.dim}tools:${C.reset}     ${opts.allowedTools.join(', ')}`)
+      }
       console.log(`${tag}`)
       console.log(`${tag} ${C.cyan}${C.bold}📤 Prompt Sent to Agent:${C.reset}`)
       console.log(`${tag} ${C.cyan}${'─'.repeat(50)}${C.reset}`)

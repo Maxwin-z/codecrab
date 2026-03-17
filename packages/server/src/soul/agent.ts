@@ -79,6 +79,7 @@ export async function triggerSoulEvolution(conversations: ConversationTurn[]): P
     cwd,
     prompt,
     maxTurns: 5, // Keep it short — read SOUL.md, maybe edit, done
+    allowedTools: ['Read', 'Write'], // Soul only needs to read and write files
   })
 
   if (!result.success) {
