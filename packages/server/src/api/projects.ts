@@ -81,6 +81,22 @@ router.get('/:id', async (req, res) => {
   res.json(project)
 })
 
+// Update project
+router.patch('/:id', async (req, res) => {
+  const { name, icon } = req.body as { name?: string; icon?: string }
+  const projects = await readProjects()
+  const project = projects.find((p) => p.id === req.params.id)
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' })
+    return
+  }
+  if (name) project.name = name
+  if (icon) project.icon = icon
+  project.updatedAt = Date.now()
+  await writeProjects(projects)
+  res.json(project)
+})
+
 // Delete project
 router.delete('/:id', async (req, res) => {
   const projects = await readProjects()

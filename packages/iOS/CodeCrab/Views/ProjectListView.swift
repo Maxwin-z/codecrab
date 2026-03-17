@@ -7,6 +7,8 @@ struct ProjectListView: View {
     @State private var cronJobs: [CronJob] = []
     @State private var isLoading = false
     @State private var cardRefreshID = UUID()
+    @State private var editingProject: Project?
+    @State private var showCopiedToast = false
 
     private var selectedProjectId: String? {
         if case .project(let p) = selection { return p.id }
@@ -71,6 +73,25 @@ struct ProjectListView: View {
                         .listRowSeparator(.automatic)
                         .listRowBackground(Color.clear)
                         .contextMenu {
+                            Button {
+                                editingProject = project
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            Button {
+                                UIPasteboard.general.string = project.path
+                                withAnimation {
+                                    showCopiedToast = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    withAnimation {
+                                        showCopiedToast = false
+                                    }
+                                }
+                            } label: {
+                                Label("Copy Path", systemImage: "doc.on.doc")
+                            }
+                            Divider()
                             Button(role: .destructive) {
                                 deleteProject(project)
                             } label: {
@@ -87,6 +108,24 @@ struct ProjectListView: View {
             }
         }
         .listStyle(.plain)
+        .overlay(alignment: .bottom) {
+            if showCopiedToast {
+                Text("Path copied")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .sheet(item: $editingProject) { project in
+            EditProjectSheet(project: project) { updated in
+                if let idx = projects.firstIndex(where: { $0.id == updated.id }) {
+                    projects[idx] = updated
+                }
+            }
+        }
         .refreshable {
             await fetchAll()
         }
@@ -287,6 +326,113 @@ struct ProjectCard: View {
             p = "~" + p.dropFirst(homeDir.count)
         }
         return p
+    }
+}
+
+// MARK: - Edit Project Sheet
+
+struct EditProjectSheet: View {
+    let project: Project
+    var onSave: (Project) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var selectedIcon: String = ""
+    @State private var isSaving = false
+    @State private var showIconPicker = false
+
+    private let icons = ["🚀","💻","⭐","🎯","🎨","📱","🌐","⚡","🔧","🎮",
+        "📊","🔬","🎵","📚","🏗️","🤖","💡","🔒","🎬","🌈",
+        "🦀","🐍","🦊","🐳","🐧","🦅","🐝","🦋","🍎","🍊",
+        "💎","🔮","🎪","🏰","🎲","🧩","🔭","🧪","⚙️","🛠️",
+        "📡","🗂️","📦","🏷️","✏️","📝","🗃️","💼","🎓","🌍",
+        "🌙","☀️","⛅","🌊","🔥","💧","🌿","🍀","🌸","🌺",
+        "🎸","🎹","🥁","🎤","🎧","📷","🎥","📺","💻","⌨️"]
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    HStack(spacing: 16) {
+                        Button(action: { showIconPicker = true }) {
+                            Text(selectedIcon)
+                                .font(.largeTitle)
+                                .frame(width: 60, height: 60)
+                                .background(Color(UIColor.secondarySystemBackground))
+                                .cornerRadius(12)
+                        }
+                        TextField("Project Name", text: $name)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                    }
+                }
+                Section {
+                    LabeledContent("Path") {
+                        Text(project.path)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+            }
+            .navigationTitle("Edit Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(name.isEmpty || isSaving)
+                }
+            }
+            .sheet(isPresented: $showIconPicker) {
+                NavigationView {
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 20) {
+                            ForEach(icons, id: \.self) { icon in
+                                Button(action: {
+                                    selectedIcon = icon
+                                    showIconPicker = false
+                                }) {
+                                    Text(icon).font(.largeTitle)
+                                }
+                            }
+                        }
+                        .padding()
+                    }
+                    .navigationTitle("Choose Icon")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showIconPicker = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
+        }
+        .onAppear {
+            name = project.name
+            selectedIcon = project.icon
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            do {
+                struct PatchReq: Encodable { let name: String; let icon: String }
+                let req = PatchReq(name: name, icon: selectedIcon)
+                let updated: Project = try await APIClient.shared.fetch(
+                    path: "/api/projects/\(project.id)", method: "PATCH", body: req
+                )
+                onSave(updated)
+                dismiss()
+            } catch {
+                print("Failed to update project: \(error)")
+                isSaving = false
+            }
+        }
     }
 }
 
