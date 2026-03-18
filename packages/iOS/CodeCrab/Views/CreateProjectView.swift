@@ -22,6 +22,8 @@ struct CreateProjectView: View {
     @State private var selectedIcon: String = "🚀"
     @State private var showIconPicker = false
     @State private var isCreating = false
+    @State private var showNewFolderAlert = false
+    @State private var newFolderName = ""
     
     let icons = ["🚀","💻","⭐","🎯","🎨","📱","🌐","⚡","🔧","🎮",
         "📊","🔬","🎵","📚","🏗️","🤖","💡","🔒","🎬","🌈",
@@ -133,6 +135,24 @@ struct CreateProjectView: View {
             }
             .presentationDetents([.medium, .large])
         }
+        .alert("New Folder", isPresented: $showNewFolderAlert) {
+            TextField("Name", text: $newFolderName)
+            Button("Cancel", role: .cancel) { }
+            Button("Create") {
+                guard !newFolderName.isEmpty else { return }
+                Task {
+                    do {
+                        struct Req: Encodable { let path: String; let name: String }
+                        try await APIClient.shared.request(path: "/api/files/mkdir", method: "POST", body: Req(path: self.path, name: newFolderName))
+                        navigate(to: self.path)
+                    } catch {
+                        print("Failed to create folder: \(error)")
+                    }
+                }
+            }
+        } message: {
+            Text("Enter folder name")
+        }
         .task {
             navigate(to: "") // triggers default load
         }
@@ -157,31 +177,8 @@ struct CreateProjectView: View {
     }
     
     private func createFolder() {
-        // Needs a custom alert for text input in SwiftUI, iOS 16+ has alert(TextField)
-        // Simplified here using alert
-        let alert = UIAlertController(title: "New Folder", message: "Enter folder name", preferredStyle: .alert)
-        alert.addTextField { field in
-            field.placeholder = "Name"
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Create", style: .default) { _ in
-            if let name = alert.textFields?.first?.text, !name.isEmpty {
-                Task {
-                    do {
-                        struct Req: Encodable { let path: String; let name: String }
-                        try await APIClient.shared.request(path: "/api/files/mkdir", method: "POST", body: Req(path: self.path, name: name))
-                        navigate(to: self.path)
-                    } catch {
-                        print("Failed to create folder: \(error)")
-                    }
-                }
-            }
-        })
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = windowScene.windows.first?.rootViewController {
-            root.present(alert, animated: true)
-        }
+        newFolderName = ""
+        showNewFolderAlert = true
     }
     
     private func createProject() {
