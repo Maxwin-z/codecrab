@@ -7,7 +7,7 @@ class APIClient {
     init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForResource = 300
         self.session = URLSession(configuration: config)
     }
     

@@ -52,6 +52,7 @@ private struct FilePreviewPageView: View {
     @State private var isPreparingShare = false
     @State private var imageData: UIImage? = nil
     @State private var videoPlayer: AVPlayer? = nil
+    @State private var localVideoURL: URL? = nil
 
     private var ext: String {
         (fileName as NSString).pathExtension.lowercased()
@@ -194,6 +195,20 @@ private struct FilePreviewPageView: View {
                             Label("Share as Markdown", systemImage: "doc.plaintext")
                         }
                         .disabled(isPreparingShare || fileContent?.content == nil)
+                    } else if isImage {
+                        Button(action: {
+                            Task { await shareMedia() }
+                        }) {
+                            Label("Share image", systemImage: "square.and.arrow.up")
+                        }
+                        .disabled(isPreparingShare || imageData == nil)
+                    } else if isVideo {
+                        Button(action: {
+                            Task { await shareMedia() }
+                        }) {
+                            Label("Share video", systemImage: "square.and.arrow.up")
+                        }
+                        .disabled(isPreparingShare || localVideoURL == nil)
                     } else {
                         Button(action: {
                             Task { await prepareAndShare(asPDF: false) }
@@ -353,10 +368,11 @@ private struct FilePreviewPageView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onDisappear {
                     player.pause()
+                    cleanupLocalVideo()
                 }
         } else {
             Spacer()
-            ProgressView("Loading video...")
+            ProgressView("Downloading video...")
             Spacer()
         }
     }
@@ -375,7 +391,7 @@ private struct FilePreviewPageView: View {
             if isImage {
                 await loadImageData(urlPath: urlPath)
             } else if isVideo {
-                loadVideoPlayer(urlPath: urlPath)
+                await loadVideoPlayer(urlPath: urlPath)
             }
         } catch {
             self.error = error.localizedDescription
@@ -392,9 +408,24 @@ private struct FilePreviewPageView: View {
         }
     }
 
-    private func loadVideoPlayer(urlPath: String) {
-        if let url = APIClient.shared.buildURL(path: "/api/files/raw?path=\(urlPath)") {
-            videoPlayer = AVPlayer(url: url)
+    private func loadVideoPlayer(urlPath: String) async {
+        do {
+            let data = try await APIClient.shared.fetchData(path: "/api/files/raw?path=\(urlPath)")
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(ext)
+            try data.write(to: tempURL)
+            localVideoURL = tempURL
+            videoPlayer = AVPlayer(url: tempURL)
+        } catch {
+            self.error = "Failed to load video"
+        }
+    }
+
+    private func cleanupLocalVideo() {
+        if let url = localVideoURL {
+            try? FileManager.default.removeItem(at: url)
+            localVideoURL = nil
         }
     }
 
@@ -402,6 +433,39 @@ private struct FilePreviewPageView: View {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
         return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+
+    private func shareMedia() async {
+        isPreparingShare = true
+        defer { isPreparingShare = false }
+
+        if isImage, let image = imageData {
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            do {
+                if ext == "png" {
+                    try image.pngData()?.write(to: tempURL)
+                } else {
+                    try image.jpegData(compressionQuality: 0.95)?.write(to: tempURL)
+                }
+                shareURL = tempURL
+                showShareSheet = true
+            } catch {
+                // failed to write image
+            }
+        } else if isVideo, let videoURL = localVideoURL {
+            // Copy to a file with the original name so the share sheet shows a meaningful filename
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            do {
+                if FileManager.default.fileExists(atPath: tempURL.path) {
+                    try FileManager.default.removeItem(at: tempURL)
+                }
+                try FileManager.default.copyItem(at: videoURL, to: tempURL)
+                shareURL = tempURL
+                showShareSheet = true
+            } catch {
+                // failed to copy video
+            }
+        }
     }
 
     private func prepareAndShare(asPDF: Bool) async {
@@ -522,7 +586,25 @@ private struct CodeLineView: View {
     }
 }
 
-// MARK: - Zoomable Image View (UIScrollView-based pinch-to-zoom)
+// MARK: - Zoomable Scroll View (UIScrollView subclass)
+//
+// Uses layoutSubviews to configure zoom once valid bounds are available,
+// since UIViewRepresentable.updateUIView may fire before layout.
+
+private class ZoomScrollView: UIScrollView {
+    var onFirstLayout: ((_ bounds: CGRect) -> Void)?
+    private var didFirstLayout = false
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if !didFirstLayout, bounds.width > 0, bounds.height > 0 {
+            didFirstLayout = true
+            onFirstLayout?(bounds)
+        }
+    }
+}
+
+// MARK: - Zoomable Image View
 
 private struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
@@ -531,11 +613,9 @@ private struct ZoomableImageView: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> UIScrollView {
-        let scrollView = UIScrollView()
+    func makeUIView(context: Context) -> ZoomScrollView {
+        let scrollView = ZoomScrollView()
         scrollView.delegate = context.coordinator
-        scrollView.minimumZoomScale = 1.0
-        scrollView.maximumZoomScale = 5.0
         scrollView.bouncesZoom = true
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
@@ -544,43 +624,43 @@ private struct ZoomableImageView: UIViewRepresentable {
         let imageView = UIImageView(image: image)
         imageView.contentMode = .scaleAspectFit
         imageView.tag = 100
+        imageView.frame = CGRect(origin: .zero, size: image.size)
         scrollView.addSubview(imageView)
+        scrollView.contentSize = image.size
 
-        // Double-tap to zoom
+        // Double-tap to toggle between fit and 2× fit
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTap)
         context.coordinator.scrollView = scrollView
 
+        let imageSize = image.size
+        let coordinator = context.coordinator
+        scrollView.onFirstLayout = { [weak scrollView] bounds in
+            guard let scrollView = scrollView,
+                  imageSize.width > 0, imageSize.height > 0 else { return }
+
+            let fitScale = min(bounds.width / imageSize.width,
+                               bounds.height / imageSize.height)
+
+            // min zoom: smaller of 0.5× original and 0.5× screen-fit
+            scrollView.minimumZoomScale = min(0.5, fitScale * 0.5)
+            // max zoom: 5× the screen-fit size
+            scrollView.maximumZoomScale = fitScale * 5.0
+            // start at fit-to-screen
+            scrollView.zoomScale = fitScale
+
+            coordinator.fitScale = fitScale
+        }
+
         return scrollView
     }
 
-    func updateUIView(_ scrollView: UIScrollView, context: Context) {
-        guard let imageView = scrollView.viewWithTag(100) as? UIImageView else { return }
-        imageView.image = image
-
-        let bounds = scrollView.bounds
-        guard bounds.width > 0, bounds.height > 0 else { return }
-
-        let imageSize = image.size
-        let widthScale = bounds.width / imageSize.width
-        let heightScale = bounds.height / imageSize.height
-        let fitScale = min(widthScale, heightScale)
-
-        let fitWidth = imageSize.width * fitScale
-        let fitHeight = imageSize.height * fitScale
-        imageView.frame = CGRect(
-            x: max(0, (bounds.width - fitWidth) / 2),
-            y: max(0, (bounds.height - fitHeight) / 2),
-            width: fitWidth,
-            height: fitHeight
-        )
-
-        scrollView.contentSize = CGSize(width: max(bounds.width, fitWidth), height: max(bounds.height, fitHeight))
-    }
+    func updateUIView(_ scrollView: ZoomScrollView, context: Context) {}
 
     class Coordinator: NSObject, UIScrollViewDelegate {
         weak var scrollView: UIScrollView?
+        var fitScale: CGFloat = 1.0
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
             scrollView.viewWithTag(100)
@@ -600,15 +680,18 @@ private struct ZoomableImageView: UIViewRepresentable {
 
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             guard let scrollView = scrollView else { return }
-            if scrollView.zoomScale > scrollView.minimumZoomScale {
-                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+            if scrollView.zoomScale > fitScale + 0.01 {
+                scrollView.setZoomScale(fitScale, animated: true)
             } else {
                 let point = gesture.location(in: scrollView.viewWithTag(100))
+                let targetScale = fitScale * 2.0
+                let zoomWidth = scrollView.bounds.width / targetScale
+                let zoomHeight = scrollView.bounds.height / targetScale
                 let zoomRect = CGRect(
-                    x: point.x - 50,
-                    y: point.y - 50,
-                    width: 100,
-                    height: 100
+                    x: point.x - zoomWidth / 2,
+                    y: point.y - zoomHeight / 2,
+                    width: zoomWidth,
+                    height: zoomHeight
                 )
                 scrollView.zoom(to: zoomRect, animated: true)
             }
