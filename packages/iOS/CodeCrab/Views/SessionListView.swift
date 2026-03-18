@@ -10,6 +10,7 @@ struct ChatRoute: Hashable {
 struct SessionListView: View {
     let project: Project
     @EnvironmentObject var wsService: WebSocketService
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var sessions: [SessionInfo] = []
     @State private var isLoading = false
@@ -48,8 +49,12 @@ struct SessionListView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(sessions) { session in
+                    let isProcessingViaWS = wsService.projectStatuses.first(where: {
+                        $0.projectId == project.id && $0.sessionId == session.sessionId && $0.status == "processing"
+                    }) != nil
+
                     NavigationLink(value: ChatRoute(project: project, sessionId: session.sessionId)) {
-                        SessionRowView(session: session, now: now)
+                        SessionRowView(session: session, now: now, isProcessingViaWS: isProcessingViaWS)
                     }
                 }
             }
@@ -77,6 +82,11 @@ struct SessionListView: View {
         .onReceive(refreshTimer) { _ in
             Task { await fetchSessions(silent: true) }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await fetchSessions(silent: true) }
+            }
+        }
     }
 
     private func fetchSessions(silent: Bool = false) async {
@@ -96,6 +106,7 @@ struct SessionListView: View {
 struct SessionRowView: View {
     let session: SessionInfo
     let now: Date
+    var isProcessingViaWS: Bool = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -136,7 +147,7 @@ struct SessionRowView: View {
 
             Spacer()
 
-            if session.status == "processing" {
+            if session.status == "processing" || isProcessingViaWS {
                 Circle().fill(Color.orange).frame(width: 8, height: 8)
             } else if session.status == "error" {
                 Circle().fill(Color.red).frame(width: 8, height: 8)

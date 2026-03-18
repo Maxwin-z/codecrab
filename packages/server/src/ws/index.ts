@@ -2210,6 +2210,32 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         projectId,
         items,
       })
+
+      // Also send project_statuses so the client knows which sessions are processing
+      sendToClient(client, {
+        type: 'project_statuses',
+        statuses: getProjectStatuses(),
+      })
+
+      // Send an immediate activity_heartbeat for the running query (if any)
+      // so the client can display activity state without waiting for the next 30s heartbeat
+      const runningQuery = queryQueue.getRunningQuery(projectId)
+      if (runningQuery) {
+        const timerState = queryQueue.getTimerState(runningQuery.id)
+        if (timerState) {
+          const now = Date.now()
+          sendToClient(client, {
+            type: 'activity_heartbeat',
+            projectId,
+            sessionId: runningQuery.sessionId,
+            queryId: runningQuery.id,
+            elapsedMs: now - (runningQuery.startedAt || now),
+            lastActivityType: timerState.lastActivityType,
+            lastToolName: timerState.lastToolName,
+            paused: timerState.paused || undefined,
+          })
+        }
+      }
       break
     }
 
