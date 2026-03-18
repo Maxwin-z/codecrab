@@ -1,9 +1,10 @@
 // FileBrowser — file system navigation with preview (matches iOS FileBrowserView)
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
-import { authFetch } from '@/lib/auth'
+import { authFetch, getToken } from '@/lib/auth'
+import { buildApiUrl } from '@/lib/server'
 import {
   ArrowLeft,
   ChevronRight,
@@ -131,6 +132,19 @@ function shortenPath(fullPath: string): string {
   return fullPath
 }
 
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'])
+const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi'])
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a'])
+
+function isImageFile(name: string) { return IMAGE_EXTS.has(getExt(name)) }
+function isVideoFile(name: string) { return VIDEO_EXTS.has(getExt(name)) }
+function isAudioFile(name: string) { return AUDIO_EXTS.has(getExt(name)) }
+function buildRawUrl(filePath: string): string {
+  const token = getToken()
+  const url = buildApiUrl(`/api/files/raw?path=${encodeURIComponent(filePath)}`)
+  return token ? `${url}&token=${encodeURIComponent(token)}` : url
+}
+
 // --- File Preview Component ---
 
 function FilePreview({ filePath, fileName, onBack }: {
@@ -146,8 +160,15 @@ function FilePreview({ filePath, fileName, onBack }: {
   const [copied, setCopied] = useState(false)
 
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(fileName)
+  const mediaType = isImageFile(fileName) ? 'image' : isVideoFile(fileName) ? 'video' : isAudioFile(fileName) ? 'audio' : null
+  const rawUrl = mediaType ? buildRawUrl(filePath) : ''
 
   useEffect(() => {
+    if (mediaType) {
+      // For media files, skip reading content — we use the raw endpoint directly
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     const encoded = encodeURIComponent(filePath)
@@ -159,7 +180,7 @@ function FilePreview({ filePath, fileName, onBack }: {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
-  }, [filePath])
+  }, [filePath, mediaType])
 
   const handleCopy = useCallback(() => {
     if (content?.content) {
@@ -219,8 +240,8 @@ function FilePreview({ filePath, fileName, onBack }: {
         </div>
       </header>
 
-      {/* File info bar */}
-      {content && (
+      {/* File info bar — only for non-media files */}
+      {content && !mediaType && (
         <div className="flex items-center gap-3 px-4 py-1.5 text-xs border-b bg-muted/30 shrink-0">
           <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
             {getLanguageLabel(fileName)}
@@ -247,7 +268,43 @@ function FilePreview({ filePath, fileName, onBack }: {
             <p className="text-sm">{error}</p>
           </div>
         )}
-        {content && !loading && !error && (
+
+        {/* Media preview */}
+        {mediaType === 'image' && !loading && (
+          <div className="flex items-center justify-center h-full p-4 bg-muted/20">
+            <img
+              src={rawUrl}
+              alt={fileName}
+              className="max-w-full max-h-full object-contain rounded-lg"
+              onError={() => setError('Failed to load image')}
+            />
+          </div>
+        )}
+        {mediaType === 'video' && !loading && (
+          <div className="flex items-center justify-center h-full p-4 bg-black/50">
+            <video
+              src={rawUrl}
+              controls
+              className="max-w-full max-h-full rounded-lg"
+              onError={() => setError('Failed to load video')}
+            />
+          </div>
+        )}
+        {mediaType === 'audio' && !loading && (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <Music className="h-16 w-16 text-muted-foreground/30" />
+            <p className="text-sm font-medium text-muted-foreground">{fileName}</p>
+            <audio
+              src={rawUrl}
+              controls
+              className="w-full max-w-md"
+              onError={() => setError('Failed to load audio')}
+            />
+          </div>
+        )}
+
+        {/* Text/binary content */}
+        {!mediaType && content && !loading && !error && (
           <>
             {content.binary ? (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
@@ -320,55 +377,86 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
   const [items, setItems] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [searchText, setSearchText] = useState('')
-  const [navStack, setNavStack] = useState<string[]>([])
-  // File preview state
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null)
+  const [canGoBack, setCanGoBack] = useState(false)
 
-  const navigateTo = useCallback((dirPath: string, pushStack = true) => {
+  // Browser history integration: each pushState carries a _fbDepth so we know
+  // how many entries to rewind on close.
+  const depthRef = useRef(0)
+
+  const pushFBState = useCallback((dir: string, file?: { path: string; name: string }) => {
+    depthRef.current++
+    history.pushState({ _fb: true, _fbDepth: depthRef.current, dir, file }, '')
+    setCanGoBack(depthRef.current > 1)
+  }, [])
+
+  // Fetch directory listing (returns resolved path)
+  const fetchDir = useCallback((dirPath: string): Promise<string | null> => {
     setSearchText('')
     setLoading(true)
-    if (pushStack && currentPath) {
-      setNavStack((prev) => [...prev, currentPath])
-    }
-    const encoded = encodeURIComponent(dirPath)
-    authFetch(`/api/files?path=${encoded}`)
+    return authFetch(`/api/files?path=${encodeURIComponent(dirPath)}`)
       .then((r) => r.json())
       .then((data: FileListing) => {
         setCurrentPath(data.current)
         setItems(data.items)
+        return data.current
       })
-      .catch((err) => console.error('Failed to fetch files:', err))
+      .catch((err) => { console.error('Failed to fetch files:', err); return null })
       .finally(() => setLoading(false))
-  }, [currentPath])
+  }, [])
 
-  // Initial load
+  // Initial load — push first history entry
   useEffect(() => {
-    setLoading(true)
-    const encoded = encodeURIComponent(projectPath)
-    authFetch(`/api/files?path=${encoded}`)
-      .then((r) => r.json())
-      .then((data: FileListing) => {
-        setCurrentPath(data.current)
-        setItems(data.items)
-      })
-      .catch((err) => console.error('Failed to fetch files:', err))
-      .finally(() => setLoading(false))
-  }, [projectPath])
+    fetchDir(projectPath).then((resolved) => {
+      if (resolved) pushFBState(resolved)
+    })
+  }, [projectPath, fetchDir, pushFBState])
 
-  const goBack = useCallback(() => {
-    const prev = navStack[navStack.length - 1]
-    if (prev) {
-      setNavStack((s) => s.slice(0, -1))
-      navigateTo(prev, false)
+  // Listen to browser back/forward
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      const state = e.state
+      if (!state || !state._fb) {
+        // Left FileBrowser history — close
+        onClose()
+        return
+      }
+      depthRef.current = state._fbDepth
+      setCanGoBack(depthRef.current > 1)
+
+      if (state.file) {
+        setPreviewFile({ path: state.file.path, name: state.file.name, isDirectory: false })
+      } else {
+        setPreviewFile(null)
+        fetchDir(state.dir)
+      }
     }
-  }, [navStack, navigateTo])
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [onClose, fetchDir])
+
+  // Navigate to a directory (user action — pushes history)
+  const navigateTo = useCallback((dirPath: string) => {
+    fetchDir(dirPath).then((resolved) => {
+      if (resolved) pushFBState(resolved)
+    })
+  }, [fetchDir, pushFBState])
+
+  // Close: rewind all FB history entries, popstate will fire onClose
+  const handleClose = useCallback(() => {
+    const d = depthRef.current
+    if (d > 0) {
+      history.go(-d)
+    } else {
+      onClose()
+    }
+  }, [onClose])
 
   // Breadcrumb segments
   const segments = useMemo(() => {
     if (!currentPath) return []
     const shortened = shortenPath(currentPath)
     const parts = shortened.split('/').filter(Boolean)
-    // Build segments with absolute paths
     const isHome = shortened.startsWith('~')
     const homeMatch = currentPath.match(/^\/Users\/[^/]+/)
     const homeDir = homeMatch ? homeMatch[0] : ''
@@ -392,7 +480,6 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
       }
     }
 
-    // Keep last 4 segments
     if (result.length > 4) {
       const trimmed = result.slice(-4)
       return [{ name: '...', path: result[result.length - 5].path }, ...trimmed]
@@ -414,6 +501,7 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
       navigateTo(item.path)
     } else {
       setPreviewFile(item)
+      pushFBState(currentPath, { path: item.path, name: item.name })
     }
   }
 
@@ -423,7 +511,7 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
       <FilePreview
         filePath={previewFile.path}
         fileName={previewFile.name}
-        onBack={() => setPreviewFile(null)}
+        onBack={() => history.back()}
       />
     )
   }
@@ -436,7 +524,7 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={onClose}
+            onClick={handleClose}
             className="shrink-0"
             title="Back to chat"
           >
@@ -453,9 +541,9 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-1 px-4 py-2 border-b bg-muted/30 overflow-x-auto shrink-0">
-        {navStack.length > 0 && (
+        {canGoBack && (
           <button
-            onClick={goBack}
+            onClick={() => history.back()}
             className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
           >
             <ArrowLeft className="h-3 w-3" />
