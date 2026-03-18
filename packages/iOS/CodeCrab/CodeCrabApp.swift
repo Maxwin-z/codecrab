@@ -72,6 +72,10 @@ struct CodeCrabApp: App {
                     if phase == .active {
                         shareHandler.checkOnActivation()
                         webSocketService.requestQueueSnapshot()
+                        // Clean up stale Live Activity if nothing is running
+                        if webSocketService.runningProjectIds.isEmpty {
+                            LiveActivityService.shared.endActivity()
+                        }
                     }
                 }
         }

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		C14DA9672F6653EB00B210A1 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = C14DA8A82F6652B400B210A1 /* Textual */; };
 		C1A0DE010000000C007C38AC /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C1A0DE0100000001007C38AC /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C1B0DE020000000D007C38AC /* LiveActivityWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C1B0DE0200000001007C38AC /* LiveActivityWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -18,6 +19,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = C1A0DE0100000007007C38AC;
 			remoteInfo = ShareExtension;
+		};
+		C1B0DE020000000C007C38AC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C197DCD02F618361007C38AC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C1B0DE0200000008007C38AC;
+			remoteInfo = LiveActivityWidget;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -29,6 +37,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				C1A0DE010000000C007C38AC /* ShareExtension.appex in Embed Foundation Extensions */,
+				C1B0DE020000000D007C38AC /* LiveActivityWidget.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -38,6 +47,7 @@
 /* Begin PBXFileReference section */
 		C197DCD82F618361007C38AC /* CodeCrab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodeCrab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1A0DE0100000001007C38AC /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1B0DE0200000001007C38AC /* LiveActivityWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiveActivityWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -54,6 +64,13 @@
 				Info.plist,
 			);
 			target = C1A0DE0100000007007C38AC /* ShareExtension */;
+		};
+		C1B0DE0200000004007C38AC /* Exceptions for "LiveActivityWidget" folder in "LiveActivityWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C1B0DE0200000008007C38AC /* LiveActivityWidget */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -74,6 +91,19 @@
 			path = ShareExtension;
 			sourceTree = "<group>";
 		};
+		C1B0DE0200000002007C38AC /* LiveActivityWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C1B0DE0200000004007C38AC /* Exceptions for "LiveActivityWidget" folder in "LiveActivityWidget" target */,
+			);
+			path = LiveActivityWidget;
+			sourceTree = "<group>";
+		};
+		C1B0DE0200000003007C38AC /* LiveActivityShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LiveActivityShared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +122,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C1B0DE0200000006007C38AC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -99,6 +136,8 @@
 			isa = PBXGroup;
 			children = (
 				C197DCDA2F618361007C38AC /* CodeCrab */,
+				C1B0DE0200000003007C38AC /* LiveActivityShared */,
+				C1B0DE0200000002007C38AC /* LiveActivityWidget */,
 				C1A0DE0100000002007C38AC /* ShareExtension */,
 				C197DCD92F618361007C38AC /* Products */,
 			);
@@ -109,6 +148,7 @@
 			children = (
 				C197DCD82F618361007C38AC /* CodeCrab.app */,
 				C1A0DE0100000001007C38AC /* ShareExtension.appex */,
+				C1B0DE0200000001007C38AC /* LiveActivityWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -129,9 +169,11 @@
 			);
 			dependencies = (
 				C1A0DE010000000E007C38AC /* PBXTargetDependency */,
+				C1B0DE020000000E007C38AC /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C197DCDA2F618361007C38AC /* CodeCrab */,
+				C1B0DE0200000003007C38AC /* LiveActivityShared */,
 			);
 			name = CodeCrab;
 			packageProductDependencies = (
@@ -163,6 +205,29 @@
 			productReference = C1A0DE0100000001007C38AC /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		C1B0DE0200000008007C38AC /* LiveActivityWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1B0DE020000000B007C38AC /* Build configuration list for PBXNativeTarget "LiveActivityWidget" */;
+			buildPhases = (
+				C1B0DE0200000005007C38AC /* Sources */,
+				C1B0DE0200000006007C38AC /* Frameworks */,
+				C1B0DE0200000007007C38AC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C1B0DE0200000002007C38AC /* LiveActivityWidget */,
+				C1B0DE0200000003007C38AC /* LiveActivityShared */,
+			);
+			name = LiveActivityWidget;
+			packageProductDependencies = (
+			);
+			productName = LiveActivityWidget;
+			productReference = C1B0DE0200000001007C38AC /* LiveActivityWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -177,6 +242,9 @@
 						CreatedOnToolsVersion = 26.2;
 					};
 					C1A0DE0100000007007C38AC = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					C1B0DE0200000008007C38AC = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -200,6 +268,7 @@
 			targets = (
 				C197DCD72F618361007C38AC /* CodeCrab */,
 				C1A0DE0100000007007C38AC /* ShareExtension */,
+				C1B0DE0200000008007C38AC /* LiveActivityWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -213,6 +282,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C1A0DE0100000006007C38AC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1B0DE0200000007007C38AC /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -236,6 +312,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C1B0DE0200000005007C38AC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -243,6 +326,11 @@
 			isa = PBXTargetDependency;
 			target = C1A0DE0100000007007C38AC /* ShareExtension */;
 			targetProxy = C1A0DE010000000D007C38AC /* PBXContainerItemProxy */;
+		};
+		C1B0DE020000000E007C38AC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C1B0DE0200000008007C38AC /* LiveActivityWidget */;
+			targetProxy = C1B0DE020000000C007C38AC /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -510,6 +598,62 @@
 			};
 			name = Release;
 		};
+		C1B0DE0200000009007C38AC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LiveActivityWidget/LiveActivityWidget.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = BS4GBZN537;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LiveActivityWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CodeCrab;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.byutech.codecrab.LiveActivityWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C1B0DE020000000A007C38AC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LiveActivityWidget/LiveActivityWidget.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = BS4GBZN537;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LiveActivityWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CodeCrab;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.byutech.codecrab.LiveActivityWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -536,6 +680,15 @@
 			buildConfigurations = (
 				C1A0DE0100000008007C38AC /* Debug */,
 				C1A0DE0100000009007C38AC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C1B0DE020000000B007C38AC /* Build configuration list for PBXNativeTarget "LiveActivityWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C1B0DE0200000009007C38AC /* Debug */,
+				C1B0DE020000000A007C38AC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

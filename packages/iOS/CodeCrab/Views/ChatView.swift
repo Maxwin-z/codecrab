@@ -121,7 +121,7 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            wsService.switchProject(projectId: project.id, cwd: project.path)
+            wsService.switchProject(projectId: project.id, cwd: project.path, name: project.name, icon: project.icon)
             if let sessionId = initialSessionId {
                 // Resume the specified session after project switch settles
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

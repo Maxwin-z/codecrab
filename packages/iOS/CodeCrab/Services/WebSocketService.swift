@@ -107,6 +107,8 @@ class WebSocketService: ObservableObject {
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
     private var activeProjectId: String? = nil
+    private var activeProjectName: String = ""
+    private var activeProjectIcon: String = "🦀"
     private var projectStates: [String: ProjectChatState] = [:]
     private var webSocketTask: URLSessionWebSocketTask?
     private var clientId: String
@@ -302,6 +304,10 @@ class WebSocketService: ObservableObject {
             }
             if isCurrentProject, let pid = projectId {
                 self.activityHeartbeat = nil
+                LiveActivityService.shared.startActivity(
+                    projectName: activeProjectName,
+                    projectIcon: activeProjectIcon
+                )
                 // Clear summary/suggestions for the session that's starting a query
                 let targetSid = msgSessionId ?? sessionId
                 if !targetSid.isEmpty {
@@ -324,6 +330,7 @@ class WebSocketService: ObservableObject {
             if isCurrentProject, let pid = projectId {
                 self.isAborting = false
                 self.activityHeartbeat = nil
+                LiveActivityService.shared.endActivity()
                 // Defensively remove the completed query from the queue.
                 // query_queue_status(completed) should handle this, but query_end
                 // serves as a backup to prevent stale queue items.
@@ -363,6 +370,14 @@ class WebSocketService: ObservableObject {
             if targetSid == sessionId {
                 if deltaType == "thinking" { self.streamingThinking += textDelta }
                 else { self.streamingText += textDelta }
+                // Update Live Activity with streaming state
+                let actType = deltaType == "thinking" ? "thinking" : "streaming"
+                LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
+                    activityType: actType,
+                    toolName: nil,
+                    contentSnippet: getLastLineSnippet(),
+                    elapsedSeconds: Int((activityHeartbeat?.elapsedMs ?? 0) / 1000)
+                ))
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) {
                     if deltaType == "thinking" { $0.streamingThinking += textDelta }
@@ -412,6 +427,14 @@ class WebSocketService: ObservableObject {
                     let msg = ChatMessage(id: UUID().uuidString, role: "system", content: "", toolCalls: toolCalls, timestamp: Date().timeIntervalSince1970 * 1000)
                     self.messages.append(msg)
                 }
+                // Update Live Activity with tool name
+                let toolName = toolCalls.first?.name
+                LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
+                    activityType: "tool_use",
+                    toolName: toolName,
+                    contentSnippet: nil,
+                    elapsedSeconds: Int((activityHeartbeat?.elapsedMs ?? 0) / 1000)
+                ))
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) {
                     if let lastIdx = $0.messages.lastIndex(where: { $0.role == "system" }), $0.messages[lastIdx].toolCalls != nil {
@@ -525,6 +548,7 @@ class WebSocketService: ObservableObject {
             }
             runningProjectIds.remove(pid)
             self.isAborting = false
+            LiveActivityService.shared.endActivity()
         case "cleared":
             if isCurrentProject {
                 clearSessionPublished()
@@ -544,6 +568,7 @@ class WebSocketService: ObservableObject {
             if isCurrentProject {
                 if let pid = projectId { runningProjectIds.remove(pid) }
                 self.isAborting = false
+                LiveActivityService.shared.endActivity()
             }
         case "result":
             guard let pid = projectId, isCurrentProject else { break }
@@ -614,6 +639,24 @@ class WebSocketService: ObservableObject {
                     lastToolName: lastToolName,
                     paused: paused
                 )
+                // Update Live Activity from heartbeat
+                let actType: String
+                if paused {
+                    actType = "paused"
+                } else {
+                    switch lastActivityType {
+                    case "thinking_delta": actType = "thinking"
+                    case "text_delta": actType = "streaming"
+                    case "tool_use": actType = "tool_use"
+                    default: actType = "working"
+                    }
+                }
+                LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
+                    activityType: actType,
+                    toolName: lastToolName,
+                    contentSnippet: getLastLineSnippet(),
+                    elapsedSeconds: Int(elapsedMs / 1000)
+                ))
             }
         case "cron_task_completed":
             guard isCurrentProject else { break }
@@ -903,6 +946,16 @@ class WebSocketService: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func getLastLineSnippet() -> String? {
+        let text = streamingText.isEmpty ? streamingThinking : streamingText
+        guard !text.isEmpty else { return nil }
+        let lastLine = text.components(separatedBy: .newlines)
+            .last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
+        let trimmed = lastLine.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return nil }
+        return trimmed.count > 60 ? String(trimmed.prefix(57)) + "..." : trimmed
+    }
+
     private func sendWebSocketMessage(_ dict: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let jsonString = String(data: data, encoding: .utf8) else { return }
@@ -1084,7 +1137,7 @@ class WebSocketService: ObservableObject {
         ])
     }
 
-    func switchProject(projectId: String, cwd: String?) {
+    func switchProject(projectId: String, cwd: String?, name: String = "", icon: String = "🦀") {
         if let current = activeProjectId {
             // Save per-session data to current session state
             saveCurrentSessionToState()
@@ -1104,6 +1157,8 @@ class WebSocketService: ObservableObject {
         }
 
         activeProjectId = projectId
+        activeProjectName = name
+        activeProjectIcon = icon
         ensureProjectState(projectId)
         projectStates[projectId]!.awaitingSessionSwitch = true
 
