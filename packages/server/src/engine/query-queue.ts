@@ -60,6 +60,9 @@ export interface QueryTimerState {
   lastActivityType: string
   lastToolName?: string
   textSnippet?: string
+  /** Number of tools currently executing (between tool_use and tool_result).
+   *  Idle timer is suspended while > 0 to avoid killing long-running tools. */
+  activeToolCount: number
 }
 
 export type StatusChangeCallback = (event: QueryStatusEvent) => void
@@ -202,6 +205,7 @@ export class QueryQueue {
       lastActivityAt: now,
       paused: false,
       lastActivityType: 'started',
+      activeToolCount: 0,
     })
 
     console.log(`[QueryQueue] Running query ${query.id} for project ${projectId} (idle timeout: ${timeoutMs}ms)`)
@@ -284,8 +288,26 @@ export class QueryQueue {
       state.textSnippet = undefined
     }
 
+    // Track tool execution lifecycle (handles parallel tool calls via counter)
+    if (activityType === 'tool_use') {
+      state.activeToolCount = (state.activeToolCount || 0) + 1
+    } else if (activityType === 'tool_result') {
+      state.activeToolCount = Math.max(0, (state.activeToolCount || 0) - 1)
+    }
+
     // If paused (waiting for user input), only update metadata — timer restarts on resume
     if (state.paused) return
+
+    // While tools are executing, suspend the idle timer — the tool process is still
+    // alive and working (e.g. a long-running render/build/test script).
+    // The timer will restart once all tool_result events arrive.
+    if (state.activeToolCount > 0) {
+      if (state.timerId) {
+        clearTimeout(state.timerId)
+        state.timerId = null
+      }
+      return
+    }
 
     // Reset idle timer
     if (state.timerId) clearTimeout(state.timerId)
@@ -322,6 +344,13 @@ export class QueryQueue {
 
     state.paused = false
     state.lastActivityAt = Date.now()
+
+    // If tools are still executing, don't start the timer — it will start
+    // when the last tool_result arrives via touchActivity()
+    if (state.activeToolCount > 0) {
+      console.log(`[QueryQueue] Resumed idle timeout for query ${queryId} (timer deferred — ${state.activeToolCount} tool(s) still executing)`)
+      return
+    }
 
     const timeoutMs = getTimeoutMs()
     const query = this.findQueryById(queryId)
