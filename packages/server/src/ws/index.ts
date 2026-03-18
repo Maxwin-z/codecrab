@@ -738,6 +738,7 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
   status: string
   summary?: string
   suggestions?: string[]
+  processingTurnTimestamp?: number
 } | null> {
   // Try memory first, then disk
   let session = sessions.get(sessionId)
@@ -768,36 +769,41 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
   }
   if (!session) return null
 
-  // If processing, exclude the last (in-progress) turn
+  // Include all turns, even the in-progress one when processing.
+  // The client needs the current turn's accumulated data (completed thinking,
+  // text, tool_use, tool_result events) to display a complete picture.
   const isProcessing = session.status === 'processing'
-  let turns = isProcessing && session.turns.length > 0
-    ? session.turns.slice(0, -1)
-    : session.turns
+  const inProgressTurn = isProcessing && session.turns.length > 0
+    ? session.turns[session.turns.length - 1]
+    : null
+  let turns = session.turns
 
-  // Incremental fetch: only return turns after the given timestamp
+  // Incremental fetch: only return turns after the given timestamp.
+  // Always include the in-progress turn even if previously fetched,
+  // because its content keeps growing as the agent works.
   if (afterTurn) {
-    turns = turns.filter(t => t.timestamp > afterTurn)
+    turns = turns.filter(t => t.timestamp > afterTurn || t === inProgressTurn)
   }
 
   // User messages as summaries
   const messages = turnsToMessages(turns).map(toMessageSummary)
 
-  // High-value SDK events only (from turn.agent.messages, NOT debugEvents)
-  // Truncate tool_result content for client delivery
+  // SDK events for client display.
+  // Completed turns: high-value events only (from turn.agent.messages) to keep payload small.
+  // In-progress turn: ALL debug events (from turn.agent.debugEvents) so the client's
+  // debug timeline matches what was visible via WebSocket before re-entering.
   const sdkEvents: import('@codecrab/shared').DebugEvent[] = []
   for (const turn of turns) {
-    for (const event of turn.agent.messages) {
+    const events = turn === inProgressTurn ? turn.agent.debugEvents : turn.agent.messages
+    for (const event of events) {
       sdkEvents.push(event.type === 'tool_result' ? truncateToolResultEvent(event) : event)
     }
   }
 
   // Extract suggestions from last text event (always from full session, not just delta)
   let suggestions: string[] | undefined
-  const allTurns = isProcessing && session.turns.length > 0
-    ? session.turns.slice(0, -1)
-    : session.turns
-  for (let i = allTurns.length - 1; i >= 0; i--) {
-    const msgs = allTurns[i].agent.messages
+  for (let i = session.turns.length - 1; i >= 0; i--) {
+    const msgs = session.turns[i].agent.messages
     const textEvt = [...msgs].reverse().find(e => e.type === 'text' && e.data?.content)
     if (textEvt) {
       const textContent = textEvt.data?.content as string
@@ -815,6 +821,7 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
     status: session.status,
     summary: session.summary,
     suggestions,
+    processingTurnTimestamp: inProgressTurn?.timestamp,
   }
 }
 

@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
 
 // Get session history optimized for client display.
 // Returns user messages + high-value SDK events (much smaller than full debugEvents).
-// If session is processing, excludes the last in-progress turn.
+// Includes in-progress turn when processing, with processingTurnTimestamp for client dedup.
 router.get('/:id/history', async (req, res) => {
   const sessionId = req.params.id
   const afterTurn = req.query.afterTurn ? Number(req.query.afterTurn) : undefined

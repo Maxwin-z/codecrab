@@ -876,27 +876,56 @@ class WebSocketService: ObservableObject {
                 guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
                 let isIncremental = lastUserTs != nil
+                let processingTurnTs = json["processingTurnTimestamp"] as? Double
 
-                // Parse and merge messages
+                // Parse and merge messages.
+                // When the server returns an in-progress turn (processingTurnTimestamp),
+                // remove any cached messages at or after that timestamp before merging,
+                // so the API snapshot replaces partial WebSocket data for the current turn.
                 if let messagesJson = json["messages"] as? [[String: Any]], !messagesJson.isEmpty {
                     let newMessages = parseMessageHistory(messagesJson)
                     if sid == self.sessionId {
-                        self.messages = isIncremental ? self.messages + newMessages : newMessages
+                        if isIncremental, let pts = processingTurnTs {
+                            // Keep cached messages before the in-progress turn, replace the rest
+                            self.messages = self.messages.filter { $0.timestamp < pts } + newMessages
+                            // Clear streaming state — the snapshot has all completed content;
+                            // ongoing streaming will resume via WebSocket deltas.
+                            self.streamingText = ""
+                            self.streamingThinking = ""
+                        } else {
+                            self.messages = isIncremental ? self.messages + newMessages : newMessages
+                        }
                     } else if let pid = self.activeProjectId {
                         modifySessionState(projectId: pid, sessionId: sid) {
-                            $0.messages = isIncremental ? $0.messages + newMessages : newMessages
+                            if isIncremental, let pts = processingTurnTs {
+                                $0.messages = $0.messages.filter { $0.timestamp < pts } + newMessages
+                                $0.streamingText = ""
+                                $0.streamingThinking = ""
+                            } else {
+                                $0.messages = isIncremental ? $0.messages + newMessages : newMessages
+                            }
                         }
                     }
                 }
 
-                // Parse and merge SDK events
+                // Parse and merge SDK events.
+                // Same logic: replace events from in-progress turn with the latest snapshot.
                 if let eventsArray = json["sdkEvents"] as? [[String: Any]], !eventsArray.isEmpty {
                     let newEvents = eventsArray.compactMap { parseSdkEvent($0) }
                     if sid == self.sessionId {
-                        self.sdkEvents = isIncremental ? self.sdkEvents + newEvents : newEvents
+                        if isIncremental, let pts = processingTurnTs {
+                            // SDK events have a ts field; keep events before the in-progress turn
+                            self.sdkEvents = self.sdkEvents.filter { $0.ts < pts } + newEvents
+                        } else {
+                            self.sdkEvents = isIncremental ? self.sdkEvents + newEvents : newEvents
+                        }
                     } else if let pid = self.activeProjectId {
                         modifySessionState(projectId: pid, sessionId: sid) {
-                            $0.sdkEvents = isIncremental ? $0.sdkEvents + newEvents : newEvents
+                            if isIncremental, let pts = processingTurnTs {
+                                $0.sdkEvents = $0.sdkEvents.filter { $0.ts < pts } + newEvents
+                            } else {
+                                $0.sdkEvents = isIncremental ? $0.sdkEvents + newEvents : newEvents
+                            }
                         }
                     }
                 }
