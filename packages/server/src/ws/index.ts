@@ -102,15 +102,15 @@ function triggerSoulEvolutionAsync(userMessage: string, assistantResponse: strin
   })
 }
 
-// Activity heartbeat — throttle to one broadcast per 30s per query
-const HEARTBEAT_THROTTLE_MS = 30_000
+// Activity heartbeat — throttle to one broadcast per 10s per query
+const HEARTBEAT_THROTTLE_MS = 10_000
 const lastHeartbeatSentAt = new Map<string, number>()
+// Periodic heartbeat timers — ensure updates during long tool executions
+const periodicHeartbeatTimers = new Map<string, NodeJS.Timeout>()
+const PERIODIC_HEARTBEAT_INTERVAL_MS = 10_000
 
-function maybeSendActivityHeartbeat(projectId: string, sessionId: string, queryId: string): void {
+function sendActivityHeartbeat(projectId: string, sessionId: string, queryId: string): void {
   const now = Date.now()
-  const lastSent = lastHeartbeatSentAt.get(queryId) || 0
-  if (now - lastSent < HEARTBEAT_THROTTLE_MS) return
-
   const timerState = queryQueue.getTimerState(queryId)
   if (!timerState) return
 
@@ -128,12 +128,37 @@ function maybeSendActivityHeartbeat(projectId: string, sessionId: string, queryI
     elapsedMs,
     lastActivityType: timerState.lastActivityType,
     lastToolName: timerState.lastToolName,
+    textSnippet: timerState.textSnippet || undefined,
     paused: timerState.paused || undefined,
   })
 }
 
+function maybeSendActivityHeartbeat(projectId: string, sessionId: string, queryId: string): void {
+  const now = Date.now()
+  const lastSent = lastHeartbeatSentAt.get(queryId) || 0
+  if (now - lastSent < HEARTBEAT_THROTTLE_MS) return
+  sendActivityHeartbeat(projectId, sessionId, queryId)
+}
+
+function startPeriodicHeartbeat(projectId: string, sessionId: string, queryId: string): void {
+  stopPeriodicHeartbeat(queryId)
+  const timerId = setInterval(() => {
+    sendActivityHeartbeat(projectId, sessionId, queryId)
+  }, PERIODIC_HEARTBEAT_INTERVAL_MS)
+  periodicHeartbeatTimers.set(queryId, timerId)
+}
+
+function stopPeriodicHeartbeat(queryId: string): void {
+  const timerId = periodicHeartbeatTimers.get(queryId)
+  if (timerId) {
+    clearInterval(timerId)
+    periodicHeartbeatTimers.delete(queryId)
+  }
+}
+
 function cleanupHeartbeat(queryId: string): void {
   lastHeartbeatSentAt.delete(queryId)
+  stopPeriodicHeartbeat(queryId)
 }
 
 // Project activity — lightweight global broadcast for project list UI
@@ -345,6 +370,7 @@ async function executeCronQuery(
   // Broadcast query_start to both sessions
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: execSessionId, queryId: queuedQuery.id })
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: parentSession.sessionId, queryId: queuedQuery.id })
+  startPeriodicHeartbeat(projectId, execSessionId, queuedQuery.id)
 
   logEvent('query_start', prompt.slice(0, 200))
 
@@ -1560,6 +1586,7 @@ async function executeUserQuery(
   tsLog('[ws]', `Query started — project=${projectId}, session=${session.sessionId}, query=${queuedQuery.id}, prompt=${prompt.slice(0, 80)}`)
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
   broadcastProjectStatuses()
+  startPeriodicHeartbeat(projectId, session.sessionId, queuedQuery.id)
 
   // Debug event logger for this query — uses the captured turn reference
   const currentTurn = turn

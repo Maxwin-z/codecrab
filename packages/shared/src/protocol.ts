@@ -249,6 +249,7 @@ export interface ActivityHeartbeatMessage extends ServerProjectContext {
   elapsedMs: number
   lastActivityType: string
   lastToolName?: string
+  textSnippet?: string
   paused?: boolean
 }
 

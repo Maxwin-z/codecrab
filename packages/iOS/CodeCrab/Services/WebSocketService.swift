@@ -414,8 +414,17 @@ class WebSocketService: ObservableObject {
             }
         case "tool_use":
             guard let pid = projectId, isCurrentProject else { break }
-            guard let toolData = try? JSONSerialization.data(withJSONObject: json["toolCalls"] ?? []),
-                  let toolCalls = try? JSONDecoder().decode([ToolCall].self, from: toolData) else { break }
+            guard let toolName = json["toolName"] as? String,
+                  let toolId = json["toolId"] as? String else { break }
+            // Decode input as JSONValue
+            var inputValue: JSONValue = .null
+            if let inputObj = json["input"] {
+                if let inputData = try? JSONSerialization.data(withJSONObject: inputObj) {
+                    inputValue = (try? JSONDecoder().decode(JSONValue.self, from: inputData)) ?? .null
+                }
+            }
+            let toolCall = ToolCall(name: toolName, id: toolId, input: inputValue)
+            let toolCalls = [toolCall]
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
             if targetSid == sessionId {
@@ -425,12 +434,12 @@ class WebSocketService: ObservableObject {
                     let msg = ChatMessage(id: UUID().uuidString, role: "system", content: "", toolCalls: toolCalls, timestamp: Date().timeIntervalSince1970 * 1000)
                     self.messages.append(msg)
                 }
-                // Update Live Activity with tool name
-                let toolName = toolCalls.first?.name
+                // Update Live Activity with tool name and detail
+                let toolDetail = Self.extractToolDetail(toolName: toolName, input: json["input"])
                 LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
                     activityType: "tool_use",
                     toolName: toolName,
-                    contentSnippet: nil,
+                    contentSnippet: toolDetail,
                     elapsedSeconds: Int((activityHeartbeat?.elapsedMs ?? 0) / 1000)
                 ))
             } else {
@@ -631,6 +640,7 @@ class WebSocketService: ObservableObject {
                 let lastActivityType = json["lastActivityType"] as? String ?? "working"
                 let lastToolName = json["lastToolName"] as? String
                 let paused = json["paused"] as? Bool ?? false
+                let serverSnippet = json["textSnippet"] as? String
                 self.activityHeartbeat = ActivityHeartbeat(
                     elapsedMs: elapsedMs,
                     lastActivityType: lastActivityType,
@@ -649,10 +659,15 @@ class WebSocketService: ObservableObject {
                     default: actType = "working"
                     }
                 }
+                // Prefer local snippet for streaming; fall back to server snippet (useful during tool execution)
+                let snippet = getLastLineSnippet() ?? serverSnippet.flatMap { s in
+                    let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : (trimmed.count > 60 ? String(trimmed.suffix(57)) + "..." : trimmed)
+                }
                 LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
                     activityType: actType,
                     toolName: lastToolName,
-                    contentSnippet: getLastLineSnippet(),
+                    contentSnippet: snippet,
                     elapsedSeconds: Int(elapsedMs / 1000)
                 ))
             }
@@ -942,6 +957,43 @@ class WebSocketService: ObservableObject {
             .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[\\s\\S]*?\\]", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\n?\\[SUMMARY:[\\s\\S]*?\\]", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Extract a human-readable detail from a tool's input for Live Activity display.
+    static func extractToolDetail(toolName: String, input: Any?) -> String? {
+        guard let inputDict = input as? [String: Any] else { return nil }
+        switch toolName {
+        case "Read", "Edit", "Write":
+            if let filePath = inputDict["file_path"] as? String {
+                // Show last 2 path components
+                let components = filePath.components(separatedBy: "/").filter { !$0.isEmpty }
+                let tail = components.suffix(2).joined(separator: "/")
+                return tail.count > 60 ? String(tail.suffix(57)) + "..." : tail
+            }
+        case "Bash":
+            if let desc = inputDict["description"] as? String, !desc.isEmpty {
+                return desc.count > 60 ? String(desc.prefix(57)) + "..." : desc
+            }
+            if let cmd = inputDict["command"] as? String, !cmd.isEmpty {
+                let firstLine = cmd.components(separatedBy: .newlines).first ?? cmd
+                return firstLine.count > 60 ? String(firstLine.prefix(57)) + "..." : firstLine
+            }
+        case "Glob":
+            if let pattern = inputDict["pattern"] as? String {
+                return pattern.count > 60 ? String(pattern.prefix(57)) + "..." : pattern
+            }
+        case "Grep":
+            if let pattern = inputDict["pattern"] as? String {
+                return pattern.count > 60 ? String(pattern.prefix(57)) + "..." : pattern
+            }
+        case "Agent":
+            if let desc = inputDict["description"] as? String, !desc.isEmpty {
+                return desc.count > 60 ? String(desc.prefix(57)) + "..." : desc
+            }
+        default:
+            break
+        }
+        return nil
     }
 
     private func getLastLineSnippet() -> String? {

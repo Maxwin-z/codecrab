@@ -29,7 +29,6 @@ struct CodeCrabLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    // Prominent status row
                     HStack(spacing: 10) {
                         // Colored status icon
                         ZStack {
@@ -42,17 +41,26 @@ struct CodeCrabLiveActivity: Widget {
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(activityLabel(context.state))
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
+                            // Content-first: show snippet as primary, status as fallback
+                            if let snippet = context.state.contentSnippet {
+                                Text(snippet)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .lineLimit(2)
+                                    .foregroundStyle(.white.opacity(0.85))
+                            } else {
+                                Text(activityLabel(context.state))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
 
-                            if let toolName = context.state.toolName,
-                               context.state.activityType == "tool_use" {
+                            // Tool name badge for tool_use
+                            if context.state.activityType == "tool_use",
+                               let toolName = context.state.toolName {
                                 Text(toolName)
-                                    .font(.caption)
+                                    .font(.caption2)
                                     .fontWeight(.medium)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
                                     .background(statusColor(context.state.activityType).opacity(0.2))
                                     .clipShape(Capsule())
                             }
@@ -63,19 +71,7 @@ struct CodeCrabLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    if let snippet = context.state.contentSnippet {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Divider()
-                                .background(.white.opacity(0.15))
-                                .padding(.bottom, 8)
-
-                            Text(snippet)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .lineLimit(3)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
+                    EmptyView()
                 }
 
             } compactLeading: {
@@ -137,12 +133,21 @@ struct CodeCrabLiveActivity: Widget {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(activityLabel(context.state))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                    // Content-first: show snippet as primary, status label as fallback
+                    if let snippet = context.state.contentSnippet {
+                        Text(snippet)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                    } else {
+                        Text(activityLabel(context.state))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
 
-                    if let toolName = context.state.toolName,
-                       context.state.activityType == "tool_use" {
+                    // Tool name badge for tool_use
+                    if context.state.activityType == "tool_use",
+                       let toolName = context.state.toolName {
                         Text(toolName)
                             .font(.caption)
                             .fontWeight(.medium)
@@ -154,18 +159,6 @@ struct CodeCrabLiveActivity: Widget {
                 }
 
                 Spacer()
-            }
-
-            // Content snippet
-            if let snippet = context.state.contentSnippet {
-                Divider()
-                    .padding(.vertical, 10)
-
-                Text(snippet)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(16)
@@ -197,7 +190,7 @@ struct CodeCrabLiveActivity: Widget {
         switch state.activityType {
         case "thinking": return "Thinking..."
         case "streaming": return "Streaming"
-        case "tool_use": return "Tool: \(state.toolName ?? "unknown")"
+        case "tool_use": return "Tool: \(state.toolName ?? "working")"
         case "paused": return "Waiting for input"
         default: return "Working..."
         }
