@@ -13,7 +13,7 @@ import { CronPage } from '@/components/CronPage'
 import { AppSidebar } from '@/components/AppSidebar'
 import { WebSocketProvider } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { checkAuthStatus, authFetch, clearToken } from '@/lib/auth'
+import { checkAuthStatus, authFetch, clearToken, verifyToken, setToken } from '@/lib/auth'
 import './index.css'
 
 function AppLayout({
@@ -48,6 +48,20 @@ function AppRoutes() {
   const retryCountRef = useRef(0)
 
   const checkAuth = useCallback(async () => {
+    // Check for token in URL (from `codecrab init` auto-login)
+    const params = new URLSearchParams(window.location.search)
+    const urlToken = params.get('token')
+    if (urlToken) {
+      const isValid = await verifyToken(urlToken)
+      if (isValid) {
+        setToken(urlToken)
+        // Remove token from URL to avoid leaking it in browser history
+        window.history.replaceState({}, '', window.location.pathname)
+        setAuthState('authenticated')
+        return
+      }
+    }
+
     const { configured, valid } = await checkAuthStatus()
     // If server has no auth configured, treat as authenticated
     if (!configured) {

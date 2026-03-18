@@ -1,9 +1,14 @@
 {
   "name": "@codecrab/server",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "description": "CodeCrab backend — Express server, WebSocket, engine adapters, MCP extensions",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./auth": "./src/auth/index.ts"
+  },
   "scripts": {
     "dev": "nodemon --watch src --ext ts --signal SIGTERM --exec 'tsx src/index.ts'",
     "build": "tsc",

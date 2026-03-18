@@ -11,14 +11,24 @@
     "dev:web": "pnpm --filter @codecrab/web dev",
     "dev:relay": "pnpm --filter @codecrab/relay dev",
     "build": "pnpm -r build",
-    "start": "pnpm --filter @codecrab/server start"
+    "start": "pnpm --filter @codecrab/server start",
+    "cli": "npx tsx packages/cli/src/index.ts"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "tsx": "^4.21.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
-  "keywords": ["ai", "coding", "agent", "mcp", "cli"],
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "mcp",
+    "cli"
+  ],
   "license": "MIT"
 }

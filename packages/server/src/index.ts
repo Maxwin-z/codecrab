@@ -1,5 +1,6 @@
 import dotenv from 'dotenv'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
 
 // Load .env from project root (two levels up from packages/server/src)
@@ -24,92 +25,122 @@ import { ensureToken, authMiddleware } from './auth/index.js'
 import { setupWebSocket, executePromptInSession } from './ws/index.js'
 import os from 'os'
 
-const app = express()
-const server = createServer(app)
-const PORT = Number(process.env.PORT) || 4200
+export interface StartServerOptions {
+  port?: number
+}
 
-app.use(express.json())
+/**
+ * Create and start the CodeCrab server.
+ * Returns a promise that resolves with the port once the server is listening.
+ */
+export async function startServer(options: StartServerOptions = {}): Promise<{ port: number }> {
+  const PORT = options.port || Number(process.env.PORT) || 4200
 
-// CORS — allow cross-origin requests (needed when web app connects to a different server)
-app.use((req, res, next) => {
-  const origin = req.headers.origin
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin)
-    res.setHeader('Access-Control-Allow-Credentials', 'true')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  const app = express()
+  const server = createServer(app)
+
+  app.use(express.json())
+
+  // CORS — allow cross-origin requests (needed when web app connects to a different server)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    }
+    if (req.method === 'OPTIONS') {
+      res.status(204).end()
+      return
+    }
+    next()
+  })
+
+  // Request logging
+  app.use((req, res, next) => {
+    const start = Date.now()
+    const end = res.end
+    res.end = function (this: typeof res, ...args: Parameters<typeof end>) {
+      const code = res.statusCode
+      const color = code < 300 ? '\x1b[32m' : code < 400 ? '\x1b[36m' : code < 500 ? '\x1b[33m' : '\x1b[31m'
+      console.log(`${req.method} ${req.originalUrl} ${color}${code}\x1b[0m ${Date.now() - start}ms`)
+      return end.apply(this, args)
+    } as typeof end
+    next()
+  })
+
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', timestamp: Date.now() })
+  })
+
+  // Service discovery endpoint (no auth required, used by LAN scanner)
+  app.get('/api/discovery', (_req, res) => {
+    res.json({ service: 'CodeCrab', version: '0.1.0' })
+  })
+
+  // Public routes (no token required)
+  app.use('/api/auth', authRouter)
+
+  // Public setup detection endpoints (needed before initialization)
+  app.get('/api/setup/detect', async (_req, res) => {
+    const { detectHandler } = await import('./api/setup-detect.js')
+    detectHandler(_req, res)
+  })
+  app.get('/api/setup/detect/probe', async (_req, res) => {
+    const { probeHandler } = await import('./api/setup-detect.js')
+    probeHandler(_req, res)
+  })
+
+  // Public debug endpoints (no auth required, for troubleshooting)
+  app.use('/api/debug', debugRouter)
+
+  // Serve the web app static files (before auth — the app handles its own auth via API calls)
+  const appDistCandidates = [
+    path.resolve(__dirname, '../../app/dist'),       // from packages/server/src (dev with tsx)
+    path.resolve(__dirname, '../../../app/dist'),     // from packages/server/dist (compiled)
+  ]
+  const appDistDir = appDistCandidates.find(dir => fs.existsSync(path.join(dir, 'index.html')))
+  if (appDistDir) {
+    app.use(express.static(appDistDir))
+    // SPA fallback for non-API routes — serve index.html so client-side routing works
+    app.use((req, res, next) => {
+      if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
+        res.sendFile(path.join(appDistDir, 'index.html'))
+        return
+      }
+      next()
+    })
+    console.log(`[server] Serving web app from ${appDistDir}`)
   }
-  if (req.method === 'OPTIONS') {
-    res.status(204).end()
-    return
-  }
-  next()
-})
 
-// Request logging
-app.use((req, res, next) => {
-  const start = Date.now()
-  const end = res.end
-  res.end = function (this: typeof res, ...args: Parameters<typeof end>) {
-    const code = res.statusCode
-    const color = code < 300 ? '\x1b[32m' : code < 400 ? '\x1b[36m' : code < 500 ? '\x1b[33m' : '\x1b[31m'
-    console.log(`${req.method} ${req.originalUrl} ${color}${code}\x1b[0m ${Date.now() - start}ms`)
-    return end.apply(this, args)
-  } as typeof end
-  next()
-})
+  // Auth middleware — validates token on all subsequent routes
+  app.use(authMiddleware)
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: Date.now() })
-})
+  // Protected routes (require valid token)
+  app.use('/api/setup', setupRouter)
+  app.use('/api/files', filesRouter)
+  app.use('/api/projects', projectsRouter)
+  app.use('/api/sessions', sessionsRouter)
+  app.use('/api/chrome', chromeRouter)
+  app.use('/api/cron', cronRouter)
+  app.use('/api/push', pushRouter)
+  app.use('/api/soul', soulRouter)
 
-// Service discovery endpoint (no auth required, used by LAN scanner)
-app.get('/api/discovery', (_req, res) => {
-  res.json({ service: 'CodeCrab', version: '0.1.0' })
-})
+  // MCP registry — list available MCP servers
+  app.get('/api/mcps', (_req, res) => {
+    res.json(getAvailableMcps())
+  })
 
-// Public routes (no token required)
-app.use('/api/auth', authRouter)
+  // Error handler
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error(`[error] ${_req.method} ${_req.originalUrl}:`, err.message)
+    res.status(500).json({ error: err.message })
+  })
 
-// Public setup detection endpoints (needed before initialization)
-app.get('/api/setup/detect', async (_req, res) => {
-  const { detectHandler } = await import('./api/setup-detect.js')
-  detectHandler(_req, res)
-})
-app.get('/api/setup/detect/probe', async (_req, res) => {
-  const { probeHandler } = await import('./api/setup-detect.js')
-  probeHandler(_req, res)
-})
+  // Initialize token, setup WebSocket, and start server
+  await ensureToken()
 
-// Public debug endpoints (no auth required, for troubleshooting)
-app.use('/api/debug', debugRouter)
-
-// Auth middleware — validates token on all subsequent routes
-app.use(authMiddleware)
-
-// Protected routes (require valid token)
-app.use('/api/setup', setupRouter)
-app.use('/api/files', filesRouter)
-app.use('/api/projects', projectsRouter)
-app.use('/api/sessions', sessionsRouter)
-app.use('/api/chrome', chromeRouter)
-app.use('/api/cron', cronRouter)
-app.use('/api/push', pushRouter)
-app.use('/api/soul', soulRouter)
-
-// MCP registry — list available MCP servers
-app.get('/api/mcps', (_req, res) => {
-  res.json(getAvailableMcps())
-})
-
-// Error handler
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(`[error] ${_req.method} ${_req.originalUrl}:`, err.message)
-  res.status(500).json({ error: err.message })
-})
-
-// Initialize token, setup WebSocket, and start server
-ensureToken().then(() => {
   // Initialize push notifications (APNs)
   initPush()
 
@@ -147,23 +178,35 @@ ensureToken().then(() => {
     return result
   })
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[server] listening on http://0.0.0.0:${PORT}`)
-  })
-
-  // Graceful shutdown — close server and WebSocket on termination signals
-  const shutdown = (signal: string) => {
-    console.log(`[server] ${signal} received, shutting down...`)
-    wss.close()
-    cronSystem.stop()
-    server.close(() => {
-      console.log(`[server] closed`)
-      process.exit(0)
+  return new Promise((resolve) => {
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`[server] listening on http://0.0.0.0:${PORT}`)
+      resolve({ port: PORT })
     })
-    // Force exit if graceful shutdown takes too long
-    setTimeout(() => process.exit(1), 3000)
-  }
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'))
-  process.on('SIGINT', () => shutdown('SIGINT'))
-})
+    // Graceful shutdown — close server and WebSocket on termination signals
+    const shutdown = (signal: string) => {
+      console.log(`[server] ${signal} received, shutting down...`)
+      wss.close()
+      cronSystem.stop()
+      server.close(() => {
+        console.log(`[server] closed`)
+        process.exit(0)
+      })
+      // Force exit if graceful shutdown takes too long
+      setTimeout(() => process.exit(1), 3000)
+    }
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'))
+    process.on('SIGINT', () => shutdown('SIGINT'))
+  })
+}
+
+// Auto-start when run directly (not imported as a module)
+const isDirectRun = process.argv[1] && (
+  process.argv[1].endsWith('/server/src/index.ts') ||
+  process.argv[1].endsWith('/server/dist/index.js')
+)
+if (isDirectRun) {
+  startServer()
+}
