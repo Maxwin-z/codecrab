@@ -968,7 +968,7 @@ interface Session {
 const HIGH_VALUE_EVENT_TYPES = new Set(['thinking', 'text', 'tool_use', 'tool_result', 'task_started', 'task_progress', 'task_notification'])
 
 /** Maximum length for tool_result content sent to clients (full content is kept in session) */
-const MAX_TOOL_RESULT_CLIENT_LENGTH = 2000
+const MAX_TOOL_RESULT_CLIENT_LENGTH = 300
 
 /** Truncate tool result content for client delivery, preserving full content in session storage */
 function truncateToolResultForClient(content: string): { content: string; totalLength?: number } {

@@ -198,17 +198,16 @@ private struct MessageModeTextView: View {
 private struct MessageModeThinkingView: View {
     let event: SdkEvent
     let isStreaming: Bool
-    @State private var expanded: Bool
-
-    init(event: SdkEvent, isStreaming: Bool) {
-        self.event = event
-        self.isStreaming = isStreaming
-        self._expanded = State(initialValue: isStreaming)
-    }
+    @State private var expanded: Bool = false
 
     private var content: String {
         guard let data = event.data, case .string(let c) = data["content"] else { return "" }
         return c
+    }
+
+    /// Single-line preview with newlines collapsed
+    private var thinkingPreview: String {
+        content.components(separatedBy: .newlines).joined(separator: " ")
     }
 
     var body: some View {
@@ -218,10 +217,19 @@ private struct MessageModeThinkingView: View {
                     HStack(spacing: 4) {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 10, weight: .medium))
+                        Text("🧠")
+                            .font(.caption)
                         Text("Thinking")
                             .font(.callout)
                             .fontDesign(.monospaced)
-                        Spacer()
+                            .layoutPriority(1)
+                        if !expanded {
+                            Text(thinkingPreview)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
                     .foregroundColor(.orange.opacity(0.8))
                 }
@@ -236,11 +244,6 @@ private struct MessageModeThinkingView: View {
                         .textSelection(.enabled)
                 }
             }
-            .onChange(of: isStreaming) { _, streaming in
-                if !streaming {
-                    withAnimation { expanded = false }
-                }
-            }
         }
     }
 }
@@ -248,13 +251,7 @@ private struct MessageModeThinkingView: View {
 private struct MessageModeToolUseView: View {
     let event: SdkEvent
     let isStreaming: Bool
-    @State private var expanded: Bool
-
-    init(event: SdkEvent, isStreaming: Bool) {
-        self.event = event
-        self.isStreaming = isStreaming
-        self._expanded = State(initialValue: isStreaming)
-    }
+    @State private var expanded: Bool = false
 
     private var toolName: String {
         guard let data = event.data, case .string(let name) = data["toolName"] else { return "unknown" }
@@ -266,9 +263,60 @@ private struct MessageModeToolUseView: View {
         return c
     }
 
+    /// Parse the input JSON string into a dictionary
+    private var inputDict: [String: Any]? {
+        guard let data = input.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return obj
+    }
+
+    private var toolIcon: String {
+        switch toolName {
+        case "Read", "ReadFile": return "📖"
+        case "Write", "WriteFile": return "✏️"
+        case "Edit", "EditFile": return "✏️"
+        case "Bash", "bash": return "💻"
+        case "Glob": return "🔍"
+        case "Grep": return "🔍"
+        case "Agent": return "🤖"
+        case "ToolSearch": return "🔎"
+        default: return "🔧"
+        }
+    }
+
+    /// Smart summary based on tool type
     private var summary: String {
-        let firstLine = input.components(separatedBy: .newlines).first ?? ""
-        return String(firstLine.prefix(60))
+        let dict = inputDict
+        switch toolName {
+        case "Read", "ReadFile", "Write", "WriteFile", "Edit", "EditFile":
+            if let path = dict?["file_path"] as? String ?? dict?["path"] as? String {
+                return truncatePath(path)
+            }
+            return String(input.prefix(20)) + (input.count > 20 ? "..." : "")
+        case "Bash", "bash":
+            if let desc = dict?["description"] as? String, !desc.isEmpty {
+                return String(desc.prefix(60))
+            }
+            if let cmd = dict?["command"] as? String {
+                return String(cmd.prefix(60))
+            }
+            return String(input.prefix(20)) + (input.count > 20 ? "..." : "")
+        case "Glob":
+            if let pattern = dict?["pattern"] as? String { return pattern }
+            return String(input.prefix(20)) + (input.count > 20 ? "..." : "")
+        case "Grep":
+            if let pattern = dict?["pattern"] as? String { return pattern }
+            return String(input.prefix(20)) + (input.count > 20 ? "..." : "")
+        default:
+            let firstLine = input.components(separatedBy: .newlines).first ?? ""
+            return String(firstLine.prefix(60))
+        }
+    }
+
+    /// Truncate file path to show the trailing portion: ...path/to/file.swift
+    private func truncatePath(_ path: String, maxLength: Int = 50) -> String {
+        if path.count <= maxLength { return path }
+        return "..." + String(path.suffix(maxLength))
     }
 
     var body: some View {
@@ -277,6 +325,8 @@ private struct MessageModeToolUseView: View {
                 HStack(spacing: 4) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .medium))
+                    Text(toolIcon)
+                        .font(.caption)
                     Text(toolName)
                         .font(.callout)
                         .fontDesign(.monospaced)
@@ -305,24 +355,13 @@ private struct MessageModeToolUseView: View {
                     .textSelection(.enabled)
             }
         }
-        .onChange(of: isStreaming) { _, streaming in
-            if !streaming {
-                withAnimation { expanded = false }
-            }
-        }
     }
 }
 
 private struct MessageModeToolResultView: View {
     let event: SdkEvent
     let isStreaming: Bool
-    @State private var expanded: Bool
-
-    init(event: SdkEvent, isStreaming: Bool) {
-        self.event = event
-        self.isStreaming = isStreaming
-        self._expanded = State(initialValue: isStreaming)
-    }
+    @State private var expanded: Bool = false
 
     private var content: String {
         guard let data = event.data, case .string(let c) = data["content"] else { return "" }
@@ -339,6 +378,15 @@ private struct MessageModeToolResultView: View {
         return content.count
     }
 
+    /// Single-line preview with newlines collapsed
+    private var resultPreview: String {
+        content.components(separatedBy: .newlines).joined(separator: " ")
+    }
+
+    private var charCountLabel: String {
+        "(\(charCount) chars)"
+    }
+
     var body: some View {
         if !content.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
@@ -346,23 +394,34 @@ private struct MessageModeToolResultView: View {
                     HStack(spacing: 4) {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 10, weight: .medium))
+                        Text("📋")
+                            .font(.caption)
                         Circle()
                             .fill(isError ? Color.red : Color.green)
                             .frame(width: 6, height: 6)
                         Text("Result")
                             .font(.callout)
                             .fontDesign(.monospaced)
-                        Text("\(charCount) chars")
-                            .font(.caption)
-                            .fontDesign(.monospaced)
-                        Spacer()
+                            .layoutPriority(1)
+                        if !expanded {
+                            Text(resultPreview)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(charCountLabel)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                        }
                     }
                     .foregroundColor(isError ? .red : .secondary)
                 }
                 .buttonStyle(PlainButtonStyle())
 
                 if expanded {
-                    Text(content.count > 2000 ? String(content.prefix(2000)) + "\n… (truncated)" : content)
+                    Text(content.count > 300 ? String(content.prefix(300)) + "\n… (truncated)" : content)
                         .font(.caption)
                         .fontDesign(.monospaced)
                         .foregroundColor(isError ? .red : .secondary)
@@ -370,11 +429,6 @@ private struct MessageModeToolResultView: View {
                         .padding(.leading, 18)
                         .padding(.top, 4)
                         .textSelection(.enabled)
-                }
-            }
-            .onChange(of: isStreaming) { _, streaming in
-                if !streaming {
-                    withAnimation { expanded = false }
                 }
             }
         }
@@ -800,7 +854,7 @@ struct ToolCallView: View {
                             Text("Result:")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
-                            Text(truncate(result, max: 2000))
+                            Text(truncate(result, max: 300))
                                 .font(.caption)
                                 .fontDesign(.monospaced)
                                 .foregroundColor(tool.isError == true ? .red : .secondary)
