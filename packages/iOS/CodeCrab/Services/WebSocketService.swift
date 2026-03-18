@@ -86,6 +86,9 @@ class WebSocketService: ObservableObject {
     @Published var suggestions: [String] = []
     @Published var pendingQuestion: PendingQuestion? = nil
 
+    /// Cached tool detail for Live Activity — persists across heartbeat updates until activity changes
+    private var currentToolDetail: String? = nil
+
     /// Filtered streaming text that hides SUMMARY/SUGGESTIONS tags during streaming
     var displayStreamingText: String {
         getDisplayStreamingText(streamingText)
@@ -368,6 +371,8 @@ class WebSocketService: ObservableObject {
             if targetSid == sessionId {
                 if deltaType == "thinking" { self.streamingThinking += textDelta }
                 else { self.streamingText += textDelta }
+                // Clear tool detail when streaming resumes
+                self.currentToolDetail = nil
                 // Update Live Activity with streaming state
                 let actType = deltaType == "thinking" ? "thinking" : "streaming"
                 LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
@@ -436,6 +441,7 @@ class WebSocketService: ObservableObject {
                 }
                 // Update Live Activity with tool name and detail
                 let toolDetail = Self.extractToolDetail(toolName: toolName, input: json["input"])
+                self.currentToolDetail = toolDetail
                 LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
                     activityType: "tool_use",
                     toolName: toolName,
@@ -659,10 +665,16 @@ class WebSocketService: ObservableObject {
                     default: actType = "working"
                     }
                 }
-                // Prefer local snippet for streaming; fall back to server snippet (useful during tool execution)
-                let snippet = getLastLineSnippet() ?? serverSnippet.flatMap { s in
-                    let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return trimmed.isEmpty ? nil : (trimmed.count > 60 ? String(trimmed.suffix(57)) + "..." : trimmed)
+                // For tool_use: preserve the cached tool detail; for streaming: use local snippet
+                let snippet: String?
+                if actType == "tool_use" {
+                    snippet = currentToolDetail
+                } else {
+                    currentToolDetail = nil
+                    snippet = getLastLineSnippet() ?? serverSnippet.flatMap { s in
+                        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? nil : (trimmed.count > 60 ? String(trimmed.suffix(57)) + "..." : trimmed)
+                    }
                 }
                 LiveActivityService.shared.updateActivity(state: CodeCrabActivityAttributes.ContentState(
                     activityType: actType,
