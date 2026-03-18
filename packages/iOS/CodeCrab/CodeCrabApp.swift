@@ -78,10 +78,35 @@ struct CodeCrabApp: App {
                         if webSocketService.runningProjectIds.isEmpty {
                             LiveActivityService.shared.endAllActivities()
                         }
+                        endLiveActivityBackgroundTask()
+                    } else if phase == .background {
+                        // Flush any pending Live Activity update before suspension
+                        LiveActivityService.shared.flushPendingUpdate()
+                        // Request background execution time to keep WebSocket alive
+                        // so Live Activity continues updating on the Lock Screen
+                        if LiveActivityService.shared.isActive {
+                            beginLiveActivityBackgroundTask()
+                        }
                     }
                 }
         }
     }
+}
+
+// Background task ID for keeping WebSocket alive while Live Activity is visible
+private var liveActivityBgTaskId: UIBackgroundTaskIdentifier = .invalid
+
+private func beginLiveActivityBackgroundTask() {
+    guard liveActivityBgTaskId == .invalid else { return }
+    liveActivityBgTaskId = UIApplication.shared.beginBackgroundTask {
+        endLiveActivityBackgroundTask()
+    }
+}
+
+private func endLiveActivityBackgroundTask() {
+    guard liveActivityBgTaskId != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(liveActivityBgTaskId)
+    liveActivityBgTaskId = .invalid
 }
 
 struct RootView: View {

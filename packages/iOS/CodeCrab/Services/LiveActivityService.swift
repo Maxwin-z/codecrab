@@ -7,9 +7,15 @@ class LiveActivityService {
     private var currentActivity: Activity<CodeCrabActivityAttributes>?
     private var lastUpdateTime: Date = .distantPast
     private var pendingUpdateTask: Task<Void, Never>?
+    private var pendingState: CodeCrabActivityAttributes.ContentState?
     private let throttleInterval: TimeInterval = 1.5
+    /// Track last activity type to detect state transitions
+    private var lastActivityType: String?
 
     nonisolated private init() {}
+
+    /// Whether a Live Activity is currently running
+    var isActive: Bool { currentActivity != nil }
 
     func startActivity(projectName: String, projectIcon: String) {
         endActivity()
@@ -28,11 +34,12 @@ class LiveActivityService {
         do {
             let activity = try Activity.request(
                 attributes: attributes,
-                content: .init(state: initialState, staleDate: nil),
+                content: .init(state: initialState, staleDate: Date().addingTimeInterval(15)),
                 pushType: nil
             )
             currentActivity = activity
             lastUpdateTime = Date()
+            lastActivityType = "working"
         } catch {
             print("[LiveActivity] Failed to start: \(error)")
         }
@@ -44,10 +51,14 @@ class LiveActivityService {
         let now = Date()
         let elapsed = now.timeIntervalSince(lastUpdateTime)
 
+        // Detect state transitions (e.g., streaming → tool_use) and bypass throttle
+        let isStateTransition = state.activityType != lastActivityType
+
         pendingUpdateTask?.cancel()
         pendingUpdateTask = nil
+        pendingState = state
 
-        if elapsed >= throttleInterval {
+        if elapsed >= throttleInterval || isStateTransition {
             performUpdate(state: state)
         } else {
             let delay = throttleInterval - elapsed
@@ -59,9 +70,20 @@ class LiveActivityService {
         }
     }
 
+    /// Immediately flush any pending update (e.g., before entering background)
+    func flushPendingUpdate() {
+        guard let state = pendingState else { return }
+        pendingUpdateTask?.cancel()
+        pendingUpdateTask = nil
+        pendingState = nil
+        performUpdate(state: state)
+    }
+
     func endActivity() {
         pendingUpdateTask?.cancel()
         pendingUpdateTask = nil
+        pendingState = nil
+        lastActivityType = nil
 
         guard let activity = currentActivity else { return }
 
@@ -94,9 +116,11 @@ class LiveActivityService {
         guard let activity = currentActivity else { return }
 
         Task {
-            await activity.update(.init(state: state, staleDate: nil))
+            await activity.update(.init(state: state, staleDate: Date().addingTimeInterval(15)))
         }
 
         lastUpdateTime = Date()
+        lastActivityType = state.activityType
+        pendingState = nil
     }
 }
