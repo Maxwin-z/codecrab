@@ -219,11 +219,9 @@ class WebSocketService: ObservableObject {
     }
 
     private func reconnect() {
-        Task { @MainActor in
-            guard !connected else { return }
-        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.connect()
+            guard let self, !self.connected else { return }
+            self.connect()
         }
     }
 
@@ -1002,6 +1000,22 @@ class WebSocketService: ObservableObject {
     func abort() {
         guard let projectId = activeProjectId else { return }
         isAborting = true
+        if !connected {
+            // WS is disconnected — reconnect first, then send abort after connection establishes
+            connect()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self, self.connected else {
+                    self?.isAborting = false
+                    return
+                }
+                self.sendWebSocketMessage([
+                    "type": "abort",
+                    "projectId": projectId,
+                    "sessionId": self.sessionId
+                ])
+            }
+            return
+        }
         sendWebSocketMessage([
             "type": "abort",
             "projectId": projectId,
@@ -1135,6 +1149,23 @@ class WebSocketService: ObservableObject {
             "projectId": projectId,
             "sessionId": sessionId
         ])
+    }
+
+    /// Called when the app returns to foreground.
+    /// Ensures WS is connected, fetches incremental session history, and syncs queue state.
+    func onForegroundReturn() {
+        if !connected {
+            // Force immediate reconnection instead of waiting for the 2s timer
+            connect()
+            return // connect() will send switch_project which triggers history fetch
+        }
+        // WS is still connected — request queue snapshot and fetch session history
+        requestQueueSnapshot()
+        // Fetch incremental history for the current viewing session
+        // (messages may have been generated while the app was in background)
+        if !sessionId.isEmpty {
+            fetchSessionHistory(sessionId: sessionId)
+        }
     }
 
     func switchProject(projectId: String, cwd: String?, name: String = "", icon: String = "🦀") {

@@ -41,6 +41,13 @@ import type { QueuedQuery, QueryResult, QueryTimerState } from '../engine/query-
 // Export for API use
 export { getSessionStatuses as getSessions }
 
+// Timestamp helper — formats to second-level precision for query execution logs
+function tsLog(prefix: string, ...args: unknown[]): void {
+  const now = new Date()
+  const ts = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
+  console.log(`[${ts}] ${prefix}`, ...args)
+}
+
 // Per-project query queue — replaces the old rejection-based concurrency control
 const queryQueue = new QueryQueue((event) => {
   broadcastToProject(event.projectId, {
@@ -1372,7 +1379,7 @@ export function setupWebSocket(server: Server) {
     // Attach client info to WebSocket for cron executor lookup
     ;(ws as any).clientInfo = { clientId }
 
-    console.log(`[ws] client connected: ${clientId} (${connectionId})`)
+    tsLog('[ws]', `Client connected — clientId=${clientId}, connectionId=${connectionId}`)
 
     // Send global state on connect
     let models = getCachedModels()
@@ -1550,6 +1557,7 @@ async function executeUserQuery(
   )
 
   session.status = 'processing'
+  tsLog('[ws]', `Query started — project=${projectId}, session=${session.sessionId}, query=${queuedQuery.id}, prompt=${prompt.slice(0, 80)}`)
   broadcastToProject(projectId, { type: 'query_start', projectId, sessionId: session.sessionId, queryId: queuedQuery.id })
   broadcastProjectStatuses()
 
@@ -1613,6 +1621,7 @@ async function executeUserQuery(
         // Reset text/thinking flags for next turn
         thinkingStarted = false
         textStarted = false
+        tsLog('[ws]', `Tool use — project=${projectId}, query=${queuedQuery.id}, tool=${toolName}`)
         broadcastToProject(projectId, {
           type: 'tool_use',
           toolName,
@@ -1627,6 +1636,7 @@ async function executeUserQuery(
       },
       onToolResult: (toolId, content, isError) => {
         const truncated = truncateToolResultForClient(content)
+        tsLog('[ws]', `Tool result — project=${projectId}, query=${queuedQuery.id}, toolId=${toolId}, error=${isError}`)
         broadcastToProject(projectId, {
           type: 'tool_result',
           toolId,
@@ -1811,7 +1821,7 @@ async function executeUserQuery(
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
   } catch (err: any) {
     logEvent('error', err.message || 'Query failed')
-    console.error('[ws] Query error:', err)
+    tsLog('[ws]', `Query error — project=${projectId}, query=${queuedQuery.id}, error=${err.message}`)
     broadcastToProject(projectId, {
       type: 'error',
       message: err.message || 'Query failed',
@@ -1822,6 +1832,7 @@ async function executeUserQuery(
     persistSession(session)
     return { success: false, error: err.message || 'Query failed', queryId: queuedQuery.id }
   } finally {
+    tsLog('[ws]', `Query ended — project=${projectId}, session=${session.sessionId}, query=${queuedQuery.id}`)
     session.status = 'idle'
     const projStateForEnd = getOrCreateProjectState(projectId)
     projStateForEnd.pendingQuestion = null
@@ -1982,7 +1993,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
   switch (msg.type) {
     case 'prompt': {
-      console.log(`[ws] Prompt received for project ${projectId} from client ${client.clientId}`)
+      tsLog('[ws]', `Prompt received — project=${projectId}, client=${client.clientId}`)
 
       // Create session lazily on first user message
       if (!session) {
@@ -2142,7 +2153,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     }
 
     case 'abort': {
-      console.log(`[ws] Abort requested for project ${projectId}`)
+      tsLog('[ws]', `Abort requested — project=${projectId}, session=${session?.sessionId ?? 'none'}, client=${client.clientId}`)
 
       // Abort the running query via the queue (which triggers the abortController)
       const abortedQuery = queryQueue.abortRunning(projectId)
@@ -2154,7 +2165,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         }
         broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
         broadcastProjectStatuses()
-        console.log(`[ws] Abort completed for project ${projectId}, query ${abortedQuery.id}`)
+        tsLog('[ws]', `Abort completed — project=${projectId}, query=${abortedQuery.id}`)
       } else if (abortQuery(clientState)) {
         // Fallback: abort via client state directly
         if (session) {
@@ -2162,9 +2173,9 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         }
         broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
         broadcastProjectStatuses()
-        console.log(`[ws] Abort completed for project ${projectId} (via clientState)`)
+        tsLog('[ws]', `Abort completed (via clientState) — project=${projectId}`)
       } else {
-        console.log(`[ws] Abort: no active query for project ${projectId}`)
+        tsLog('[ws]', `Abort: no active query found — project=${projectId}, session=${session?.sessionId ?? 'none'}`)
       }
       break
     }

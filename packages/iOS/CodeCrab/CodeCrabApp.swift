@@ -71,7 +71,7 @@ struct CodeCrabApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         shareHandler.checkOnActivation()
-                        webSocketService.requestQueueSnapshot()
+                        webSocketService.onForegroundReturn()
                         // Clean up stale Live Activity if nothing is running
                         if webSocketService.runningProjectIds.isEmpty {
                             LiveActivityService.shared.endActivity()
