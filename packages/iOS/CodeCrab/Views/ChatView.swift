@@ -17,6 +17,7 @@ struct ChatView: View {
     @State private var execSessionId: String? = nil
     @State private var inputAttachments: [ImageAttachment] = []
     @State private var isNearBottom: Bool = true
+    @State private var isUserInteracting: Bool = false
     @State private var scrollViewHeight: CGFloat = 0
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
@@ -202,6 +203,11 @@ struct ChatView: View {
                         .id("Bottom")
                     }
                     .scrollDismissesKeyboard(.interactively)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 5)
+                            .onChanged { _ in isUserInteracting = true }
+                            .onEnded { _ in isUserInteracting = false }
+                    )
                     .coordinateSpace(name: "chatScroll")
                     .background(
                         GeometryReader { geo in
@@ -211,7 +217,13 @@ struct ChatView: View {
                         }
                     )
                     .onPreferenceChange(BottomOffsetKey.self) { bottomY in
-                        isNearBottom = bottomY <= scrollViewHeight + 150
+                        let nearBottom = bottomY <= scrollViewHeight + 150
+                        // Only allow isNearBottom to flip false when the user is actively
+                        // scrolling. Content growth alone (which pushes the bottom marker
+                        // further away) must NOT disable auto-scroll.
+                        if isUserInteracting || nearBottom {
+                            isNearBottom = nearBottom
+                        }
                     }
                     .onChange(of: wsService.messages.count) { scrollToBottom(proxy) }
                     .onChange(of: wsService.sdkEvents.count) { scrollToBottom(proxy) }
@@ -364,8 +376,15 @@ struct ChatView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, force: Bool = false) {
-        guard force || isNearBottom else { return }
-        withAnimation {
+        guard force || (isNearBottom && !isUserInteracting) else { return }
+        if force {
+            withAnimation {
+                proxy.scrollTo("Bottom", anchor: .bottom)
+            }
+        } else {
+            // Non-animated scroll during streaming avoids race conditions where
+            // an in-flight animation leaves the bottom marker outside the
+            // threshold, falsely disabling auto-scroll.
             proxy.scrollTo("Bottom", anchor: .bottom)
         }
     }
