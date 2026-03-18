@@ -49,12 +49,23 @@ struct SessionListView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(sessions) { session in
-                    let isProcessingViaWS = wsService.projectStatuses.first(where: {
-                        $0.projectId == project.id && $0.sessionId == session.sessionId && $0.status == "processing"
-                    }) != nil
+                    let projectIsRunning = wsService.runningProjectIds.contains(project.id)
+                    let wsProcessingSessionId = wsService.projectStatuses.first(where: {
+                        $0.projectId == project.id && $0.status == "processing"
+                    })?.sessionId
+
+                    // Processing: WS identifies this session, or project is running
+                    // and WS doesn't specify which session so use the most recent one
+                    let isProcessing = session.status == "processing" ||
+                        (wsProcessingSessionId != nil && wsProcessingSessionId == session.sessionId) ||
+                        (projectIsRunning && wsProcessingSessionId == nil && session.sessionId == sessions.first?.sessionId)
+
+                    // Active: recently modified within 10 minutes (same threshold as ProjectCard)
+                    let isRecentlyActive = !isProcessing &&
+                        (Date().timeIntervalSince1970 * 1000 - session.lastModified) < 600_000
 
                     NavigationLink(value: ChatRoute(project: project, sessionId: session.sessionId)) {
-                        SessionRowView(session: session, now: now, isProcessingViaWS: isProcessingViaWS)
+                        SessionRowView(session: session, now: now, isProcessing: isProcessing, isRecentlyActive: isRecentlyActive)
                     }
                 }
             }
@@ -106,7 +117,8 @@ struct SessionListView: View {
 struct SessionRowView: View {
     let session: SessionInfo
     let now: Date
-    var isProcessingViaWS: Bool = false
+    var isProcessing: Bool = false
+    var isRecentlyActive: Bool = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -147,10 +159,12 @@ struct SessionRowView: View {
 
             Spacer()
 
-            if session.status == "processing" || isProcessingViaWS {
+            if isProcessing {
                 Circle().fill(Color.orange).frame(width: 8, height: 8)
             } else if session.status == "error" {
                 Circle().fill(Color.red).frame(width: 8, height: 8)
+            } else if isRecentlyActive {
+                Circle().fill(Color.green).frame(width: 8, height: 8)
             } else {
                 Circle().fill(session.isCron ? Color.purple.opacity(0.5) : Color.gray.opacity(0.3)).frame(width: 8, height: 8)
             }
