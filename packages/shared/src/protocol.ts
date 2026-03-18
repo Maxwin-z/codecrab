@@ -138,6 +138,7 @@ export interface ToolResultMessage extends ServerProjectContext {
   toolId: string
   content: string
   isError: boolean
+  totalLength?: number
 }
 
 export interface ResultMessage extends ServerProjectContext {

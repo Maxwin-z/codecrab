@@ -300,16 +300,18 @@ async function executeCronQuery(
         currentTurn.agent.messages.push(event)
       }
     }
+    // For tool_result events, broadcast a truncated copy to clients
+    const broadcastEvent = (type === 'tool_result' && data?.content) ? truncateToolResultEvent(event) : event
     // Broadcast sdk_event to both sessions
     broadcastToProject(projectId, {
       type: 'sdk_event',
-      event,
+      event: broadcastEvent,
       projectId,
       sessionId: execSessionId,
     })
     broadcastToProject(projectId, {
       type: 'sdk_event',
-      event,
+      event: broadcastEvent,
       projectId,
       sessionId: parentSession.sessionId,
     })
@@ -420,20 +422,23 @@ async function executeCronQuery(
         maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
-        // Broadcast tool_result to both sessions
+        // Broadcast tool_result to both sessions (truncated for client)
+        const truncated = truncateToolResultForClient(content)
         broadcastToProject(projectId, {
           type: 'tool_result',
           toolId,
-          content,
+          content: truncated.content,
           isError,
+          totalLength: truncated.totalLength,
           projectId,
           sessionId: execSessionId,
         })
         broadcastToProject(projectId, {
           type: 'tool_result',
           toolId,
-          content,
+          content: truncated.content,
           isError,
+          totalLength: truncated.totalLength,
           projectId,
           sessionId: parentSession.sessionId,
         })
@@ -745,9 +750,12 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
   const messages = turnsToMessages(turns).map(toMessageSummary)
 
   // High-value SDK events only (from turn.agent.messages, NOT debugEvents)
+  // Truncate tool_result content for client delivery
   const sdkEvents: import('@codecrab/shared').DebugEvent[] = []
   for (const turn of turns) {
-    sdkEvents.push(...turn.agent.messages)
+    for (const event of turn.agent.messages) {
+      sdkEvents.push(event.type === 'tool_result' ? truncateToolResultEvent(event) : event)
+    }
   }
 
   // Extract suggestions from last text event (always from full session, not just delta)
@@ -918,6 +926,30 @@ interface Session {
 
 /** Event types that are kept in turn.agent.messages (high-value) */
 const HIGH_VALUE_EVENT_TYPES = new Set(['thinking', 'text', 'tool_use', 'tool_result', 'task_started', 'task_progress', 'task_notification'])
+
+/** Maximum length for tool_result content sent to clients (full content is kept in session) */
+const MAX_TOOL_RESULT_CLIENT_LENGTH = 2000
+
+/** Truncate tool result content for client delivery, preserving full content in session storage */
+function truncateToolResultForClient(content: string): { content: string; totalLength?: number } {
+  if (content.length <= MAX_TOOL_RESULT_CLIENT_LENGTH) {
+    return { content }
+  }
+  return {
+    content: content.slice(0, MAX_TOOL_RESULT_CLIENT_LENGTH) + `\n... (total: ${content.length} chars)`,
+    totalLength: content.length,
+  }
+}
+
+/** Create a truncated copy of a tool_result DebugEvent for client broadcast */
+function truncateToolResultEvent(event: import('@codecrab/shared').DebugEvent): import('@codecrab/shared').DebugEvent {
+  const content = event.data?.content
+  if (typeof content !== 'string' || content.length <= MAX_TOOL_RESULT_CLIENT_LENGTH) {
+    return event
+  }
+  const truncated = truncateToolResultForClient(content)
+  return { ...event, data: { ...event.data, content: truncated.content, totalLength: truncated.totalLength } }
+}
 
 const clients = new Map<string, Client>()
 const sessions = new Map<string, Session>()
@@ -1531,9 +1563,11 @@ async function executeUserQuery(
         currentTurn.agent.messages.push(event)
       }
     }
+    // For tool_result events, broadcast a truncated copy to clients
+    const broadcastEvent = (type === 'tool_result' && data?.content) ? truncateToolResultEvent(event) : event
     broadcastToProject(projectId, {
       type: 'sdk_event',
-      event,
+      event: broadcastEvent,
       projectId,
       sessionId: session.sessionId,
     })
@@ -1592,11 +1626,13 @@ async function executeUserQuery(
         maybeBroadcastProjectActivity(projectId, queuedQuery.id)
       },
       onToolResult: (toolId, content, isError) => {
+        const truncated = truncateToolResultForClient(content)
         broadcastToProject(projectId, {
           type: 'tool_result',
           toolId,
-          content,
+          content: truncated.content,
           isError,
+          totalLength: truncated.totalLength,
           projectId,
           sessionId: session.sessionId,
         })
