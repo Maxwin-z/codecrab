@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]) {
 export function stripMetaTags(text: string): string {
   if (!text) return text
   return text
-    .replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/g, '')
-    .replace(/\n?\[SUMMARY:\s*.+?\]\s*$/g, '')
+    .replace(/\n?\[SUGGESTIONS:\s*.+\]\s*$/gm, '')
+    .replace(/\n?\[SUMMARY:\s*.+\]\s*$/gm, '')
     .trimEnd()
 }

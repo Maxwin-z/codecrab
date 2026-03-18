@@ -83,8 +83,8 @@ function triggerSoulEvolutionAsync(userMessage: string, assistantResponse: strin
   // Strip [SUMMARY: ...] and [SUGGESTIONS: ...] tags — these are prompt-forced
   // output markers, not meaningful conversation content for SOUL analysis
   const cleaned = assistantResponse
-    .replace(/\n?\[SUMMARY:\s*.+?\]/g, '')
-    .replace(/\n?\[SUGGESTIONS:\s*.+?\]/g, '')
+    .replace(/\n?\[SUMMARY:\s*.+\]\s*$/gm, '')
+    .replace(/\n?\[SUGGESTIONS:\s*.+\]\s*$/gm, '')
     .trimEnd()
 
   // Truncate long responses to keep the evolution prompt manageable
@@ -572,7 +572,7 @@ async function executeCronQuery(
       execSession.lastModified = Date.now()
 
       // Extract per-turn summary
-      const cronSummaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
+      const cronSummaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
       if (cronSummaryMatch && currentTurn) {
         const extractedSummary = cronSummaryMatch[1].trim()
         currentTurn.summary = extractedSummary
@@ -594,7 +594,7 @@ async function executeCronQuery(
       }
 
       // Extract suggestions
-      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+)\]\s*$/m)
       if (suggestionsMatch) {
         const suggestions = suggestionsMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
         broadcastToProject(projectId, {
@@ -701,7 +701,7 @@ async function executeCronQuery(
   broadcastProjectStatuses()
 
   // Send push notification
-  const summaryMatch = finalText.match(/\[SUMMARY:\s*(.+?)\]/)
+  const summaryMatch = finalText.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
   const pushSummary = summaryMatch
     ? summaryMatch[1].trim()
     : `${cronJobName || 'Scheduled Task'}: ${resultSummary}`
@@ -801,7 +801,7 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
     const textEvt = [...msgs].reverse().find(e => e.type === 'text' && e.data?.content)
     if (textEvt) {
       const textContent = textEvt.data?.content as string
-      const sugMatch = textContent.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+      const sugMatch = textContent.match(/\[SUGGESTIONS:\s*(.+)\]\s*$/m)
       if (sugMatch) {
         suggestions = sugMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
       }
@@ -1202,7 +1202,7 @@ const MAX_TOOL_RESULT_PREVIEW_LENGTH = 100
 // Convert ChatMessage to summary for initial history load
 // Assistant and user messages are sent in full; only tool call results are truncated
 function toMessageSummary(message: ChatMessage): import('@codecrab/shared').ChatMessageSummary {
-  const content = (message.content || '').replace(/\n?\[SUGGESTIONS:\s*.+?\]\s*$/, '').replace(/\n?\[SUMMARY:\s*.+?\]\s*$/, '').trimEnd()
+  const content = (message.content || '').replace(/\n?\[SUGGESTIONS:\s*.+\]\s*$/m, '').replace(/\n?\[SUMMARY:\s*.+\]\s*$/m, '').trimEnd()
   const hasToolCalls = !!(message.toolCalls && message.toolCalls.length > 0)
   const hasImages = !!(message.images && message.images.length > 0)
 
@@ -1791,7 +1791,7 @@ async function executeUserQuery(
     if (assistantMsg) {
       session.lastModified = Date.now()
 
-      const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+?)\]/)
+      const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
       if (summaryMatch) {
         const extractedSummary = summaryMatch[1].trim()
         session.summary = extractedSummary
@@ -1812,7 +1812,7 @@ async function executeUserQuery(
         console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
       }
 
-      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+?)\]/)
+      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+)\]\s*$/m)
       if (suggestionsMatch) {
         const suggestions = suggestionsMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
         console.log(`[Suggestions] Extracted ${suggestions.length}: ${suggestions.join(', ')}`)
