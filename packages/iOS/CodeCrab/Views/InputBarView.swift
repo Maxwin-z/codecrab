@@ -116,6 +116,28 @@ struct InputBarView: View {
                 }
             }
 
+            // Apple speech listening indicator
+            if speechService.isRecording {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .scaleEffect(micPulse ? 1.3 : 1.0)
+                    Text("Listening...")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.red)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.08))
+                .cornerRadius(8)
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+                .transition(.opacity)
+            }
+
             // LLM recording overlay
             if isLLMRecording {
                 LLMRecordingOverlayView(
@@ -147,13 +169,20 @@ struct InputBarView: View {
             // Transcribing indicator
             if isLLMTranscribing {
                 HStack(spacing: 6) {
-                    ProgressView().scaleEffect(0.7)
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.blue)
                     Text("Transcribing...")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
                     Spacer()
                 }
                 .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.blue.opacity(0.08))
+                .cornerRadius(8)
+                .padding(.horizontal, 8)
                 .padding(.top, 4)
             }
 
