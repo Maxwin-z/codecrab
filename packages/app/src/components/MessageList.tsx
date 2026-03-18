@@ -440,22 +440,76 @@ function MessageModeThinking({ event, defaultExpanded }: { event: DebugEvent; de
   )
 }
 
+function getToolIcon(toolName: string): string {
+  switch (toolName) {
+    case 'Read': case 'ReadFile': return '📖'
+    case 'Write': case 'WriteFile': return '✏️'
+    case 'Edit': case 'EditFile': return '✏️'
+    case 'Bash': case 'bash': return '💻'
+    case 'Glob': return '🔍'
+    case 'Grep': return '🔍'
+    case 'Agent': return '🤖'
+    case 'ToolSearch': return '🔎'
+    default: return '🔧'
+  }
+}
+
+function truncatePath(path: string, maxLength = 30): string {
+  if (path.length <= maxLength) return path
+  return '...' + path.slice(-maxLength)
+}
+
+function getToolSummary(toolName: string, input: string): string {
+  let dict: Record<string, unknown> | null = null
+  try {
+    dict = JSON.parse(input)
+  } catch { /* ignore */ }
+
+  switch (toolName) {
+    case 'Read': case 'ReadFile':
+    case 'Write': case 'WriteFile':
+    case 'Edit': case 'EditFile': {
+      const path = (dict?.file_path || dict?.path) as string | undefined
+      if (path) return truncatePath(path)
+      return input.slice(0, 25) + (input.length > 25 ? '...' : '')
+    }
+    case 'Bash': case 'bash': {
+      const desc = dict?.description as string | undefined
+      if (desc) return desc.slice(0, 30)
+      const cmd = dict?.command as string | undefined
+      if (cmd) return cmd.slice(0, 30) + (cmd.length > 30 ? '...' : '')
+      return input.slice(0, 25) + (input.length > 25 ? '...' : '')
+    }
+    case 'Glob': case 'Grep': {
+      const pattern = dict?.pattern as string | undefined
+      if (pattern) return pattern
+      return input.slice(0, 25) + (input.length > 25 ? '...' : '')
+    }
+    default: {
+      const firstLine = input.split('\n')[0] || ''
+      return firstLine.slice(0, 30) + (firstLine.length > 30 ? '...' : '')
+    }
+  }
+}
+
 function MessageModeToolUse({ event, defaultExpanded }: { event: DebugEvent; defaultExpanded: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const toolName = (event.data?.toolName as string) || 'unknown'
   const input = (event.data?.input as string) || ''
-  const summary = input.split('\n')[0]?.slice(0, 60) || ''
+  const icon = getToolIcon(toolName)
+  const summary = getToolSummary(toolName, input)
 
   return (
     <div>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1 text-xs text-left"
+        className="flex items-center gap-1 text-xs text-left min-w-0 max-w-full"
       >
-        <span className="text-[10px] text-muted-foreground">{expanded ? '▼' : '▶'}</span>
-        <span className="font-mono font-medium text-cyan-600 dark:text-cyan-400">{toolName}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{expanded ? '▼' : '▶'}</span>
+        <span className="shrink-0">{icon}</span>
+        <span className="font-mono font-medium text-cyan-600 dark:text-cyan-400 shrink-0">{toolName}</span>
         {!expanded && summary && (
-          <span className="font-mono text-muted-foreground truncate max-w-[200px]">{summary}</span>
+          <span className="font-mono text-muted-foreground truncate">{summary}</span>
         )}
       </button>
       {expanded && input && (
@@ -474,20 +528,27 @@ function MessageModeToolResult({ event, defaultExpanded }: { event: DebugEvent; 
   const charCount = (event.data?.length as number) || content.length
   if (!content) return null
 
+  // Single-line preview with newlines collapsed
+  const resultPreview = content.replace(/\n/g, ' ')
+
   return (
     <div>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-xs"
+        className="flex items-center gap-1.5 text-xs min-w-0 max-w-full"
       >
-        <span className="text-[10px] text-muted-foreground">{expanded ? '▼' : '▶'}</span>
-        <span className={`w-1.5 h-1.5 rounded-full ${isError ? 'bg-red-500' : 'bg-green-500'}`} />
-        <span className="font-mono text-muted-foreground">Result</span>
-        <span className="font-mono text-muted-foreground/70">{charCount} chars</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{expanded ? '▼' : '▶'}</span>
+        <span className="shrink-0">📋</span>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isError ? 'bg-red-500' : 'bg-green-500'}`} />
+        <span className={`font-mono shrink-0 ${isError ? 'text-red-500' : 'text-muted-foreground'}`}>Result</span>
+        {!expanded && (
+          <span className="font-mono text-muted-foreground truncate">{resultPreview}</span>
+        )}
+        <span className="font-mono text-muted-foreground/70 shrink-0">({charCount} chars)</span>
       </button>
       {expanded && (
         <pre className={`text-[11px] font-mono whitespace-pre-wrap break-all mt-1 pl-4 ${isError ? 'text-red-500' : 'text-muted-foreground'}`}>
-          {content.length > 2000 ? content.slice(0, 2000) + '\n... (truncated)' : content}
+          {content.length > 300 ? content.slice(0, 300) + '\n... (truncated)' : content}
         </pre>
       )}
     </div>
@@ -781,17 +842,18 @@ function ToolCallView({ toolCall }: { toolCall: NonNullable<ChatMessage['toolCal
     <div className="border rounded-lg overflow-hidden text-xs">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/50 hover:bg-muted transition-colors text-left"
+        className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/50 hover:bg-muted transition-colors text-left min-w-0"
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${
+        <span className="shrink-0">{getToolIcon(toolCall.name)}</span>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           toolCall.result === undefined ? "bg-amber-500 animate-pulse" :
           toolCall.isError ? "bg-red-500" : "bg-green-500"
         }`} />
-        <span className="font-mono text-cyan-600 dark:text-cyan-400">{toolCall.name}</span>
+        <span className="font-mono text-cyan-600 dark:text-cyan-400 shrink-0">{toolCall.name}</span>
         <span className="text-muted-foreground truncate flex-1">
           {summarizeInput(toolCall.name, toolCall.input)}
         </span>
-        <span className="text-muted-foreground">{expanded ? "−" : "+"}</span>
+        <span className="text-muted-foreground shrink-0">{expanded ? "−" : "+"}</span>
       </button>
       {expanded && (
         <div className="px-3 py-2 space-y-2 bg-muted/30">
