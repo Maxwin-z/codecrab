@@ -901,8 +901,11 @@ class WebSocketService: ObservableObject {
                     }
                 }
 
-                // Summary and suggestions always reflect latest state
-                if sid == self.sessionId {
+                // Summary and suggestions reflect latest state, but only when
+                // no query is actively running. During an active query the summary
+                // has already been cleared by query_start; restoring the stale
+                // value from the HTTP response would flash the old banner.
+                if sid == self.sessionId && !self.isRunning {
                     if let summary = json["summary"] as? String, !summary.isEmpty {
                         self.latestSummary = summary
                     }

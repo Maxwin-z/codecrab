@@ -391,6 +391,7 @@ struct ChatView: View {
 
     private func handleSend(text: String, images: [ImageAttachment]?, mcps: [String]?) {
         isNearBottom = true
+        isInputFocused = false
         wsService.latestSummary = nil
         if text.hasPrefix("/") {
             wsService.sendCommand(text)
