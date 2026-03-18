@@ -240,6 +240,79 @@ async function getGitFiles(root: string): Promise<string[] | null> {
   }
 }
 
+// Serve raw file (for image/video preview)
+// Uses streaming with Range request support (required by AVPlayer for video)
+router.get('/raw', async (req, res) => {
+  const filePath = req.query.path as string
+  if (!filePath) {
+    res.status(400).json({ error: 'Missing path parameter' })
+    return
+  }
+  try {
+    const resolved = path.resolve(filePath)
+    const stat = await fs.stat(resolved)
+    if (stat.isDirectory()) {
+      res.status(400).json({ error: 'Path is a directory' })
+      return
+    }
+
+    const ext = path.extname(resolved).toLowerCase()
+    const mimeTypes: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.bmp': 'image/bmp',
+      '.ico': 'image/x-icon',
+      '.svg': 'image/svg+xml',
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.avi': 'video/x-msvideo',
+      '.mkv': 'video/x-matroska',
+      '.webm': 'video/webm',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.m4a': 'audio/mp4',
+      '.pdf': 'application/pdf',
+    }
+
+    const contentType = mimeTypes[ext] || 'application/octet-stream'
+    const fileSize = stat.size
+    const range = req.headers.range
+
+    if (range) {
+      // Handle Range requests (required by AVPlayer for video streaming)
+      const parts = range.replace(/bytes=/, '').split('-')
+      const start = parseInt(parts[0], 10)
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1
+      const chunkSize = end - start + 1
+
+      const { createReadStream } = await import('fs')
+      const stream = createReadStream(resolved, { start, end })
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType,
+      })
+      stream.pipe(res)
+    } else {
+      res.setHeader('Content-Type', contentType)
+      res.setHeader('Content-Length', fileSize)
+      res.setHeader('Accept-Ranges', 'bytes')
+      res.setHeader('Cache-Control', 'private, max-age=300')
+
+      const { createReadStream } = await import('fs')
+      const stream = createReadStream(resolved)
+      stream.pipe(res)
+    }
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
+})
+
 // Create new folder
 router.post('/mkdir', async (req, res) => {
   const { path: dirPath, name } = req.body as { path?: string; name?: string }

@@ -82,17 +82,22 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return
   }
 
+  // Support token from Authorization header or query param (for raw file access)
   const authHeader = req.headers.authorization
-  if (!authHeader) {
+  const queryToken = req.query.token as string | undefined
+
+  const token = (() => {
+    if (authHeader) {
+      const parts = authHeader.split(' ')
+      return parts.length === 2 && parts[0].toLowerCase() === 'bearer' ? parts[1] : authHeader
+    }
+    return queryToken
+  })()
+
+  if (!token) {
     res.status(401).json({ error: 'Unauthorized: Missing Authorization header' })
     return
   }
-
-  // Support "Bearer <token>" format
-  const parts = authHeader.split(' ')
-  const token = parts.length === 2 && parts[0].toLowerCase() === 'bearer'
-    ? parts[1]
-    : authHeader
 
   validateToken(token).then(isValid => {
     if (!isValid) {

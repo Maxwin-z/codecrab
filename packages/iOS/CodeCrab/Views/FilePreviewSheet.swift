@@ -1,5 +1,6 @@
 import SwiftUI
 import Textual
+import AVKit
 
 // MARK: - FilePreviewSheet (sheet wrapper with NavigationStack)
 
@@ -49,6 +50,8 @@ private struct FilePreviewPageView: View {
     @State private var shareURL: URL? = nil
     @State private var showShareSheet = false
     @State private var isPreparingShare = false
+    @State private var imageData: UIImage? = nil
+    @State private var videoPlayer: AVPlayer? = nil
 
     private var ext: String {
         (fileName as NSString).pathExtension.lowercased()
@@ -57,6 +60,12 @@ private struct FilePreviewPageView: View {
     private var isMarkdown: Bool {
         ext == "md" || ext == "markdown" || ext == "mdx"
     }
+
+    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]
+    private static let videoExtensions: Set<String> = ["mp4", "mov", "avi", "mkv", "webm"]
+
+    private var isImage: Bool { Self.imageExtensions.contains(ext) }
+    private var isVideo: Bool { Self.videoExtensions.contains(ext) }
 
     private var languageLabel: String {
         switch ext {
@@ -114,7 +123,11 @@ private struct FilePreviewPageView: View {
                 .padding()
                 Spacer()
             } else if let fc = fileContent {
-                if fc.binary {
+                if isImage {
+                    imagePreviewView(fc)
+                } else if isVideo {
+                    videoPreviewView(fc)
+                } else if fc.binary {
                     binaryFileView(fc)
                 } else if fc.truncated == true {
                     truncatedFileView(fc)
@@ -318,6 +331,36 @@ private struct FilePreviewPageView: View {
         Spacer()
     }
 
+    // MARK: - Image Preview
+
+    @ViewBuilder
+    private func imagePreviewView(_ fc: FileContent) -> some View {
+        if let image = imageData {
+            ZoomableImageView(image: image)
+        } else {
+            Spacer()
+            ProgressView("Loading image...")
+            Spacer()
+        }
+    }
+
+    // MARK: - Video Preview
+
+    @ViewBuilder
+    private func videoPreviewView(_ fc: FileContent) -> some View {
+        if let player = videoPlayer {
+            VideoPlayer(player: player)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onDisappear {
+                    player.pause()
+                }
+        } else {
+            Spacer()
+            ProgressView("Loading video...")
+            Spacer()
+        }
+    }
+
     // MARK: - Helpers
 
     private func loadFile() async {
@@ -327,9 +370,31 @@ private struct FilePreviewPageView: View {
             let fc: FileContent = try await APIClient.shared.fetch(path: "/api/files/read?path=\(urlPath)")
             fileContent = fc
             isLoading = false
+
+            // Load media content after metadata is ready
+            if isImage {
+                await loadImageData(urlPath: urlPath)
+            } else if isVideo {
+                loadVideoPlayer(urlPath: urlPath)
+            }
         } catch {
             self.error = error.localizedDescription
             isLoading = false
+        }
+    }
+
+    private func loadImageData(urlPath: String) async {
+        do {
+            let data = try await APIClient.shared.fetchData(path: "/api/files/raw?path=\(urlPath)")
+            imageData = UIImage(data: data)
+        } catch {
+            self.error = "Failed to load image"
+        }
+    }
+
+    private func loadVideoPlayer(urlPath: String) {
+        if let url = APIClient.shared.buildURL(path: "/api/files/raw?path=\(urlPath)") {
+            videoPlayer = AVPlayer(url: url)
         }
     }
 
@@ -454,5 +519,99 @@ private struct CodeLineView: View {
 
     private var gutterFrame: CGFloat {
         CGFloat(gutterWidth * 9 + 12)
+    }
+}
+
+// MARK: - Zoomable Image View (UIScrollView-based pinch-to-zoom)
+
+private struct ZoomableImageView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 5.0
+        scrollView.bouncesZoom = true
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.backgroundColor = .systemBackground
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.tag = 100
+        scrollView.addSubview(imageView)
+
+        // Double-tap to zoom
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+        context.coordinator.scrollView = scrollView
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        guard let imageView = scrollView.viewWithTag(100) as? UIImageView else { return }
+        imageView.image = image
+
+        let bounds = scrollView.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        let imageSize = image.size
+        let widthScale = bounds.width / imageSize.width
+        let heightScale = bounds.height / imageSize.height
+        let fitScale = min(widthScale, heightScale)
+
+        let fitWidth = imageSize.width * fitScale
+        let fitHeight = imageSize.height * fitScale
+        imageView.frame = CGRect(
+            x: max(0, (bounds.width - fitWidth) / 2),
+            y: max(0, (bounds.height - fitHeight) / 2),
+            width: fitWidth,
+            height: fitHeight
+        )
+
+        scrollView.contentSize = CGSize(width: max(bounds.width, fitWidth), height: max(bounds.height, fitHeight))
+    }
+
+    class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var scrollView: UIScrollView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            scrollView.viewWithTag(100)
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            guard let imageView = scrollView.viewWithTag(100) else { return }
+            let bounds = scrollView.bounds
+            let contentSize = scrollView.contentSize
+            let offsetX = max(0, (bounds.width - contentSize.width) / 2)
+            let offsetY = max(0, (bounds.height - contentSize.height) / 2)
+            imageView.center = CGPoint(
+                x: contentSize.width / 2 + offsetX,
+                y: contentSize.height / 2 + offsetY
+            )
+        }
+
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let scrollView = scrollView else { return }
+            if scrollView.zoomScale > scrollView.minimumZoomScale {
+                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+            } else {
+                let point = gesture.location(in: scrollView.viewWithTag(100))
+                let zoomRect = CGRect(
+                    x: point.x - 50,
+                    y: point.y - 50,
+                    width: 100,
+                    height: 100
+                )
+                scrollView.zoom(to: zoomRect, animated: true)
+            }
+        }
     }
 }

@@ -78,6 +78,30 @@ class APIClient {
         }
     }
     
+    func fetchData(path: String) async throws -> Data {
+        let request = try makeRequest(path: path)
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidURL
+        }
+        if httpResponse.statusCode == 401 {
+            throw APIError.unauthorized
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.httpError(httpResponse.statusCode)
+        }
+        return data
+    }
+
+    func buildURL(path: String) -> URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url") else { return nil }
+        var urlString = "\(serverURL)\(path)"
+        if let token = KeychainHelper.shared.getToken() {
+            urlString += (urlString.contains("?") ? "&" : "?") + "token=\(token)"
+        }
+        return URL(string: urlString)
+    }
+
     func request(path: String, method: String = "GET", body: Encodable? = nil, isPublic: Bool = false) async throws {
         var bodyData: Data? = nil
         if let body = body {
