@@ -21,6 +21,21 @@ struct ProjectListView: View {
                    by: { $0.context.projectId! })
     }
 
+    /// Projects sorted by most recent activity first
+    private var sortedProjects: [Project] {
+        projects.sorted { a, b in
+            lastActiveTime(for: a) > lastActiveTime(for: b)
+        }
+    }
+
+    private func lastActiveTime(for project: Project) -> Double {
+        if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }),
+           let lastMod = status.lastModified {
+            return lastMod
+        }
+        return project.updatedAt
+    }
+
     var body: some View {
         List(selection: $selection) {
             // Dashboard cards
@@ -62,7 +77,7 @@ struct ProjectListView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.automatic)
                 } else {
-                    ForEach(projects) { project in
+                    ForEach(sortedProjects) { project in
                         ProjectCard(
                             project: project,
                             isSelected: selectedProjectId == project.id,
