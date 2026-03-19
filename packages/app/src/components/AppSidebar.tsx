@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation, useSearchParams } from 'react-router'
-import { Search, Brain, Clock, Settings, Plus, FolderOpen } from 'lucide-react'
+import { Search, Brain, Clock, MessageSquare, Settings, Plus, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { authFetch } from '@/lib/auth'
 import { useWs } from '@/hooks/WebSocketContext'
@@ -55,6 +55,7 @@ export function AppSidebar({ onOpenSetup, onUnauthorized }: AppSidebarProps) {
   const navItems = [
     { label: 'SOUL', icon: Brain, path: '/soul' },
     { label: 'Cron', icon: Clock, path: '/cron' },
+    { label: 'Channels', icon: MessageSquare, path: '/channels' },
   ]
 
   return (

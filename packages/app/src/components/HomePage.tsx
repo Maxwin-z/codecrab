@@ -42,6 +42,7 @@ export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
         recentEvolution={recentEvolution}
         cronSummary={cronSummary}
         loading={soulLoading && cronLoading}
+        onUnauthorized={onUnauthorized}
       />
 
       {/* Projects section — only on mobile (desktop has sidebar) */}

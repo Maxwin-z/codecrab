@@ -10,6 +10,7 @@ import { ChatPage } from '@/components/ChatPage'
 import { DebugPage } from '@/components/DebugPage'
 import { SoulPage } from '@/components/SoulPage'
 import { CronPage } from '@/components/CronPage'
+import { ChannelsPage } from '@/components/ChannelsPage'
 import { AppSidebar } from '@/components/AppSidebar'
 import { WebSocketProvider } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -180,6 +181,11 @@ function AppRoutes() {
         <Route path="/cron" element={
           setupStatus === 'initialized'
             ? <CronPage onUnauthorized={handleUnauthorized} />
+            : <Navigate to="/setup" replace />
+        } />
+        <Route path="/channels" element={
+          setupStatus === 'initialized'
+            ? <ChannelsPage onUnauthorized={handleUnauthorized} />
             : <Navigate to="/setup" replace />
         } />
         <Route path="/debug" element={<DebugPage />} />

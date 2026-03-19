@@ -81,6 +81,9 @@ importers:
       '@codecrab/shared':
         specifier: workspace:*
         version: link:../shared
+      express:
+        specifier: ^5.1.0
+        version: 5.2.1
       grammy:
         specifier: ^1.35.0
         version: 1.41.1

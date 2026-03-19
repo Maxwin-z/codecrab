@@ -5,6 +5,7 @@
 
 import { SoulCard } from './SoulCard'
 import { CronCard } from './CronCard'
+import { ChannelCard } from './ChannelCard'
 import type { SoulDocument, SoulStatus, EvolutionEntry } from '@/hooks/useSoul'
 import type { CronSummary } from '@/hooks/useCron'
 
@@ -14,13 +15,15 @@ interface DashboardProps {
   recentEvolution: EvolutionEntry[]
   cronSummary: CronSummary | null
   loading: boolean
+  onUnauthorized?: () => void
 }
 
-export function Dashboard({ soul, soulStatus, recentEvolution, cronSummary, loading }: DashboardProps) {
+export function Dashboard({ soul, soulStatus, recentEvolution, cronSummary, loading, onUnauthorized }: DashboardProps) {
   if (loading) {
     return (
       <div className="px-4 sm:px-6 pt-4 sm:pt-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="h-36 rounded-lg border bg-card animate-pulse" />
           <div className="h-36 rounded-lg border bg-card animate-pulse" />
           <div className="h-36 rounded-lg border bg-card animate-pulse" />
         </div>
@@ -37,7 +40,7 @@ export function Dashboard({ soul, soulStatus, recentEvolution, cronSummary, load
           recentEvolution={recentEvolution}
         />
         <CronCard summary={cronSummary} />
-        {/* Future: ResearchCard, OrchestratorCard, etc. */}
+        <ChannelCard onUnauthorized={onUnauthorized} />
       </div>
     </div>
   )
