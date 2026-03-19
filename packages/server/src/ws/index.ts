@@ -1608,6 +1608,7 @@ async function executeUserQuery(
   // Broadcast user message to all clients (including sender) when query starts executing
   // Update timestamp to execution time so turnGroups correctly orders events after this message
   const execTimestamp = Date.now()
+  userMsg.id = `turn-${execTimestamp}`
   userMsg.timestamp = execTimestamp
   turn.timestamp = execTimestamp
   const projState = getOrCreateProjectState(projectId)

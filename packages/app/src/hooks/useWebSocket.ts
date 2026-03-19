@@ -304,11 +304,23 @@ export function useWebSocket(): UseWebSocketReturn {
       if (!res.ok) return
       const data = await res.json()
 
-      // Append new messages and events (incremental) or set (full load)
+      // Merge messages: use processingTurnTimestamp to replace in-progress data (like iOS)
       if (data.messages?.length) {
         const newMessages = data.messages.map(parseSummaryToMessage)
-        if (afterTurn) {
-          sState.messages = [...sState.messages, ...newMessages]
+        const processingTurnTs = data.processingTurnTimestamp as number | undefined
+        if (afterTurn && processingTurnTs) {
+          // Keep cached messages before the in-progress turn, replace the rest
+          // with the authoritative API snapshot (matches iOS merge strategy)
+          sState.messages = sState.messages.filter((m) => m.timestamp < processingTurnTs).concat(newMessages)
+          sState.streamingText = ''
+          sState.streamingThinking = ''
+        } else if (afterTurn) {
+          // No in-progress turn: deduplicate by ID before appending
+          const existingIds = new Set(sState.messages.map((m) => m.id))
+          const unique = newMessages.filter((m: ChatMessage) => !existingIds.has(m.id))
+          if (unique.length) {
+            sState.messages = [...sState.messages, ...unique]
+          }
         } else {
           sState.messages = newMessages
         }
@@ -687,8 +699,11 @@ export function useWebSocket(): UseWebSocketReturn {
           const target = getTargetSession()
           if (target) {
             const { sState, isViewing } = target
-            sState.messages = [...sState.messages, msg.message]
-            if (isViewing) needsRender = true
+            // Deduplicate: skip if a message with the same id already exists
+            if (!sState.messages.some((m) => m.id === msg.message.id)) {
+              sState.messages = [...sState.messages, msg.message]
+              if (isViewing) needsRender = true
+            }
           }
           break
         }
@@ -899,26 +914,10 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [sendWithProject])
 
   const sendCommand = useCallback((command: string) => {
-    if (!command.match(/^\/(clear|switch\s)/)) {
-      const pid = activeProjectIdRef.current
-      if (pid) {
-        const pState = getProjectState(pid)
-        const sid = pState.sessionId
-        if (sid) {
-          const sState = getSessionState(pState, sid)
-          const userMsg: ChatMessage = {
-            id: genId(),
-            role: 'user',
-            content: command,
-            timestamp: Date.now(),
-          }
-          sState.messages = [...sState.messages, userMsg]
-        }
-        triggerRender()
-      }
-    }
+    // Don't add user message locally — the server broadcasts user_message back
+    // for all non-/clear commands (they're re-routed as prompts on the server).
     sendWithProject({ type: 'command', command })
-  }, [getProjectState, sendWithProject, triggerRender])
+  }, [sendWithProject])
 
   const abort = useCallback(() => {
     const pid = activeProjectIdRef.current
