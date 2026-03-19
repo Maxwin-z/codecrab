@@ -5,11 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-/** Strip [SUMMARY: ...] and [SUGGESTIONS: ...] meta tags from message content. */
+/** Strip [SUMMARY: ...] and [SUGGESTIONS: ...] meta tags from message content.
+ *  Handles both well-formed tags (with closing ']') and malformed ones (missing ']'). */
 export function stripMetaTags(text: string): string {
   if (!text) return text
   return text
-    .replace(/\n?\[SUGGESTIONS:\s*.+\]\s*$/gm, '')
-    .replace(/\n?\[SUMMARY:\s*.+\]\s*$/gm, '')
+    .replace(/\n?\[SUGGESTIONS:\s*.+\]?\s*$/gm, '')
+    .replace(/\n?\[SUMMARY:\s*.+\]?\s*$/gm, '')
     .trimEnd()
 }

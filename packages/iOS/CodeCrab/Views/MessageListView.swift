@@ -179,8 +179,8 @@ private struct MessageModeTextView: View {
     private var content: String {
         guard let data = event.data, case .string(let c) = data["content"] else { return "" }
         return c
-            .replacingOccurrences(of: "\\n?\\[SUMMARY:[\\s\\S]*?\\]", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[\\s\\S]*?\\]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\n?\\[SUMMARY:[^\\n]*\\]?", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[^\\n]*\\]?", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

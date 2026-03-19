@@ -48,6 +48,38 @@ function tsLog(prefix: string, ...args: unknown[]): void {
   console.log(`[${ts}] ${prefix}`, ...args)
 }
 
+// Robust extraction of [SUMMARY: ...] and [SUGGESTIONS: ...] meta tags from response text.
+// Handles both well-formed tags (with closing ']') and malformed ones (missing closing ']').
+function extractMetaTags(text: string): { summary: string | null; suggestions: string[] } {
+  let summary: string | null = null
+  let suggestions: string[] = []
+
+  // SUMMARY: try strict format first, then fallback without closing bracket
+  const strictSummary = text.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
+  if (strictSummary) {
+    summary = strictSummary[1].trim()
+  } else {
+    const looseSummary = text.match(/\[SUMMARY:\s*(.+?)\s*$/m)
+    if (looseSummary) {
+      summary = looseSummary[1].replace(/\]\s*$/, '').trim() || null
+    }
+  }
+
+  // SUGGESTIONS: try strict format first, then fallback without closing bracket
+  const strictSuggestions = text.match(/\[SUGGESTIONS:\s*(.+)\]\s*$/m)
+  if (strictSuggestions) {
+    suggestions = strictSuggestions[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+  } else {
+    const looseSuggestions = text.match(/\[SUGGESTIONS:\s*(.+?)\s*$/m)
+    if (looseSuggestions) {
+      const raw = looseSuggestions[1].replace(/\]\s*$/, '').trim()
+      suggestions = raw.split('|').map((s: string) => s.trim()).filter(Boolean)
+    }
+  }
+
+  return { summary, suggestions }
+}
+
 // Per-project query queue — replaces the old rejection-based concurrency control
 const queryQueue = new QueryQueue((event) => {
   broadcastToProject(event.projectId, {
@@ -571,41 +603,35 @@ async function executeCronQuery(
       finalText = assistantMsg.content
       execSession.lastModified = Date.now()
 
-      // Extract per-turn summary
-      const cronSummaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
-      if (cronSummaryMatch && currentTurn) {
-        const extractedSummary = cronSummaryMatch[1].trim()
-        currentTurn.summary = extractedSummary
-        execSession.summary = `${cronJobName || 'Scheduled Task'}: ${extractedSummary}`
-        console.log(`[cron] Summary: ${extractedSummary}`)
-        // Broadcast summary to both sessions
+      // Extract per-turn summary and suggestions (tolerant of missing closing brackets)
+      const { summary: cronSummary, suggestions: cronSuggestions } = extractMetaTags(assistantMsg.content)
+      if (cronSummary && currentTurn) {
+        currentTurn.summary = cronSummary
+        execSession.summary = `${cronJobName || 'Scheduled Task'}: ${cronSummary}`
+        console.log(`[cron] Summary: ${cronSummary}`)
         broadcastToProject(projectId, {
           type: 'query_summary',
-          summary: extractedSummary,
+          summary: cronSummary,
           projectId,
           sessionId: execSessionId,
         })
         broadcastToProject(projectId, {
           type: 'query_summary',
-          summary: extractedSummary,
+          summary: cronSummary,
           projectId,
           sessionId: parentSession.sessionId,
         })
       }
-
-      // Extract suggestions
-      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+)\]\s*$/m)
-      if (suggestionsMatch) {
-        const suggestions = suggestionsMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+      if (cronSuggestions.length > 0) {
         broadcastToProject(projectId, {
           type: 'query_suggestions',
-          suggestions,
+          suggestions: cronSuggestions,
           projectId,
           sessionId: execSessionId,
         })
         broadcastToProject(projectId, {
           type: 'query_suggestions',
-          suggestions,
+          suggestions: cronSuggestions,
           projectId,
           sessionId: parentSession.sessionId,
         })
@@ -700,11 +726,9 @@ async function executeCronQuery(
   })
   broadcastProjectStatuses()
 
-  // Send push notification
-  const summaryMatch = finalText.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
-  const pushSummary = summaryMatch
-    ? summaryMatch[1].trim()
-    : `${cronJobName || 'Scheduled Task'}: ${resultSummary}`
+  // Send push notification (use extracted summary or fallback)
+  const { summary: cronPushSummary } = extractMetaTags(finalText)
+  const pushSummary = cronPushSummary || `${cronJobName || 'Scheduled Task'}: ${resultSummary}`
   sendQueryCompletionPush(pushSummary, projectId, parentSession.sessionId)
 
   if (isSuccess) {
@@ -1798,11 +1822,10 @@ async function executeUserQuery(
     if (assistantMsg) {
       session.lastModified = Date.now()
 
-      const summaryMatch = assistantMsg.content.match(/\[SUMMARY:\s*(.+)\]\s*$/m)
-      if (summaryMatch) {
-        const extractedSummary = summaryMatch[1].trim()
+      // Extract summary and suggestions (tolerant of missing closing brackets)
+      const { summary: extractedSummary, suggestions } = extractMetaTags(assistantMsg.content)
+      if (extractedSummary) {
         session.summary = extractedSummary
-        // Also store on the current turn
         if (currentTurn) {
           currentTurn.summary = extractedSummary
         }
@@ -1813,15 +1836,21 @@ async function executeUserQuery(
           projectId,
           sessionId: session.sessionId,
         })
-        // Send push notification (best-effort, never throws)
         sendQueryCompletionPush(extractedSummary, projectId, session.sessionId)
       } else {
+        // No summary tag found — send fallback push with truncated user prompt
         console.log(`[Summary] No [SUMMARY: ...] tag found in response (${assistantMsg.content.length} chars)`)
+        const truncatedPrompt = prompt.length > 50 ? prompt.slice(0, 50) + '…' : prompt
+        const fallbackSummary = `已完成: ${truncatedPrompt}`
+        sendQueryCompletionPush(fallbackSummary, projectId, session.sessionId)
+        broadcastToProject(projectId, {
+          type: 'query_summary',
+          summary: fallbackSummary,
+          projectId,
+          sessionId: session.sessionId,
+        })
       }
-
-      const suggestionsMatch = assistantMsg.content.match(/\[SUGGESTIONS:\s*(.+)\]\s*$/m)
-      if (suggestionsMatch) {
-        const suggestions = suggestionsMatch[1].split('|').map((s: string) => s.trim()).filter(Boolean)
+      if (suggestions.length > 0) {
         console.log(`[Suggestions] Extracted ${suggestions.length}: ${suggestions.join(', ')}`)
         broadcastToProject(projectId, {
           type: 'query_suggestions',

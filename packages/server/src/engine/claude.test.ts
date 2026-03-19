@@ -371,17 +371,22 @@ describe('Model caching', () => {
 describe('buildPrompt', () => {
   it('should return plain string when no images provided', () => {
     const result = buildPrompt('Hello world')
-    expect(result).toBe('Hello world')
+    expect(typeof result).toBe('string')
+    expect(result as string).toContain('Hello world')
+    expect(result as string).toContain('[SUMMARY:')
+    expect(result as string).toContain('[SUGGESTIONS:')
   })
 
   it('should return plain string when images is undefined', () => {
     const result = buildPrompt('Hello world', undefined)
-    expect(result).toBe('Hello world')
+    expect(typeof result).toBe('string')
+    expect(result as string).toContain('Hello world')
   })
 
   it('should return plain string when images is empty array', () => {
     const result = buildPrompt('Hello world', [])
-    expect(result).toBe('Hello world')
+    expect(typeof result).toBe('string')
+    expect(result as string).toContain('Hello world')
   })
 
   it('should return AsyncIterable when images are provided', () => {
@@ -421,9 +426,9 @@ describe('buildPrompt', () => {
     expect(content[0].source.data).toBe('imgdata123')
     expect(content[0].source.media_type).toBe('image/png')
 
-    // Second block: text
+    // Second block: text (contains prompt + appended instructions)
     expect(content[1].type).toBe('text')
-    expect(content[1].text).toBe('What is this?')
+    expect(content[1].text).toContain('What is this?')
   })
 
   it('should handle multiple images — all images before text', async () => {
@@ -456,9 +461,9 @@ describe('buildPrompt', () => {
     expect(content[2].source.data).toBe('webp3')
     expect(content[2].source.media_type).toBe('image/webp')
 
-    // Last block should be text
+    // Last block should be text (contains prompt + appended instructions)
     expect(content[3].type).toBe('text')
-    expect(content[3].text).toBe('Compare these')
+    expect(content[3].text).toContain('Compare these')
   })
 
   it('should use empty string for session_id when not provided', async () => {
