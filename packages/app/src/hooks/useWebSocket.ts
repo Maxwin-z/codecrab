@@ -695,6 +695,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
         case 'ask_user_question': {
           const target = getTargetSession()
+          console.log('[ws] ask_user_question received', { toolId: msg.toolId, questionsCount: msg.questions?.length, hasTarget: !!target })
           if (target) {
             target.sState.pendingQuestion = {
               toolId: msg.toolId,
@@ -996,26 +997,29 @@ export function useWebSocket(): UseWebSocketReturn {
 
   const submitQuestionResponse = useCallback(
     (answers: Record<string, string | string[]>) => {
-      const answerText = Object.entries(answers)
-        .map(([key, value]) => {
-          if (Array.isArray(value)) {
-            return `${key}: ${value.join(', ')}`
-          }
-          return `${key}: ${value}`
-        })
-        .join('\n')
-      sendPrompt(answerText)
       const pid = activeProjectIdRef.current
+      console.log('[submitQuestionResponse] called', { pid, answers })
       if (pid) {
         const pState = getProjectState(pid)
         const sid = pState.sessionId
         if (sid) {
-          getSessionState(pState, sid).pendingQuestion = null
+          const sState = getSessionState(pState, sid)
+          const toolId = sState.pendingQuestion?.toolId
+          console.log('[submitQuestionResponse] pendingQuestion', { toolId, sessionId: sid, hasPendingQuestion: !!sState.pendingQuestion })
+          if (toolId) {
+            console.log('[submitQuestionResponse] sending respond_question', { type: 'respond_question', toolId, answers })
+            sendWithProject({ type: 'respond_question', toolId, answers })
+          } else {
+            console.warn('[submitQuestionResponse] no toolId found — pendingQuestion may have been cleared already')
+          }
+          sState.pendingQuestion = null
+        } else {
+          console.warn('[submitQuestionResponse] no sessionId found')
         }
         triggerRender()
       }
     },
-    [sendPrompt, getProjectState, triggerRender]
+    [sendWithProject, getProjectState, triggerRender]
   )
 
   const dismissQuestion = useCallback(() => {
