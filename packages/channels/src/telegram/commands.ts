@@ -3,12 +3,38 @@
 import type { Bot, Context } from 'grammy'
 import type { ChannelContext } from '../types.js'
 
+/** Register commands with Telegram so they appear in the chat menu */
+export async function setMenuCommands(bot: Bot): Promise<void> {
+  await bot.api.setMyCommands([
+    { command: 'project', description: 'Switch or view current project' },
+    { command: 'projects', description: 'List available projects' },
+    { command: 'status', description: 'Show current status' },
+    { command: 'abort', description: 'Abort running query' },
+    { command: 'mode', description: 'Change interactive mode' },
+    { command: 'help', description: 'Show available commands' },
+  ])
+}
+
 export function registerCommands(
   bot: Bot,
   context: ChannelContext,
   getConversationProjectId: (chatId: string) => string | undefined,
   setConversationProjectId: (chatId: string, projectId: string) => void,
 ): void {
+
+  // /help — Show available commands
+  bot.command('help', async (ctx: Context) => {
+    await ctx.reply(
+      '<b>📋 CodeCrab Bot Commands</b>\n\n' +
+      '/project &lt;name&gt; — Switch to a project\n' +
+      '/projects — List available projects\n' +
+      '/status — Show current status\n' +
+      '/abort — Abort running query\n' +
+      '/mode &lt;mode&gt; — Change interactive mode\n' +
+      '/help — Show this help message',
+      { parse_mode: 'HTML' },
+    )
+  })
 
   // /projects — List available CodeCrab projects
   bot.command('projects', async (ctx: Context) => {

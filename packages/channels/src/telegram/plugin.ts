@@ -9,7 +9,7 @@ import type {
   ChannelHealthResult,
 } from '../types.js'
 import type { Question } from '@codecrab/shared'
-import { registerCommands } from './commands.js'
+import { registerCommands, setMenuCommands } from './commands.js'
 import { formatForTelegram, splitMessage, formatToolUse, formatError, formatResult } from './formatter.js'
 import * as store from '../store.js'
 import type { ConversationState } from '../types.js'
@@ -185,8 +185,54 @@ export class TelegramChannelPlugin implements ChannelPlugin {
 
         await ctx.answerCallbackQuery({ text: allow ? 'Allowed' : 'Denied' })
         await ctx.editMessageText(allow ? '✅ Permission granted' : '🚫 Permission denied')
+      } else if (data.startsWith('q:')) {
+        // Question answer via inline button: q:<toolIdPrefix>:<optionIndex>
+        const parts = data.split(':')
+        const optionIndex = parseInt(parts[2], 10)
+
+        const pending = this.pendingInteractions.get(chatId)
+        if (pending?.type === 'question') {
+          clearTimeout(pending.timeout)
+          this.pendingInteractions.delete(chatId)
+
+          const projectId = this.getConversationProjectId(chatId)
+          if (projectId) {
+            // Find the option across all questions
+            let idx = 0
+            const answers: Record<string, string | string[]> = {}
+            for (const q of pending.questions) {
+              for (const opt of q.options) {
+                if (idx === optionIndex) {
+                  answers[q.question] = opt.label
+                }
+                idx++
+              }
+            }
+            context.respondToQuestion(projectId, pending.toolId, answers)
+          }
+
+          const selectedLabel = ctx.callbackQuery.data
+          await ctx.answerCallbackQuery({ text: 'Answer received' })
+          // Update the message to show the selected option
+          try {
+            const original = (ctx.callbackQuery.message as any)?.text || ''
+            await ctx.editMessageText(`${original}\n\n✅ Selected`, { parse_mode: 'HTML' })
+          } catch {
+            // ignore edit failures
+          }
+        } else {
+          await ctx.answerCallbackQuery({ text: 'This question has expired' })
+        }
       }
     })
+
+    // Register commands with Telegram so they appear in the menu
+    try {
+      await setMenuCommands(this.bot)
+      context.log('info', 'Telegram menu commands registered')
+    } catch (err: any) {
+      context.log('warn', `Failed to set menu commands: ${err.message}`)
+    }
 
     // Start polling
     try {
@@ -319,19 +365,38 @@ export class TelegramChannelPlugin implements ChannelPlugin {
 
     // Format questions as Telegram message
     const lines = ['❓ <b>Question from CodeCrab:</b>', '']
+    const allOptions: { label: string; questionKey: string }[] = []
+
     for (const q of questions) {
       lines.push(`<b>${q.question}</b>`)
       if (q.options.length > 0) {
-        for (let i = 0; i < q.options.length; i++) {
-          const opt = q.options[i]
-          lines.push(`  ${i + 1}. ${opt.label}${opt.description ? ` — ${opt.description}` : ''}`)
+        for (const opt of q.options) {
+          lines.push(`• ${opt.label}${opt.description ? ` — ${opt.description}` : ''}`)
+          allOptions.push({ label: opt.label, questionKey: q.question })
         }
-        lines.push('')
-        lines.push('<i>Reply with option number(s) or text answer:</i>')
       }
     }
 
-    this.bot.api.sendMessage(conversationId, lines.join('\n'), { parse_mode: 'HTML' }).catch(() => {})
+    // Build inline keyboard buttons for options (max 8 buttons in rows of 2)
+    const hasOptions = allOptions.length > 0 && allOptions.length <= 8
+    const replyMarkup = hasOptions ? {
+      inline_keyboard: allOptions.reduce<Array<Array<{ text: string; callback_data: string }>>>((rows, opt, i) => {
+        const btn = { text: opt.label, callback_data: `q:${toolId.slice(0, 16)}:${i}` }
+        if (i % 2 === 0) rows.push([btn])
+        else rows[rows.length - 1].push(btn)
+        return rows
+      }, []),
+    } : undefined
+
+    if (!hasOptions) {
+      lines.push('')
+      lines.push('<i>Reply with your answer:</i>')
+    }
+
+    this.bot.api.sendMessage(conversationId, lines.join('\n'), {
+      parse_mode: 'HTML',
+      reply_markup: replyMarkup,
+    }).catch(() => {})
 
     // Set up pending interaction with timeout
     const timeout = setTimeout(() => {
