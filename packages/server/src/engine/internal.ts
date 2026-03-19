@@ -86,6 +86,14 @@ export async function executeInternalQuery(opts: InternalQueryOpts): Promise<Int
   // Override settings for internal agents
   options.maxTurns = opts.maxTurns ?? 10
 
+  // Override system prompt — internal agents should NOT produce [SUMMARY] / [SUGGESTIONS] tags.
+  // Those are only for user-facing queries. Keep it minimal: just the cwd.
+  options.systemPrompt = {
+    type: 'preset',
+    preset: 'claude_code',
+    append: `\n\nYour working directory is ${opts.cwd}.`,
+  }
+
   // No MCP servers for internal queries (keep it lightweight)
   options.mcpServers = {}
 
