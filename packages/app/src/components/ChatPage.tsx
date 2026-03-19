@@ -604,6 +604,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         currentSessionId={ws.sessionId}
         onAbort={ws.abort}
         onDequeue={ws.dequeueQuery}
+        onExecuteNow={ws.executeNow}
         isAborting={ws.isAborting}
       />
 

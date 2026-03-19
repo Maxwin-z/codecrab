@@ -147,7 +147,7 @@ function sendActivityHeartbeat(projectId: string, sessionId: string, queryId: st
   const timerState = queryQueue.getTimerState(queryId)
   if (!timerState) return
 
-  const runningQuery = queryQueue.getRunningQuery(projectId)
+  const runningQuery = queryQueue.findRunningQueryById(queryId) || queryQueue.getRunningQuery(projectId)
   if (!runningQuery) return
 
   const elapsedMs = now - (runningQuery.startedAt || now)
@@ -247,6 +247,34 @@ export async function executePromptInSession(
 
   if (parentSessionId) {
     parentSession = sessions.get(parentSessionId)
+
+    // If not in memory, try loading from disk (e.g., after server restart)
+    if (!parentSession) {
+      try {
+        const filePath = path.join(SESSIONS_DIR, `${parentSessionId}.json`)
+        const content = await fs.readFile(filePath, 'utf-8')
+        const data = JSON.parse(content)
+        if (data.sessionId) {
+          parentSession = {
+            sessionId: data.sessionId,
+            sdkSessionId: data.sdkSessionId,
+            projectId: data.projectId,
+            cwd: data.cwd,
+            turns: data.turns || [],
+            status: 'idle',
+            lastModified: data.lastModified || Date.now(),
+            summary: data.summary,
+            firstPrompt: data.firstPrompt,
+            pendingQuestion: data.pendingQuestion || null,
+            pendingPermissionRequest: data.pendingPermissionRequest || null,
+          }
+          sessions.set(parentSession.sessionId, parentSession)
+          console.log(`[cron] Loaded parent session ${parentSessionId} from disk`)
+        }
+      } catch {
+        // File doesn't exist or is unreadable
+      }
+    }
   }
 
   // If no session found by sessionId, try to find one by projectId or create new
@@ -2107,6 +2135,12 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         projectId,
         sessionId: capturedSession.sessionId,
         prompt: msg.prompt,
+        promptData: {
+          images: msg.images,
+          enabledMcps: msg.enabledMcps,
+          disabledSdkServers: msg.disabledSdkServers,
+          disabledSkills: msg.disabledSkills,
+        },
         executor: async (queuedQuery) => {
           return executeUserQuery(
             client,
@@ -2220,29 +2254,46 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
     }
 
     case 'abort': {
-      tsLog('[ws]', `Abort requested — project=${projectId}, session=${session?.sessionId ?? 'none'}, client=${client.clientId}`)
+      tsLog('[ws]', `Abort requested — project=${projectId}, session=${session?.sessionId ?? 'none'}, queryId=${msg.queryId ?? 'none'}, client=${client.clientId}`)
 
-      // Abort the running query via the queue (which triggers the abortController)
-      const abortedQuery = queryQueue.abortRunning(projectId)
-      if (abortedQuery) {
-        // Also abort through the engine's abort mechanism
-        abortQuery(clientState)
-        if (session) {
-          session.status = 'idle'
+      if (msg.queryId) {
+        // Abort a specific force-running query
+        const aborted = queryQueue.abortForceRunning(msg.queryId)
+        if (aborted) {
+          // The abortController will trigger abortQuery via the event listener in executeUserQuery
+          const forceSession = sessions.get(aborted.sessionId)
+          if (forceSession) {
+            forceSession.status = 'idle'
+          }
+          broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: aborted.sessionId })
+          broadcastProjectStatuses()
+          tsLog('[ws]', `Abort completed (force query) — project=${projectId}, query=${aborted.id}`)
+        } else {
+          tsLog('[ws]', `Abort: force query ${msg.queryId} not found — project=${projectId}`)
         }
-        broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
-        broadcastProjectStatuses()
-        tsLog('[ws]', `Abort completed — project=${projectId}, query=${abortedQuery.id}`)
-      } else if (abortQuery(clientState)) {
-        // Fallback: abort via client state directly
-        if (session) {
-          session.status = 'idle'
-        }
-        broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
-        broadcastProjectStatuses()
-        tsLog('[ws]', `Abort completed (via clientState) — project=${projectId}`)
       } else {
-        tsLog('[ws]', `Abort: no active query found — project=${projectId}, session=${session?.sessionId ?? 'none'}`)
+        // Abort the running query via the queue (which triggers the abortController)
+        const abortedQuery = queryQueue.abortRunning(projectId)
+        if (abortedQuery) {
+          // Also abort through the engine's abort mechanism
+          abortQuery(clientState)
+          if (session) {
+            session.status = 'idle'
+          }
+          broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
+          broadcastProjectStatuses()
+          tsLog('[ws]', `Abort completed — project=${projectId}, query=${abortedQuery.id}`)
+        } else if (abortQuery(clientState)) {
+          // Fallback: abort via client state directly
+          if (session) {
+            session.status = 'idle'
+          }
+          broadcastToProject(projectId, { type: 'aborted', projectId, sessionId: session?.sessionId })
+          broadcastProjectStatuses()
+          tsLog('[ws]', `Abort completed (via clientState) — project=${projectId}`)
+        } else {
+          tsLog('[ws]', `Abort: no active query found — project=${projectId}, session=${session?.sessionId ?? 'none'}`)
+        }
       }
       break
     }
@@ -2254,6 +2305,106 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       } else {
         console.log(`[ws] Dequeue failed: query ${msg.queryId} not found or already running`)
       }
+      break
+    }
+
+    case 'execute_now': {
+      tsLog('[ws]', `Execute now requested — project=${projectId}, queryId=${msg.queryId}`)
+
+      // 1. Extract the queued query
+      const extracted = queryQueue.extract(msg.queryId)
+      if (!extracted) {
+        sendToClient(client, { type: 'error', message: 'Query not found or already running', projectId })
+        break
+      }
+
+      // 2. Validate same project
+      if (extracted.projectId !== projectId) {
+        sendToClient(client, { type: 'error', message: 'Query belongs to a different project', projectId })
+        break
+      }
+
+      // 3. Create a new session for parallel execution
+      const execSessionId = generateSessionIdLocal()
+      const projStateForExec = getOrCreateProjectState(projectId)
+      const execSession: Session = {
+        sessionId: execSessionId,
+        projectId,
+        cwd: session?.cwd || projStateForExec.cwd,
+        turns: [],
+        status: 'processing',
+        lastModified: Date.now(),
+        firstPrompt: extracted.prompt.slice(0, 100),
+      }
+      sessions.set(execSessionId, execSession)
+
+      // 4. Create client state for the new session (bypassPermissions since unattended)
+      const execClientId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      const execClientState = createClientState(execClientId, projectId, execSession.cwd || process.cwd())
+      execClientState.permissionMode = 'bypassPermissions'
+
+      // 5. Create turn in new session
+      const promptData = extracted._promptData
+      const execTimestamp = Date.now()
+      execSession.turns.push({
+        prompt: {
+          type: 'user',
+          text: extracted.prompt,
+          images: promptData?.images as any,
+        },
+        agent: { messages: [], debugEvents: [] },
+        timestamp: execTimestamp,
+      })
+      execSession.lastModified = execTimestamp
+      persistSession(execSession)
+
+      // 6. Build user message for the new session
+      const execUserMsg: ChatMessage = {
+        id: `turn-${execTimestamp}`,
+        role: 'user',
+        content: extracted.prompt,
+        images: promptData?.images as any,
+        timestamp: execTimestamp,
+      }
+
+      // 7. Notify clients about the new session
+      broadcastToProject(projectId, {
+        type: 'session_created',
+        sessionId: execSessionId,
+        projectId,
+      })
+      broadcastProjectStatuses()
+
+      // 8. Capture variables for the executor closure
+      const capturedExecSession = execSession
+      const capturedExecClientState = execClientState
+      const capturedExecTurn = execSession.turns[execSession.turns.length - 1]
+
+      // 9. Force-execute through the queue (bypasses per-project lock, still gets timer/heartbeat)
+      queryQueue.forceExecute({
+        type: 'user',
+        projectId,
+        sessionId: execSessionId,
+        prompt: extracted.prompt,
+        executor: async (queuedQuery) => {
+          return executeUserQuery(
+            client,
+            capturedExecSession,
+            capturedExecClientState,
+            projectId,
+            extracted.prompt,
+            promptData?.images as any,
+            promptData?.enabledMcps,
+            promptData?.disabledSdkServers,
+            promptData?.disabledSkills,
+            queuedQuery,
+            execUserMsg,
+            capturedExecTurn,
+          )
+        },
+      })
+
+      tsLog('[ws]', `Execute now started — project=${projectId}, newSession=${execSessionId}, prompt=${extracted.prompt.slice(0, 80)}`)
       break
     }
 
@@ -2269,6 +2420,18 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
           queryType: queueState.running.type,
           sessionId: queueState.running.sessionId,
           cronJobName: queueState.running.metadata?.cronJobName,
+        })
+      }
+      // Include force-running queries (parallel execution)
+      for (const fq of queueState.forceRunning) {
+        items.push({
+          queryId: fq.id,
+          status: 'running',
+          position: 0,
+          prompt: fq.prompt,
+          queryType: fq.type,
+          sessionId: fq.sessionId,
+          cronJobName: fq.metadata?.cronJobName,
         })
       }
       for (let i = 0; i < queueState.queued.length; i++) {

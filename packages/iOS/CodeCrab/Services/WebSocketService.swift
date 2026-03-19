@@ -1093,9 +1093,19 @@ class WebSocketService: ObservableObject {
         ])
     }
 
-    func abort() {
+    func abort(queryId: String? = nil) {
         guard let projectId = activeProjectId else { return }
         isAborting = true
+
+        var payload: [String: Any] = [
+            "type": "abort",
+            "projectId": projectId,
+            "sessionId": sessionId
+        ]
+        if let qid = queryId {
+            payload["queryId"] = qid
+        }
+
         if !connected {
             // WS is disconnected — reconnect first, then send abort after connection establishes
             connect()
@@ -1104,19 +1114,11 @@ class WebSocketService: ObservableObject {
                     self?.isAborting = false
                     return
                 }
-                self.sendWebSocketMessage([
-                    "type": "abort",
-                    "projectId": projectId,
-                    "sessionId": self.sessionId
-                ])
+                self.sendWebSocketMessage(payload)
             }
             return
         }
-        sendWebSocketMessage([
-            "type": "abort",
-            "projectId": projectId,
-            "sessionId": sessionId
-        ])
+        sendWebSocketMessage(payload)
     }
 
     func resumeSession(_ newSessionId: String) {
@@ -1230,6 +1232,16 @@ class WebSocketService: ObservableObject {
         guard let projectId = activeProjectId else { return }
         sendWebSocketMessage([
             "type": "dequeue",
+            "queryId": queryId,
+            "projectId": projectId,
+            "sessionId": sessionId
+        ])
+    }
+
+    func executeNow(_ queryId: String) {
+        guard let projectId = activeProjectId else { return }
+        sendWebSocketMessage([
+            "type": "execute_now",
             "queryId": queryId,
             "projectId": projectId,
             "sessionId": sessionId

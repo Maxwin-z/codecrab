@@ -1,7 +1,8 @@
 // QueryQueue — per-project FIFO query queue with activity-based idle timeout
 //
-// Ensures only one query runs per project at a time.
+// Ensures only one queue-managed query runs per project at a time.
 // Both user prompts and cron jobs are enqueued here.
+// Force-executed queries bypass the queue and run in parallel.
 // Timeout resets on every activity signal (text, thinking, tool use, etc.)
 // and pauses when waiting for user input (permission request, ask_user_question).
 
@@ -37,6 +38,13 @@ export interface QueuedQuery {
     channelId?: string
     channelInstanceId?: string
     conversationId?: string
+  }
+  /** Original prompt data preserved for execute_now re-creation */
+  _promptData?: {
+    images?: unknown[]
+    enabledMcps?: string[]
+    disabledSdkServers?: string[]
+    disabledSkills?: string[]
   }
   // Internal: execution function and promise callbacks
   _executor: (query: QueuedQuery) => Promise<QueryResult>
@@ -86,6 +94,8 @@ function generateQueryId(): string {
 export class QueryQueue {
   private queues = new Map<string, QueuedQuery[]>()
   private running = new Map<string, QueuedQuery>()
+  /** Force-executed queries that bypass the queue and run in parallel (queryId → query) */
+  private forceRunning = new Map<string, QueuedQuery>()
   private timerStates = new Map<string, QueryTimerState>()
   private onStatusChange: StatusChangeCallback
 
@@ -103,6 +113,7 @@ export class QueryQueue {
     prompt: string
     priority?: number
     metadata?: QueuedQuery['metadata']
+    promptData?: QueuedQuery['_promptData']
     executor: (query: QueuedQuery) => Promise<QueryResult>
   }): { queryId: string; promise: Promise<QueryResult> } {
     const queryId = generateQueryId()
@@ -126,6 +137,7 @@ export class QueryQueue {
       createdAt: Date.now(),
       abortController: new AbortController(),
       metadata: params.metadata,
+      _promptData: params.promptData,
       _executor: params.executor,
       _resolve: resolve,
       _reject: reject,
@@ -261,9 +273,13 @@ export class QueryQueue {
     this.onStatusChange({ queryId: query.id, projectId, sessionId: query.sessionId, status: 'timeout', prompt: query.prompt, queryType: query.type, cronJobName: query.metadata?.cronJobName })
     query._resolve({ success: false, error: 'Query timed out (idle)', queryId: query.id })
 
-    // Remove from running so next can proceed
-    this.running.delete(projectId)
-    this.processNext(projectId)
+    // Remove from running (queue-managed or force-running)
+    if (this.running.get(projectId)?.id === query.id) {
+      this.running.delete(projectId)
+      this.processNext(projectId)
+    } else {
+      this.forceRunning.delete(query.id)
+    }
   }
 
   private clearTimerState(queryId: string): void {
@@ -376,7 +392,160 @@ export class QueryQueue {
     for (const query of this.running.values()) {
       if (query.id === queryId) return query
     }
-    return undefined
+    return this.forceRunning.get(queryId)
+  }
+
+  /**
+   * Find any running query by queryId (queue-managed or force-running).
+   * Used by heartbeat broadcaster.
+   */
+  findRunningQueryById(queryId: string): QueuedQuery | undefined {
+    return this.findQueryById(queryId)
+  }
+
+  /**
+   * Extract a queued (not yet running) query, removing it from the queue.
+   * Returns the extracted query or null if not found/already running.
+   */
+  extract(queryId: string): QueuedQuery | null {
+    for (const [projectId, queue] of this.queues) {
+      const idx = queue.findIndex(q => q.id === queryId)
+      if (idx !== -1) {
+        const removed = queue.splice(idx, 1)[0]
+        removed.status = 'cancelled'
+        removed.completedAt = Date.now()
+        this.onStatusChange({ queryId, projectId, sessionId: removed.sessionId, status: 'cancelled', prompt: removed.prompt, queryType: removed.type, cronJobName: removed.metadata?.cronJobName })
+        removed._resolve({ success: false, error: 'Extracted for immediate execution', queryId })
+
+        // Broadcast updated positions for remaining items
+        const runningOffset = this.running.has(projectId) ? 1 : 0
+        queue.forEach((q, i) => {
+          this.onStatusChange({
+            queryId: q.id, projectId, sessionId: q.sessionId,
+            status: 'queued', position: i + runningOffset, queueLength: queue.length + runningOffset,
+            prompt: q.prompt, queryType: q.type, cronJobName: q.metadata?.cronJobName,
+          })
+        })
+
+        console.log(`[QueryQueue] Extracted queued query ${queryId} for immediate execution`)
+        return removed
+      }
+    }
+    return null
+  }
+
+  /**
+   * Force-execute a query immediately, bypassing the per-project queue lock.
+   * Used for "execute now" — runs in parallel with any queue-managed query.
+   */
+  forceExecute(params: {
+    type: QueryType
+    projectId: string
+    sessionId: string
+    prompt: string
+    metadata?: QueuedQuery['metadata']
+    executor: (query: QueuedQuery) => Promise<QueryResult>
+  }): { queryId: string; promise: Promise<QueryResult> } {
+    const queryId = generateQueryId()
+    let resolve!: (r: QueryResult) => void
+    let reject!: (e: Error) => void
+    const promise = new Promise<QueryResult>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+
+    const query: QueuedQuery = {
+      id: queryId,
+      type: params.type,
+      projectId: params.projectId,
+      sessionId: params.sessionId,
+      prompt: params.prompt,
+      status: 'running',
+      priority: 0,
+      createdAt: Date.now(),
+      startedAt: Date.now(),
+      abortController: new AbortController(),
+      metadata: params.metadata,
+      _executor: params.executor,
+      _resolve: resolve,
+      _reject: reject,
+    }
+
+    this.forceRunning.set(queryId, query)
+
+    // Emit running status
+    this.onStatusChange({
+      queryId,
+      projectId: params.projectId,
+      sessionId: params.sessionId,
+      status: 'running',
+      position: 0,
+      prompt: query.prompt,
+      queryType: query.type,
+    })
+
+    // Set up idle timeout
+    const timeoutMs = getTimeoutMs()
+    const timerId = setTimeout(() => {
+      this.handleTimeout(params.projectId, query)
+    }, timeoutMs)
+    this.timerStates.set(queryId, {
+      timerId,
+      lastActivityAt: Date.now(),
+      paused: false,
+      lastActivityType: 'started',
+      activeToolCount: 0,
+    })
+
+    console.log(`[QueryQueue] Force-executing query ${queryId} for project ${params.projectId} session ${params.sessionId}`)
+
+    // Execute asynchronously
+    this.runForced(query)
+
+    return { queryId, promise }
+  }
+
+  private async runForced(query: QueuedQuery): Promise<void> {
+    try {
+      const result = await query._executor(query)
+      this.clearTimerState(query.id)
+
+      if ((query.status as QueryStatus) === 'timeout') return
+
+      query.status = 'completed'
+      query.completedAt = Date.now()
+      this.onStatusChange({ queryId: query.id, projectId: query.projectId, sessionId: query.sessionId, status: 'completed', prompt: query.prompt, queryType: query.type })
+      query._resolve(result)
+
+      console.log(`[QueryQueue] Force query ${query.id} completed in ${query.completedAt - query.startedAt!}ms`)
+    } catch (err: any) {
+      this.clearTimerState(query.id)
+
+      if ((query.status as QueryStatus) === 'timeout') return
+
+      query.status = 'failed'
+      query.completedAt = Date.now()
+      query.error = err.message
+      this.onStatusChange({ queryId: query.id, projectId: query.projectId, sessionId: query.sessionId, status: 'failed', prompt: query.prompt, queryType: query.type })
+      query._resolve({ success: false, error: err.message, queryId: query.id })
+
+      console.error(`[QueryQueue] Force query ${query.id} failed:`, err.message)
+    } finally {
+      this.forceRunning.delete(query.id)
+    }
+  }
+
+  /**
+   * Abort a force-running query by queryId.
+   */
+  abortForceRunning(queryId: string): QueuedQuery | undefined {
+    const query = this.forceRunning.get(queryId)
+    if (query) {
+      query.abortController.abort()
+      this.clearTimerState(query.id)
+      console.log(`[QueryQueue] Aborted force-running query ${query.id}`)
+    }
+    return query
   }
 
   /**
@@ -420,12 +589,14 @@ export class QueryQueue {
   }
 
   /**
-   * Get queue status for a project.
+   * Get queue status for a project, including force-running queries.
    */
-  getProjectQueue(projectId: string): { running?: QueuedQuery; queued: QueuedQuery[] } {
+  getProjectQueue(projectId: string): { running?: QueuedQuery; queued: QueuedQuery[]; forceRunning: QueuedQuery[] } {
+    const forceRunningList = [...this.forceRunning.values()].filter(q => q.projectId === projectId)
     return {
       running: this.running.get(projectId),
       queued: [...(this.queues.get(projectId) || [])],
+      forceRunning: forceRunningList,
     }
   }
 

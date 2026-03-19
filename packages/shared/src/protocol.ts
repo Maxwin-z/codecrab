@@ -29,6 +29,7 @@ export interface SetCwdMessage extends ProjectContext {
 
 export interface AbortMessage extends ProjectContext {
   type: 'abort'
+  queryId?: string  // If set, abort a specific force-running query
 }
 
 export interface ResumeSessionMessage extends ProjectContext {
@@ -73,6 +74,11 @@ export interface DequeueMessage extends ProjectContext {
   queryId: string
 }
 
+export interface ExecuteNowMessage extends ProjectContext {
+  type: 'execute_now'
+  queryId: string
+}
+
 export interface RequestQueueSnapshotMessage extends ProjectContext {
   type: 'request_queue_snapshot'
 }
@@ -90,6 +96,7 @@ export type ClientMessage =
   | SwitchProjectMessage
   | ProbeSdkMessage
   | DequeueMessage
+  | ExecuteNowMessage
   | RequestQueueSnapshotMessage
 
 // ============ Server → Client Messages ============

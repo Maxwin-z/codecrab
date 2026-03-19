@@ -212,7 +212,7 @@ export interface UseWebSocketReturn {
   probeSdk: () => void
   sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => void
   sendCommand: (command: string) => void
-  abort: () => void
+  abort: (queryId?: string) => void
   setWorkingDir: (dir: string) => void
   setProjectId: (projectId: string | null, projectCwd?: string) => void
   clearMessages: () => void
@@ -224,6 +224,7 @@ export interface UseWebSocketReturn {
   setPermissionMode: (mode: PermissionMode) => void
   respondToPermission: (requestId: string, allow: boolean) => void
   dequeueQuery: (queryId: string) => void
+  executeNow: (queryId: string) => void
   fetchSessions: () => Promise<import('@codecrab/shared').SessionInfo[]>
 }
 
@@ -919,14 +920,14 @@ export function useWebSocket(): UseWebSocketReturn {
     sendWithProject({ type: 'command', command })
   }, [sendWithProject])
 
-  const abort = useCallback(() => {
+  const abort = useCallback((queryId?: string) => {
     const pid = activeProjectIdRef.current
     if (pid) {
       const pState = getProjectState(pid)
       pState.isAborting = true
       triggerRender()
     }
-    sendWithProject({ type: 'abort' })
+    sendWithProject({ type: 'abort', queryId })
   }, [getProjectState, sendWithProject, triggerRender])
 
   const setWorkingDir = useCallback((dir: string) => {
@@ -1067,6 +1068,10 @@ export function useWebSocket(): UseWebSocketReturn {
     sendWithProject({ type: 'dequeue', queryId })
   }, [sendWithProject])
 
+  const executeNow = useCallback((queryId: string) => {
+    sendWithProject({ type: 'execute_now', queryId })
+  }, [sendWithProject])
+
   const probeSdk = useCallback(() => {
     sendWithProject({ type: 'probe_sdk' })
   }, [sendWithProject])
@@ -1134,6 +1139,7 @@ export function useWebSocket(): UseWebSocketReturn {
     setPermissionMode,
     respondToPermission,
     dequeueQuery,
+    executeNow,
     fetchSessions,
   }
 }

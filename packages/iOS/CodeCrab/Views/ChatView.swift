@@ -294,8 +294,9 @@ struct ChatView: View {
             QueryQueueBarView(
                 items: wsService.queryQueue,
                 currentSessionId: wsService.sessionId,
-                onAbort: { wsService.abort() },
+                onAbort: { queryId in wsService.abort(queryId: queryId) },
                 onDequeue: { queryId in wsService.dequeueQuery(queryId) },
+                onExecuteNow: { queryId in wsService.executeNow(queryId) },
                 isAborting: wsService.isAborting
             )
             .padding(.horizontal)

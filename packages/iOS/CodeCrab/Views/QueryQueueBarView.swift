@@ -3,9 +3,13 @@ import SwiftUI
 struct QueryQueueBarView: View {
     let items: [QueueItem]
     let currentSessionId: String
-    let onAbort: () -> Void
+    let onAbort: (String?) -> Void
     let onDequeue: (String) -> Void
+    let onExecuteNow: (String) -> Void
     let isAborting: Bool
+    @State private var showStopConfirm = false
+    @State private var stopQueryId: String? = nil
+    @State private var showExecConfirm: String? = nil
 
     var body: some View {
         VStack(spacing: 6) {
@@ -46,9 +50,12 @@ struct QueryQueueBarView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // Action button
+                    // Action buttons
                     if isRunning {
-                        Button(action: onAbort) {
+                        Button(action: {
+                            stopQueryId = isOtherSession ? item.queryId : nil
+                            showStopConfirm = true
+                        }) {
                             Text(isAborting ? "Stopping..." : "Stop")
                                 .font(.caption2)
                                 .fontWeight(.medium)
@@ -61,17 +68,31 @@ struct QueryQueueBarView: View {
                         .disabled(isAborting)
                         .buttonStyle(PlainButtonStyle())
                     } else {
-                        Button(action: { onDequeue(item.queryId) }) {
-                            Text("Remove")
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(UIColor.secondarySystemBackground))
-                                .foregroundColor(.secondary)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        HStack(spacing: 4) {
+                            Button(action: { showExecConfirm = item.queryId }) {
+                                Text("Run Now")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.accentColor.opacity(0.1))
+                                    .foregroundColor(.accentColor)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            Button(action: { onDequeue(item.queryId) }) {
+                                Text("Remove")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .foregroundColor(.secondary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
                 }
                 .padding(.horizontal, 12)
@@ -89,5 +110,29 @@ struct QueryQueueBarView: View {
                 )
             }
         }
+        .alert("Stop running query?", isPresented: $showStopConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Stop", role: .destructive) { onAbort(stopQueryId) }
+        } message: {
+            Text("This will abort the currently running query. Any queued queries will remain in the queue.")
+        }
+        .alert("Execute in new session?", isPresented: showExecConfirmBinding) {
+            Button("Cancel", role: .cancel) { showExecConfirm = nil }
+            Button("Run Now") {
+                if let qid = showExecConfirm {
+                    onExecuteNow(qid)
+                }
+                showExecConfirm = nil
+            }
+        } message: {
+            Text("This query will be removed from the queue and executed immediately in a new parallel session. Permission requests will be auto-approved.")
+        }
+    }
+
+    private var showExecConfirmBinding: Binding<Bool> {
+        Binding(
+            get: { showExecConfirm != nil },
+            set: { if !$0 { showExecConfirm = nil } }
+        )
     }
 }
