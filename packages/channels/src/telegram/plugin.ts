@@ -8,7 +8,7 @@ import type {
   ChannelStatus,
   ChannelHealthResult,
 } from '../types.js'
-import type { Question } from '@codecrab/shared'
+import type { Question, ImageAttachment } from '@codecrab/shared'
 import { registerCommands, setMenuCommands } from './commands.js'
 import { formatForTelegram, splitMessage, formatToolUse, formatError, formatResult } from './formatter.js'
 import * as store from '../store.js'
@@ -143,7 +143,7 @@ export class TelegramChannelPlugin implements ChannelPlugin {
       (chatId, projectId) => this.setConversationProjectId(chatId, projectId),
     )
 
-    // Handle incoming messages
+    // Handle incoming text messages
     this.bot.on('message:text', async (ctx) => {
       const chatId = String(ctx.chat.id)
       const userId = String(ctx.from?.id || 'unknown')
@@ -160,6 +160,46 @@ export class TelegramChannelPlugin implements ChannelPlugin {
 
       // Normal prompt
       await this.handleNewPrompt(chatId, userId, text)
+    })
+
+    // Handle incoming photos
+    this.bot.on('message:photo', async (ctx) => {
+      const chatId = String(ctx.chat.id)
+      const userId = String(ctx.from?.id || 'unknown')
+      const caption = ctx.message.caption || ''
+
+      this.lastMessageAt = Date.now()
+
+      try {
+        const images = await this.downloadPhotos(ctx.message.photo)
+        const prompt = caption || 'What is in this image?'
+        await this.handleNewPrompt(chatId, userId, prompt, images)
+      } catch (err: any) {
+        context.log('error', `Failed to process photo: ${err.message}`)
+        await this.bot?.api.sendMessage(chatId, formatError('Failed to process image'), { parse_mode: 'HTML' })
+      }
+    })
+
+    // Handle documents that are images (e.g. uncompressed photos sent as files)
+    this.bot.on('message:document', async (ctx) => {
+      const doc = ctx.message.document
+      const mime = doc.mime_type || ''
+      if (!mime.startsWith('image/')) return // Only handle image documents
+
+      const chatId = String(ctx.chat.id)
+      const userId = String(ctx.from?.id || 'unknown')
+      const caption = ctx.message.caption || ''
+
+      this.lastMessageAt = Date.now()
+
+      try {
+        const image = await this.downloadFile(doc.file_id, mime, doc.file_name)
+        const prompt = caption || 'What is in this image?'
+        await this.handleNewPrompt(chatId, userId, prompt, [image])
+      } catch (err: any) {
+        context.log('error', `Failed to process document image: ${err.message}`)
+        await this.bot?.api.sendMessage(chatId, formatError('Failed to process image'), { parse_mode: 'HTML' })
+      }
     })
 
     // Handle callback queries (inline keyboard responses)
@@ -510,7 +550,7 @@ export class TelegramChannelPlugin implements ChannelPlugin {
     }
   }
 
-  private async handleNewPrompt(chatId: string, userId: string, text: string): Promise<void> {
+  private async handleNewPrompt(chatId: string, userId: string, text: string, images?: ImageAttachment[]): Promise<void> {
     if (!this.context) return
 
     // Resolve project for this conversation
@@ -533,10 +573,51 @@ export class TelegramChannelPlugin implements ChannelPlugin {
         prompt: text,
         conversationId: chatId,
         externalUserId: userId,
+        images,
       })
     } catch (err: any) {
       this.context.log('error', `Failed to submit prompt: ${err.message}`)
       await this.bot?.api.sendMessage(chatId, formatError(err.message), { parse_mode: 'HTML' })
+    }
+  }
+
+  /** Download Telegram photos (picks the largest resolution) and convert to ImageAttachment */
+  private async downloadPhotos(photoSizes: Array<{ file_id: string; width: number; height: number }>): Promise<ImageAttachment[]> {
+    if (!this.bot || photoSizes.length === 0) return []
+
+    // Telegram sends multiple sizes — pick the largest
+    const largest = photoSizes[photoSizes.length - 1]
+    const image = await this.downloadFile(largest.file_id, 'image/jpeg')
+    return [image]
+  }
+
+  /** Download a file from Telegram by file_id and return as ImageAttachment */
+  private async downloadFile(fileId: string, mimeType: string, fileName?: string): Promise<ImageAttachment> {
+    if (!this.bot) throw new Error('Bot not initialized')
+
+    const file = await this.bot.api.getFile(fileId)
+    const filePath = file.file_path
+    if (!filePath) throw new Error('Could not get file path from Telegram')
+
+    const token = this.config.config.botToken as string
+    const url = `https://api.telegram.org/file/bot${token}/${filePath}`
+
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`Failed to download file: ${response.statusText}`)
+
+    const arrayBuffer = await response.arrayBuffer()
+    const base64 = Buffer.from(arrayBuffer).toString('base64')
+
+    // Map MIME type to supported media types
+    let mediaType: ImageAttachment['mediaType'] = 'image/jpeg'
+    if (mimeType === 'image/png') mediaType = 'image/png'
+    else if (mimeType === 'image/gif') mediaType = 'image/gif'
+    else if (mimeType === 'image/webp') mediaType = 'image/webp'
+
+    return {
+      data: base64,
+      mediaType,
+      name: fileName,
     }
   }
 }
