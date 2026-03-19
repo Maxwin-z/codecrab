@@ -5,7 +5,7 @@
 // Timeout resets on every activity signal (text, thinking, tool use, etc.)
 // and pauses when waiting for user input (permission request, ask_user_question).
 
-export type QueryType = 'user' | 'cron'
+export type QueryType = 'user' | 'cron' | 'channel'
 export type QueryStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'
 
 export interface QueryResult {
@@ -34,6 +34,9 @@ export interface QueuedQuery {
     cronRunId?: string
     retryCount?: number
     maxRetries?: number
+    channelId?: string
+    channelInstanceId?: string
+    conversationId?: string
   }
   // Internal: execution function and promise callbacks
   _executor: (query: QueuedQuery) => Promise<QueryResult>

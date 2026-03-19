@@ -169,7 +169,7 @@ export interface QueryQueueStatusMessage extends ServerProjectContext {
   position?: number
   queueLength?: number
   prompt?: string
-  queryType?: 'user' | 'cron'
+  queryType?: 'user' | 'cron' | 'channel'
   cronJobName?: string
 }
 
@@ -178,7 +178,7 @@ export interface QueryQueueSnapshotItem {
   status: QueryQueueItemStatus
   position: number
   prompt: string
-  queryType: 'user' | 'cron'
+  queryType: 'user' | 'cron' | 'channel'
   sessionId?: string
   cronJobName?: string
 }
@@ -448,11 +448,13 @@ export interface DebugEvent {
 /** A single query turn: prompt + agent response */
 export interface SessionTurn {
   prompt: {
-    type: 'user' | 'cron'
+    type: 'user' | 'cron' | 'channel'
     text: string
     images?: ImageAttachment[]
     cronJobId?: string
     cronJobName?: string
+    channelId?: string
+    channelInstanceId?: string
   }
   agent: {
     messages: DebugEvent[]     // filtered high-value events: thinking, text, tool_use
@@ -503,4 +505,14 @@ export interface SdkMcpServer {
 export interface SdkSkill {
   name: string
   description: string
+}
+
+/** Channel plugin info for external messaging platforms */
+export interface ChannelInfo {
+  id: string
+  name: string
+  description: string
+  icon: string
+  instanceId?: string
+  status?: 'stopped' | 'starting' | 'running' | 'error'
 }

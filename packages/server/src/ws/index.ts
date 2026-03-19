@@ -1211,7 +1211,7 @@ export function deleteSession(sessionId: string): boolean {
 }
 
 // Broadcast message to all clients subscribed to a project
-function broadcastToProject(projectId: string | undefined, message: ServerMessage, excludeConnectionId?: string) {
+export function broadcastToProject(projectId: string | undefined, message: ServerMessage, excludeConnectionId?: string) {
   if (!projectId) return
   // Stamp projectId on the message
   const stamped = { ...message, projectId }
@@ -1979,7 +1979,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
     // Send queue snapshot so client knows current queue state
     const queueState = queryQueue.getProjectQueue(projectId)
-    const snapshotItems: { queryId: string; status: 'queued' | 'running'; position: number; prompt: string; queryType: 'user' | 'cron'; sessionId?: string; cronJobName?: string }[] = []
+    const snapshotItems: { queryId: string; status: 'queued' | 'running'; position: number; prompt: string; queryType: 'user' | 'cron' | 'channel'; sessionId?: string; cronJobName?: string }[] = []
     if (queueState.running) {
       snapshotItems.push({
         queryId: queueState.running.id,
@@ -2259,7 +2259,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
     case 'request_queue_snapshot': {
       const queueState = queryQueue.getProjectQueue(projectId)
-      const items: { queryId: string; status: 'queued' | 'running'; position: number; prompt: string; queryType: 'user' | 'cron'; sessionId?: string; cronJobName?: string }[] = []
+      const items: { queryId: string; status: 'queued' | 'running'; position: number; prompt: string; queryType: 'user' | 'cron' | 'channel'; sessionId?: string; cronJobName?: string }[] = []
       if (queueState.running) {
         items.push({
           queryId: queueState.running.id,

@@ -1,0 +1,477 @@
+// TelegramChannelPlugin — grammY-based Telegram bot implementation
+
+import { Bot } from 'grammy'
+import type {
+  ChannelPlugin,
+  ChannelContext,
+  ChannelConfig,
+  ChannelStatus,
+  ChannelHealthResult,
+} from '../types.js'
+import type { Question } from '@codecrab/shared'
+import { registerCommands } from './commands.js'
+import { formatForTelegram, splitMessage, formatToolUse, formatError, formatResult } from './formatter.js'
+import * as store from '../store.js'
+import type { ConversationState } from '../types.js'
+
+// Pending interaction state machine
+type PendingInteraction =
+  | { type: 'question'; toolId: string; questions: Question[]; timeout: NodeJS.Timeout }
+  | { type: 'permission'; requestId: string; timeout: NodeJS.Timeout }
+
+const INTERACTION_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+/** Response buffer for streaming mode — edits a single Telegram message */
+class ResponseBuffer {
+  private buffer = ''
+  private messageId: number | null = null
+  private flushTimer: NodeJS.Timeout | null = null
+  private bot: Bot
+  private chatId: string | number
+  private readonly FLUSH_INTERVAL = 2000
+  private readonly MAX_LENGTH = 4000
+  private flushing = false
+
+  constructor(bot: Bot, chatId: string | number) {
+    this.bot = bot
+    this.chatId = chatId
+  }
+
+  append(text: string): void {
+    this.buffer += text
+    if (this.buffer.length >= this.MAX_LENGTH) {
+      this.flush()
+    } else if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.flush(), this.FLUSH_INTERVAL)
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.flushing || !this.buffer) return
+    this.flushing = true
+
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+
+    const text = this.buffer
+    try {
+      if (this.messageId) {
+        // Edit existing message
+        try {
+          await this.bot.api.editMessageText(this.chatId, this.messageId, text)
+        } catch {
+          // If edit fails (e.g., content unchanged), ignore
+        }
+      } else {
+        // Send new message
+        const sent = await this.bot.api.sendMessage(this.chatId, text)
+        this.messageId = sent.message_id
+      }
+
+      // If buffer exceeds max, start a new message next time
+      if (this.buffer.length >= this.MAX_LENGTH) {
+        this.messageId = null
+        this.buffer = ''
+      }
+    } catch (err) {
+      // Log but don't crash
+      console.error('[TelegramPlugin] Flush error:', err)
+    } finally {
+      this.flushing = false
+    }
+  }
+
+  async finalize(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    await this.flush()
+    this.reset()
+  }
+
+  reset(): void {
+    this.buffer = ''
+    this.messageId = null
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+  }
+}
+
+export class TelegramChannelPlugin implements ChannelPlugin {
+  readonly id: string
+  private _status: ChannelStatus = 'stopped'
+  private bot: Bot | null = null
+  private context: ChannelContext | null = null
+  private config: ChannelConfig
+  private pendingInteractions = new Map<string, PendingInteraction>()
+  private responseBuffers = new Map<string, ResponseBuffer>()
+  private conversations: Map<string, ConversationState>
+  private lastMessageAt: number = 0
+
+  constructor(config: ChannelConfig) {
+    this.id = config.instanceId
+    this.config = config
+    this.conversations = store.loadConversations(config.instanceId)
+  }
+
+  get status(): ChannelStatus {
+    return this._status
+  }
+
+  async start(context: ChannelContext): Promise<void> {
+    this._status = 'starting'
+    this.context = context
+
+    const botToken = this.config.config.botToken as string
+    if (!botToken) {
+      this._status = 'error'
+      throw new Error('Missing botToken in channel config')
+    }
+
+    this.bot = new Bot(botToken)
+
+    // Register bot commands
+    registerCommands(
+      this.bot,
+      context,
+      (chatId) => this.getConversationProjectId(chatId),
+      (chatId, projectId) => this.setConversationProjectId(chatId, projectId),
+    )
+
+    // Handle incoming messages
+    this.bot.on('message:text', async (ctx) => {
+      const chatId = String(ctx.chat.id)
+      const userId = String(ctx.from?.id || 'unknown')
+      const text = ctx.message.text
+
+      this.lastMessageAt = Date.now()
+
+      // Check for pending interaction
+      const pending = this.pendingInteractions.get(chatId)
+      if (pending) {
+        await this.handlePendingInteractionResponse(chatId, text, pending)
+        return
+      }
+
+      // Normal prompt
+      await this.handleNewPrompt(chatId, userId, text)
+    })
+
+    // Handle callback queries (inline keyboard responses)
+    this.bot.on('callback_query:data', async (ctx) => {
+      const chatId = String(ctx.chat?.id)
+      const data = ctx.callbackQuery.data
+
+      if (data.startsWith('perm:')) {
+        const [, action, requestId] = data.split(':')
+        const allow = action === 'allow'
+
+        const projectId = this.getConversationProjectId(chatId)
+        if (projectId) {
+          context.respondToPermission(projectId, requestId, allow)
+        }
+
+        // Remove pending interaction
+        const pending = this.pendingInteractions.get(chatId)
+        if (pending?.type === 'permission') {
+          clearTimeout(pending.timeout)
+          this.pendingInteractions.delete(chatId)
+        }
+
+        await ctx.answerCallbackQuery({ text: allow ? 'Allowed' : 'Denied' })
+        await ctx.editMessageText(allow ? '✅ Permission granted' : '🚫 Permission denied')
+      }
+    })
+
+    // Start polling
+    try {
+      this.bot.start({
+        onStart: () => {
+          this._status = 'running'
+          context.log('info', 'Telegram bot started polling')
+        },
+      })
+    } catch (err: any) {
+      this._status = 'error'
+      context.log('error', `Failed to start bot: ${err.message}`)
+      throw err
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (this.bot) {
+      await this.bot.stop()
+      this.bot = null
+    }
+
+    // Clear all pending interactions
+    for (const [, pending] of this.pendingInteractions) {
+      clearTimeout(pending.timeout)
+    }
+    this.pendingInteractions.clear()
+
+    // Flush and clear all response buffers
+    for (const [, buffer] of this.responseBuffers) {
+      await buffer.finalize()
+    }
+    this.responseBuffers.clear()
+
+    this._status = 'stopped'
+    this.context?.log('info', 'Telegram bot stopped')
+  }
+
+  async healthCheck(): Promise<ChannelHealthResult> {
+    if (!this.bot || this._status !== 'running') {
+      return { healthy: false, message: `Status: ${this._status}` }
+    }
+
+    try {
+      const me = await this.bot.api.getMe()
+      return {
+        healthy: true,
+        message: `Bot @${me.username} is running`,
+        lastMessageAt: this.lastMessageAt || undefined,
+      }
+    } catch (err: any) {
+      return { healthy: false, message: err.message }
+    }
+  }
+
+  // ============ Outbound Callbacks ============
+
+  onQueryStart(conversationId: string, queryId: string): void {
+    if (!this.bot) return
+
+    // Initialize response buffer for streaming mode
+    if (this.config.responseMode === 'streaming') {
+      const buffer = new ResponseBuffer(this.bot, conversationId)
+      this.responseBuffers.set(conversationId, buffer)
+    }
+  }
+
+  onTextDelta(conversationId: string, text: string): void {
+    if (this.config.responseMode === 'streaming') {
+      const buffer = this.responseBuffers.get(conversationId)
+      buffer?.append(text)
+    }
+  }
+
+  onToolUse(conversationId: string, toolName: string, _toolId: string): void {
+    if (!this.bot) return
+    // Send a brief tool notification (don't await to avoid blocking)
+    const msg = formatToolUse(toolName)
+    this.bot.api.sendMessage(conversationId, msg, { parse_mode: 'HTML' }).catch(() => {})
+  }
+
+  onToolResult(conversationId: string, _toolId: string, _content: string, _isError: boolean): void {
+    // Tool results are not sent to Telegram (too noisy)
+  }
+
+  onResult(conversationId: string, fullText: string, costUsd?: number, durationMs?: number): void {
+    if (!this.bot) return
+
+    if (this.config.responseMode === 'streaming') {
+      // Finalize the streaming buffer
+      const buffer = this.responseBuffers.get(conversationId)
+      if (buffer) {
+        buffer.finalize().catch(() => {})
+        this.responseBuffers.delete(conversationId)
+      }
+
+      // Send cost/duration summary
+      const summary = formatResult(costUsd, durationMs)
+      if (summary) {
+        this.bot.api.sendMessage(conversationId, summary, { parse_mode: 'HTML' }).catch(() => {})
+      }
+    } else {
+      // Buffered mode: send full response now
+      const formatted = formatForTelegram(fullText) + formatResult(costUsd, durationMs)
+      const chunks = splitMessage(formatted)
+      for (const chunk of chunks) {
+        this.bot.api.sendMessage(conversationId, chunk, { parse_mode: 'HTML' }).catch(() => {})
+      }
+    }
+  }
+
+  onError(conversationId: string, error: string): void {
+    if (!this.bot) return
+
+    // Finalize any streaming buffer
+    const buffer = this.responseBuffers.get(conversationId)
+    if (buffer) {
+      buffer.finalize().catch(() => {})
+      this.responseBuffers.delete(conversationId)
+    }
+
+    const msg = formatError(error)
+    this.bot.api.sendMessage(conversationId, msg, { parse_mode: 'HTML' }).catch(() => {})
+  }
+
+  // ============ Interactive Flows ============
+
+  onAskUserQuestion(conversationId: string, toolId: string, questions: Question[]): void {
+    if (!this.bot || !this.context) return
+
+    // Format questions as Telegram message
+    const lines = ['❓ <b>Question from CodeCrab:</b>', '']
+    for (const q of questions) {
+      lines.push(`<b>${q.question}</b>`)
+      if (q.options.length > 0) {
+        for (let i = 0; i < q.options.length; i++) {
+          const opt = q.options[i]
+          lines.push(`  ${i + 1}. ${opt.label}${opt.description ? ` — ${opt.description}` : ''}`)
+        }
+        lines.push('')
+        lines.push('<i>Reply with option number(s) or text answer:</i>')
+      }
+    }
+
+    this.bot.api.sendMessage(conversationId, lines.join('\n'), { parse_mode: 'HTML' }).catch(() => {})
+
+    // Set up pending interaction with timeout
+    const timeout = setTimeout(() => {
+      this.pendingInteractions.delete(conversationId)
+      this.context?.log('warn', `Question timeout for chat ${conversationId}, toolId=${toolId}`)
+      // Auto-skip with empty answer on timeout
+      const projectId = this.getConversationProjectId(conversationId)
+      if (projectId) {
+        this.context?.respondToQuestion(projectId, toolId, {})
+      }
+      this.bot?.api.sendMessage(conversationId, '⏰ Question timed out (5 min). Skipping.').catch(() => {})
+    }, INTERACTION_TIMEOUT_MS)
+
+    this.pendingInteractions.set(conversationId, { type: 'question', toolId, questions, timeout })
+  }
+
+  onPermissionRequest(conversationId: string, requestId: string, toolName: string, input: unknown, reason: string): void {
+    if (!this.bot || !this.context) return
+
+    const inputStr = typeof input === 'string' ? input : JSON.stringify(input, null, 2)
+    const preview = inputStr.length > 300 ? inputStr.slice(0, 300) + '...' : inputStr
+    const msg = [
+      '🔐 <b>Permission Request</b>',
+      '',
+      `<b>Tool:</b> <code>${toolName}</code>`,
+      reason ? `<b>Reason:</b> ${reason}` : '',
+      `<b>Input:</b> <pre>${preview}</pre>`,
+    ].filter(Boolean).join('\n')
+
+    // Send with inline keyboard
+    this.bot.api.sendMessage(conversationId, msg, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Allow', callback_data: `perm:allow:${requestId}` },
+          { text: '🚫 Deny', callback_data: `perm:deny:${requestId}` },
+        ]],
+      },
+    }).catch(() => {})
+
+    // Set up timeout
+    const timeout = setTimeout(() => {
+      this.pendingInteractions.delete(conversationId)
+      const projectId = this.getConversationProjectId(conversationId)
+      if (projectId) {
+        this.context?.respondToPermission(projectId, requestId, false)
+      }
+      this.bot?.api.sendMessage(conversationId, '⏰ Permission request timed out. Auto-denied.').catch(() => {})
+    }, INTERACTION_TIMEOUT_MS)
+
+    this.pendingInteractions.set(conversationId, { type: 'permission', requestId, timeout })
+  }
+
+  // ============ Internal Helpers ============
+
+  private getConversationProjectId(chatId: string): string | undefined {
+    return this.conversations.get(chatId)?.projectId
+  }
+
+  private setConversationProjectId(chatId: string, projectId: string): void {
+    const existing = this.conversations.get(chatId)
+    const conversation: ConversationState = {
+      conversationId: chatId,
+      sessionId: existing?.sessionId || `channel-${this.config.id}-${chatId}-${Date.now()}`,
+      projectId,
+      lastActivityAt: Date.now(),
+    }
+    // Create new session when project changes
+    if (existing?.projectId !== projectId) {
+      conversation.sessionId = `channel-${this.config.id}-${chatId}-${Date.now()}`
+    }
+    this.conversations.set(chatId, conversation)
+    store.saveConversations(this.config.instanceId, this.conversations)
+  }
+
+  private async handlePendingInteractionResponse(chatId: string, text: string, pending: PendingInteraction): Promise<void> {
+    clearTimeout(pending.timeout)
+    this.pendingInteractions.delete(chatId)
+
+    const projectId = this.getConversationProjectId(chatId)
+    if (!projectId) {
+      await this.bot?.api.sendMessage(chatId, '❌ No project selected.')
+      return
+    }
+
+    if (pending.type === 'question') {
+      // Parse answer from text
+      const answers: Record<string, string | string[]> = {}
+      for (const q of pending.questions) {
+        if (q.options.length > 0) {
+          // Try to parse as option number
+          const num = parseInt(text.trim(), 10)
+          if (!isNaN(num) && num >= 1 && num <= q.options.length) {
+            answers[q.question] = q.options[num - 1].label
+          } else {
+            // Use raw text as answer
+            answers[q.question] = text.trim()
+          }
+        } else {
+          answers[q.question] = text.trim()
+        }
+      }
+
+      this.context?.respondToQuestion(projectId, pending.toolId, answers)
+      await this.bot?.api.sendMessage(chatId, '✅ Answer received.')
+    } else if (pending.type === 'permission') {
+      const lower = text.trim().toLowerCase()
+      const allow = lower === 'allow' || lower === 'yes' || lower === 'y'
+      this.context?.respondToPermission(projectId, pending.requestId, allow)
+      await this.bot?.api.sendMessage(chatId, allow ? '✅ Permission granted' : '🚫 Permission denied')
+    }
+  }
+
+  private async handleNewPrompt(chatId: string, userId: string, text: string): Promise<void> {
+    if (!this.context) return
+
+    // Resolve project for this conversation
+    const mapping = await this.context.resolveProject(userId, chatId)
+    if (!mapping) {
+      await this.bot?.api.sendMessage(
+        chatId,
+        '❌ No project configured for this chat.\n\nUse <code>/project &lt;project-id&gt;</code> to select one.',
+        { parse_mode: 'HTML' },
+      )
+      return
+    }
+
+    // Send typing indicator
+    this.bot?.api.sendChatAction(chatId, 'typing').catch(() => {})
+
+    try {
+      await this.context.submitPrompt({
+        projectId: mapping.projectId,
+        prompt: text,
+        conversationId: chatId,
+        externalUserId: userId,
+      })
+    } catch (err: any) {
+      this.context.log('error', `Failed to submit prompt: ${err.message}`)
+      await this.bot?.api.sendMessage(chatId, formatError(err.message), { parse_mode: 'HTML' })
+    }
+  }
+}

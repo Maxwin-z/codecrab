@@ -22,7 +22,18 @@ import { ensureSoulProject } from './soul/project.js'
 import { getAvailableMcps } from './mcp/index.js'
 import debugRouter from './api/debug.js'
 import { ensureToken, authMiddleware } from './auth/index.js'
-import { setupWebSocket, executePromptInSession } from './ws/index.js'
+import { setupWebSocket, executePromptInSession, broadcastToProject, queryQueue } from './ws/index.js'
+import {
+  createClientState,
+  executeQuery,
+  handleQuestionResponse,
+  handlePermissionResponse,
+  getOrCreateProjectState,
+  storeAssistantMessage,
+  generateSessionId,
+} from './engine/claude.js'
+import { ChannelManager, createChannelRouter, createWebhookRouter } from '@codecrab/channels'
+import type { ChannelEngineContext } from '@codecrab/channels'
 import os from 'os'
 
 export interface StartServerOptions {
@@ -95,6 +106,32 @@ export async function startServer(options: StartServerOptions = {}): Promise<{ p
   // Public debug endpoints (no auth required, for troubleshooting)
   app.use('/api/debug', debugRouter)
 
+  // Channel system — create manager with engine context (DI to avoid circular deps)
+  const PROJECTS_FILE = path.join(os.homedir(), '.codecrab', 'projects.json')
+  const channelEngineContext: ChannelEngineContext = {
+    queryQueue,
+    createClientState,
+    executeQuery,
+    handleQuestionResponse,
+    handlePermissionResponse,
+    broadcastToProject,
+    getOrCreateProjectState,
+    storeAssistantMessage,
+    generateSessionId,
+    listProjects: async () => {
+      try {
+        const data = fs.readFileSync(PROJECTS_FILE, 'utf-8')
+        return JSON.parse(data)
+      } catch {
+        return []
+      }
+    },
+  }
+  const channelManager = new ChannelManager(channelEngineContext)
+
+  // Public channel webhook route (before auth — external platforms call this)
+  app.use('/api/channels/webhook', createWebhookRouter(channelManager))
+
   // Serve the web app static files (before auth — the app handles its own auth via API calls)
   const appDistCandidates = [
     path.resolve(__dirname, '../../app/dist'),       // from packages/server/src (dev with tsx)
@@ -126,6 +163,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<{ p
   app.use('/api/cron', cronRouter)
   app.use('/api/push', pushRouter)
   app.use('/api/soul', soulRouter)
+  app.use('/api/channels', createChannelRouter(channelManager))
 
   // MCP registry — list available MCP servers
   app.get('/api/mcps', (_req, res) => {
@@ -178,6 +216,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<{ p
     return result
   })
 
+  // Restore enabled channel instances from disk
+  try {
+    await channelManager.restoreChannels()
+  } catch (err) {
+    console.error('[server] Failed to restore channel instances:', err)
+  }
+
   return new Promise((resolve) => {
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`[server] listening on http://0.0.0.0:${PORT}`)
@@ -189,6 +234,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<{ p
       console.log(`[server] ${signal} received, shutting down...`)
       wss.close()
       cronSystem.stop()
+      channelManager.stopAll().catch(() => {})
       server.close(() => {
         console.log(`[server] closed`)
         process.exit(0)

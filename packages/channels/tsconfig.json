@@ -6,7 +6,6 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../shared" },
-    { "path": "../channels" }
+    { "path": "../shared" }
   ]
 }

@@ -1,0 +1,22 @@
+{
+  "name": "@codecrab/channels",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Channel plugin system for external messaging platform integration (Telegram, Feishu, etc.)",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@codecrab/shared": "workspace:*",
+    "grammy": "^1.35.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/express": "^5.0.6"
+  }
+}

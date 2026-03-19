@@ -13,6 +13,7 @@
   },
   "references": [
     { "path": "packages/shared" },
+    { "path": "packages/channels" },
     { "path": "packages/server" },
     { "path": "packages/app" },
     { "path": "packages/web" },
