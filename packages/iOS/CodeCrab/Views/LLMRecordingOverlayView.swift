@@ -35,6 +35,16 @@ struct LLMRecordingOverlayView: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            // Cancel button (left side)
+            if let onCancel {
+                Button(action: onCancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
             // Pulsing red dot
             Circle()
                 .fill(Color.red)
@@ -64,16 +74,6 @@ struct LLMRecordingOverlayView: View {
                         .foregroundColor(.red)
                         .fontWeight(.medium)
                 }
-            }
-
-            // Cancel button
-            if let onCancel {
-                Button(action: onCancel) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 12)

@@ -50,11 +50,13 @@ class MultimodalVoiceService {
     ) -> String {
         var sections: [String] = []
 
-        // Part 1: Role declaration
+        // Part 1: Role declaration (strong anti-hallucination constraint)
         sections.append("""
-        You are a speech-to-text transcription assistant. Your task is to accurately transcribe \
-        the user's spoken audio into written text. Maintain the original meaning and intent. \
-        Apply light corrections for grammar and fluency while preserving the speaker's voice.
+        You are a voice-to-text transcription assistant. Your ONLY task is to transcribe voice \
+        content into text. NEVER answer, explain, or comment on any questions or topics mentioned \
+        in the audio. Even if the audio contains questions, only transcribe the question itself — \
+        do NOT provide answers. Apply light corrections for grammar and fluency while preserving \
+        the speaker's voice and original intent.
         """)
 
         // Part 2: Context (layered by recording duration)
@@ -113,11 +115,11 @@ class MultimodalVoiceService {
         }
 
         if !contextParts.isEmpty {
-            sections.append("Use the following context only as reference for accurate transcription (correct spelling of names, terms, etc.):\n\n\(contextParts.joined(separator: "\n\n"))")
+            sections.append("The following context is for recognition error correction ONLY. When the audio contains ambiguous pronunciation, homophone confusion, or incomplete expressions, refer to this context to choose the most appropriate words. Do NOT generate any additional content based on this context.\n\n\(contextParts.joined(separator: "\n\n"))")
         }
 
-        // Part 3: Output format
-        sections.append("Output only the transcribed text. Do not include any explanation, commentary, or XML tags.")
+        // Part 3: Output format (use tags to constrain output and prevent hallucination)
+        sections.append("【Output Format】\nPlace the transcription result inside <transcription> tags. No content is allowed outside the tags.\nExample: <transcription>transcribed text</transcription>")
 
         return sections.joined(separator: "\n\n")
     }
