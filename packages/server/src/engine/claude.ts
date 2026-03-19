@@ -83,6 +83,7 @@ export interface ClientState {
   permissionMode: PermissionMode
   activeQuery: ActiveQuery | null
   pendingPermissions: Map<string, PendingPermission>
+  pendingQuestionResolve: { resolve: (answers: Record<string, string | string[]>) => void } | null
   lastActivity: number
   // Message accumulation during streaming
   accumulatingText: string
@@ -752,6 +753,7 @@ export function createClientState(
     permissionMode: 'bypassPermissions',
     activeQuery: null,
     pendingPermissions: new Map(),
+    pendingQuestionResolve: null,
     lastActivity: Date.now(),
     accumulatingText: '',
     accumulatingThinking: '',
@@ -1156,6 +1158,7 @@ export async function* executeQuery(
     onToolResult: (toolId: string, content: string, isError: boolean) => void
     onSessionInit: (sessionId: string) => void
     onPermissionRequest: (requestId: string, toolName: string, input: unknown, reason: string) => void
+    onAskUserQuestion: (toolId: string, questions: unknown[]) => void
     onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }) => void
     onSdkLog?: (type: string, detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => void
   },
@@ -1245,6 +1248,27 @@ export async function* executeQuery(
         opts.updateToolInput?.({ ...input, dangerouslyDisableSandbox: true })
         console.log(`[canUseTool] Auto-disabled sandbox for Bash command: ${cmd.slice(0, 80)}`)
       }
+    }
+
+    // Handle AskUserQuestion: must wait for user answers regardless of permission mode
+    if (toolName === 'AskUserQuestion' && (input as any).questions) {
+      callbacks.onAskUserQuestion(opts.toolUseID, (input as any).questions)
+
+      return new Promise((resolve) => {
+        client.pendingQuestionResolve = {
+          resolve: (answers: Record<string, string | string[]>) => {
+            resolve({
+              behavior: 'allow',
+              updatedInput: { ...input, answers },
+            })
+          },
+        }
+        const onAbort = () => {
+          client.pendingQuestionResolve = null
+          resolve({ behavior: 'deny', message: 'Aborted' })
+        }
+        opts.signal.addEventListener('abort', onAbort, { once: true })
+      })
     }
 
     // In bypass mode, auto-approve
@@ -1509,20 +1533,8 @@ async function* processMessage(
         } else if (block.type === 'thinking') {
           fullThinking += block.thinking
         } else if (block.type === 'tool_use') {
-          // Handle AskUserQuestion specially
-          if (
-            block.name === 'AskUserQuestion' &&
-            block.input &&
-            (block.input as any).questions
-          ) {
-            yield {
-              type: 'ask_user_question',
-              data: {
-                toolId: block.id,
-                questions: (block.input as any).questions,
-              },
-            }
-          }
+          // AskUserQuestion is handled in canUseTool callback (waits for user answers)
+          // — no need to emit ask_user_question here; the callback broadcasts to clients.
 
           // Only emit tool_use if we haven't seen this tool call before
           const alreadyTracked = client.currentToolCalls?.some(tc => tc.id === block.id)
@@ -1682,6 +1694,17 @@ export function handlePermissionResponse(
     message: allow ? undefined : 'User denied permission',
   })
   client.pendingPermissions.delete(requestId)
+  return true
+}
+
+// Resolve a pending AskUserQuestion with user's answers
+export function handleQuestionResponse(
+  client: ClientState,
+  answers: Record<string, string | string[]>
+): boolean {
+  if (!client.pendingQuestionResolve) return false
+  client.pendingQuestionResolve.resolve(answers)
+  client.pendingQuestionResolve = null
   return true
 }
 

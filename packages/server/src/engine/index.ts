@@ -21,6 +21,7 @@ export {
   getProjectState,
   storeAssistantMessage,
   handlePermissionResponse,
+  handleQuestionResponse,
   abortQuery,
   getSessionStatuses,
   getCachedModels,

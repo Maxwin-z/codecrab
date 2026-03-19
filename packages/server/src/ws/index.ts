@@ -24,6 +24,7 @@ import {
   getActiveProjectIds,
   storeAssistantMessage,
   handlePermissionResponse,
+  handleQuestionResponse,
   abortQuery,
   getSessionStatuses,
   getCachedModels,
@@ -521,6 +522,9 @@ async function executeCronQuery(
       },
       onPermissionRequest: () => {
         // Cron jobs bypass permissions
+      },
+      onAskUserQuestion: () => {
+        // Cron jobs cannot ask user questions
       },
       onUsage: (usage) => {
         logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
@@ -1737,6 +1741,22 @@ async function executeUserQuery(
         queryQueue.pauseTimeout(queuedQuery.id)
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
       },
+      onAskUserQuestion: (toolId, questions) => {
+        logEvent('tool_use', `AskUserQuestion toolId=${toolId}`, { toolId } as any)
+        const questionData = { toolId, questions: questions as any }
+        const projStateForQ = getOrCreateProjectState(projectId)
+        projStateForQ.pendingQuestion = questionData
+        session.pendingQuestion = questionData
+        persistSession(session)
+        broadcastToProject(projectId, {
+          type: 'ask_user_question',
+          ...questionData,
+          projectId,
+          sessionId: session.sessionId,
+        } as any)
+        queryQueue.pauseTimeout(queuedQuery.id)
+        maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+      },
       onUsage: (usage) => {
         logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
         queryQueue.touchActivity(queuedQuery.id, 'usage')
@@ -1795,25 +1815,8 @@ async function executeUserQuery(
           })
           break
         }
-        case 'ask_user_question': {
-          const questionData = {
-            toolId: (event.data as any).toolId,
-            questions: (event.data as any).questions,
-          }
-          const projStateForQ = getOrCreateProjectState(projectId)
-          projStateForQ.pendingQuestion = questionData
-          session.pendingQuestion = questionData
-          persistSession(session)
-          broadcastToProject(projectId, {
-            type: 'ask_user_question',
-            ...questionData,
-            projectId,
-            sessionId: session.sessionId,
-          })
-          queryQueue.pauseTimeout(queuedQuery.id)
-          maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
-          break
-        }
+        // ask_user_question is now handled via the onAskUserQuestion callback
+        // in canUseTool, which broadcasts to clients and waits for answers.
       }
     }
 
@@ -2397,21 +2400,18 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         queryQueue.resumeTimeout(runningQueryForQ.id)
       }
 
-      const answerText = Object.entries(msg.answers)
-        .map(([key, value]) => {
-          if (Array.isArray(value)) {
-            return `${key}: ${value.join(', ')}`
+      // Resolve the pending canUseTool promise with the user's answers
+      const handled = handleQuestionResponse(clientState, msg.answers)
+      if (!handled) {
+        // Try other client states for this project
+        for (const otherClient of clients.values()) {
+          if (otherClient.connectionId === client.connectionId) continue
+          const otherState = getClientState(otherClient.clientId, projectId)
+          if (otherState && handleQuestionResponse(otherState, msg.answers)) {
+            break
           }
-          return `${key}: ${value}`
-        })
-        .join('\n')
-
-      await handleClientMessage(ws, client, {
-        type: 'prompt',
-        prompt: answerText,
-        projectId,
-        sessionId: msg.sessionId,
-      })
+        }
+      }
       break
     }
 
