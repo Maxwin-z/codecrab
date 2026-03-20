@@ -958,6 +958,15 @@ export function buildQueryOptions(
         `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
         `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
         `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.` +
+        `\n\nIMPORTANT: To reduce unnecessary API round-trips, you MUST proactively use the AskUserQuestion tool in these situations:` +
+        `\n1. When the user's request is ambiguous or could be interpreted in multiple ways — ask for clarification BEFORE starting work.` +
+        `\n2. When there are multiple possible approaches or solutions — present the options and let the user choose.` +
+        `\n3. When you need to confirm potentially destructive or irreversible actions (deleting files, overwriting data, force-pushing, etc.).` +
+        `\n4. When a task requires assumptions about the user's intent, preferences, or environment that you cannot determine from context.` +
+        `\nPrefer using select/multi-select question types when there are discrete options, and free-text when open-ended input is needed. ` +
+        `Do NOT guess and iterate — ask once, then act. This saves both time and API costs.` +
+        `\n\nHIGHEST PRIORITY OVERRIDE: If the user explicitly says to decide on your own (e.g. "你自主决定", "let you decide", "你来决定", "自己判断", "不用问我"), ` +
+        `do NOT use AskUserQuestion and do NOT ask for confirmation — just proceed autonomously with your best judgment. This override takes precedence over all the rules above.` +
         SUMMARY_INSTRUCTION +
         SUGGESTIONS_INSTRUCTION,
     },
