@@ -72,6 +72,9 @@ struct CodeCrabApp: App {
                     if phase == .active {
                         shareHandler.checkOnActivation()
                         webSocketService.onForegroundReturn()
+                        Task {
+                            await authService.checkAuth()
+                        }
                         // Clean up stale Live Activities if nothing is running
                         // Uses endAllActivities() to also clear activities from previous launches
                         // where currentActivity is nil but system activities persist
@@ -160,10 +163,8 @@ struct LaunchScreen: View {
                         .frame(width: 180, height: 180)
                         .scaleEffect(lobsterScale * 1.2)
 
-                    Image("CodeCrabLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 120, height: 120)
+                    Text("🦀")
+                        .font(.system(size: 100))
                         .scaleEffect(lobsterScale)
                         .rotationEffect(.degrees(lobsterRotation))
                 }
