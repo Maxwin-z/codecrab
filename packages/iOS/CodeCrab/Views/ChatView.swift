@@ -5,6 +5,8 @@ struct ChatView: View {
     let initialSessionId: String?
     @Binding var pendingAttachments: [ImageAttachment]
     @Binding var pendingSessionId: String?
+    /// When false, ChatView won't auto-call switchProject on appear (used in grid mode)
+    var autoConnect: Bool = true
     @EnvironmentObject var wsService: WebSocketService
     @State private var showFileBrowser = false
     @State private var customMcps: [McpInfo] = []
@@ -121,15 +123,8 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            wsService.switchProject(projectId: project.id, cwd: project.path, name: project.name, icon: project.icon)
-            if let sessionId = initialSessionId {
-                // Resume the specified session after project switch settles
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    wsService.resumeSession(sessionId)
-                }
-            } else {
-                // New chat — start fresh
-                wsService.newChat()
+            if autoConnect {
+                connectToProject()
             }
             fetchMcps()
             handlePendingShare()
@@ -387,6 +382,18 @@ struct ChatView: View {
             // an in-flight animation leaves the bottom marker outside the
             // threshold, falsely disabling auto-scroll.
             proxy.scrollTo("Bottom", anchor: .bottom)
+        }
+    }
+
+    /// Connect to the project WebSocket (switch project + resume/new session)
+    func connectToProject() {
+        wsService.switchProject(projectId: project.id, cwd: project.path, name: project.name, icon: project.icon)
+        if let sessionId = initialSessionId {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                wsService.resumeSession(sessionId)
+            }
+        } else {
+            wsService.newChat()
         }
     }
 
