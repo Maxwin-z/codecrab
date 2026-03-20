@@ -139,6 +139,7 @@ struct HomeView: View {
                 shareAttachments: $shareAttachments,
                 shareSessionId: $shareSessionId
             )
+            .toolbar(.hidden, for: .navigationBar)
         } else {
             // Single mode (iPhone or iPad single layout)
             NavigationStack(path: $detailPath) {
