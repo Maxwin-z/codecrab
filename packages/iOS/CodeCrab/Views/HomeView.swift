@@ -133,13 +133,36 @@ struct HomeView: View {
     @ViewBuilder
     private var detailContent: some View {
         if isIPad && !gridManager.isSingleLayout {
-            // Grid mode on iPad
-            GridContainerView(
-                gridManager: gridManager,
-                shareAttachments: $shareAttachments,
-                shareSessionId: $shareSessionId
-            )
-            .toolbar(.hidden, for: .navigationBar)
+            if gridManager.isExpanded {
+                // Expanded cell mode: show single cell with nav bar visible
+                GridContainerView(
+                    gridManager: gridManager,
+                    shareAttachments: $shareAttachments,
+                    shareSessionId: $shareSessionId
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                gridManager.collapseCell()
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                    .font(.system(size: 14))
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Grid mode on iPad
+                GridContainerView(
+                    gridManager: gridManager,
+                    shareAttachments: $shareAttachments,
+                    shareSessionId: $shareSessionId
+                )
+                .toolbar(.hidden, for: .navigationBar)
+            }
         } else {
             // Single mode (iPhone or iPad single layout)
             NavigationStack(path: $detailPath) {

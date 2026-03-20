@@ -21,8 +21,12 @@ struct GridCellView: View {
         cellIndex < gridManager.cells.count && gridManager.activeCellIndex == cellIndex
     }
 
+    private var isExpanded: Bool {
+        gridManager.expandedCellIndex == cellIndex
+    }
+
     private var showChrome: Bool {
-        !gridManager.isSingleLayout
+        !gridManager.isSingleLayout && !isExpanded
     }
 
     var body: some View {
@@ -30,6 +34,11 @@ struct GridCellView: View {
             if showChrome {
                 cellHeader
                     .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            gridManager.expandCell(at: cellIndex)
+                        }
+                    }
                     .onTapGesture {
                         gridManager.activateCell(at: cellIndex)
                     }

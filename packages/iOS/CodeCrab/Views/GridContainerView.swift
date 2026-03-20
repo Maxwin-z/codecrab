@@ -8,27 +8,38 @@ struct GridContainerView: View {
     @Binding var shareSessionId: String?
 
     var body: some View {
-        let rows = gridManager.layout.rows
-        let cols = gridManager.layout.cols
+        if let expandedIndex = gridManager.expandedCellIndex,
+           expandedIndex < gridManager.cells.count {
+            // Expanded mode: show only the expanded cell full-screen
+            GridCellView(
+                cellIndex: expandedIndex,
+                gridManager: gridManager,
+                shareAttachments: $shareAttachments,
+                shareSessionId: $shareSessionId
+            )
+        } else {
+            let rows = gridManager.layout.rows
+            let cols = gridManager.layout.cols
 
-        VStack(spacing: 2) {
-            ForEach(0..<rows, id: \.self) { row in
-                HStack(spacing: 2) {
-                    ForEach(0..<cols, id: \.self) { col in
-                        let index = row * cols + col
-                        if index < gridManager.cells.count {
-                            GridCellView(
-                                cellIndex: index,
-                                gridManager: gridManager,
-                                shareAttachments: $shareAttachments,
-                                shareSessionId: $shareSessionId
-                            )
+            VStack(spacing: 2) {
+                ForEach(0..<rows, id: \.self) { row in
+                    HStack(spacing: 2) {
+                        ForEach(0..<cols, id: \.self) { col in
+                            let index = row * cols + col
+                            if index < gridManager.cells.count {
+                                GridCellView(
+                                    cellIndex: index,
+                                    gridManager: gridManager,
+                                    shareAttachments: $shareAttachments,
+                                    shareSessionId: $shareSessionId
+                                )
+                            }
                         }
                     }
                 }
             }
+            .background(Color(uiColor: .systemBackground))
         }
-        .background(Color(uiColor: .systemBackground))
     }
 }
 

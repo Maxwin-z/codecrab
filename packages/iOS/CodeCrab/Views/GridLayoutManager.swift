@@ -6,27 +6,24 @@ import Combine
 enum GridLayout: String, CaseIterable, Identifiable {
     case single = "1×1"
     case twoColumns = "1×2"
+    case threeColumns = "1×3"
     case twoRows = "2×1"
     case twoByTwo = "2×2"
-    case twoByThree = "2×3"
-    case threeByTwo = "3×2"
-    case threeByThree = "3×3"
 
     var id: String { rawValue }
 
     var rows: Int {
         switch self {
-        case .single, .twoColumns: return 1
-        case .twoRows, .twoByTwo, .twoByThree: return 2
-        case .threeByTwo, .threeByThree: return 3
+        case .single, .twoColumns, .threeColumns: return 1
+        case .twoRows, .twoByTwo: return 2
         }
     }
 
     var cols: Int {
         switch self {
         case .single, .twoRows: return 1
-        case .twoColumns, .twoByTwo, .threeByTwo: return 2
-        case .twoByThree, .threeByThree: return 3
+        case .twoColumns, .twoByTwo: return 2
+        case .threeColumns: return 3
         }
     }
 
@@ -36,11 +33,9 @@ enum GridLayout: String, CaseIterable, Identifiable {
         switch self {
         case .single: return "square"
         case .twoColumns: return "rectangle.split.1x2"
+        case .threeColumns: return "rectangle.split.3x1"
         case .twoRows: return "rectangle.split.2x1"
         case .twoByTwo: return "rectangle.split.2x2"
-        case .twoByThree: return "rectangle.split.3x3"
-        case .threeByTwo: return "rectangle.split.3x3"
-        case .threeByThree: return "rectangle.split.3x3"
         }
     }
 }
@@ -99,6 +94,9 @@ class GridLayoutManager: ObservableObject {
     @Published var layout: GridLayout = .single
     @Published var cells: [GridCellState] = [GridCellState(id: 0)]
     @Published var activeCellIndex: Int = 0
+    @Published var expandedCellIndex: Int? = nil
+
+    var isExpanded: Bool { expandedCellIndex != nil }
 
     var activeCell: GridCellState {
         guard activeCellIndex < cells.count else { return cells[0] }
@@ -159,5 +157,15 @@ class GridLayoutManager: ObservableObject {
         if case .chat(let route) = cell.content {
             cells[index].content = .projectSessions(route.project)
         }
+    }
+
+    func expandCell(at index: Int) {
+        guard index >= 0 && index < cells.count else { return }
+        expandedCellIndex = index
+        activeCellIndex = index
+    }
+
+    func collapseCell() {
+        expandedCellIndex = nil
     }
 }
