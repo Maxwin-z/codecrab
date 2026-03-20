@@ -216,126 +216,157 @@ struct InputBarView: View {
 
             // Bottom toolbar
             HStack(spacing: 0) {
-                // Left: permission mode + action buttons
-                HStack(spacing: 2) {
-                    // Safe / YOLO toggle
+                if speechService.isRecording || isLLMRecording {
+                    // === Recording mode: Cancel + Done (send hidden to prevent accidental sends) ===
                     Button(action: {
-                        onPermissionModeChange(isSafe ? "bypassPermissions" : "default")
+                        if isLLMRecording { cancelLLMRecording() }
+                        else { speechService.stopRecording() }
                     }) {
-                        HStack(spacing: 3) {
-                            Image(systemName: isSafe ? "shield" : "bolt.fill")
-                                .font(.system(size: 10))
-                            Text(isSafe ? "Safe" : "YOLO")
-                                .font(.caption2).bold()
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Cancel")
+                                .font(.caption)
+                                .fontWeight(.medium)
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(isSafe ? Color.green.opacity(0.12) : Color.orange.opacity(0.12))
-                        .foregroundColor(isSafe ? .green : .orange)
-                        .cornerRadius(8)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color(UIColor.tertiarySystemFill))
+                        .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
 
-                    // Attach images
-                    PhotosPicker(selection: $selectedItem, matching: .images) {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: 17))
-                            .foregroundColor(.secondary)
-                            .frame(width: 34, height: 34)
-                    }
-                    .onChange(of: selectedItem) { _, newItem in
-                        Task {
-                            if let data = try? await newItem?.loadTransferable(type: Data.self),
-                               let image = UIImage(data: data),
-                               let attachment = ImageCompressor.compressImage(image) {
-                                attachments.append(attachment)
-                            }
-                        }
-                    }
+                    Spacer()
 
-                    // MCP toggle
-                    if !availableMcps.isEmpty {
+                    Button(action: {
+                        if isLLMRecording { stopLLMRecording() }
+                        else { speechService.stopRecording() }
+                    }) {
+                        HStack(spacing: 5) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white)
+                                .frame(width: 10, height: 10)
+                            Text("Done")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                    }
+                } else {
+                    // === Normal mode ===
+                    // Left: permission mode + action buttons
+                    HStack(spacing: 2) {
+                        // Safe / YOLO toggle
                         Button(action: {
-                            if !sdkLoaded && !sdkProbing, let probe = onProbeSdk {
-                                sdkProbing = true
-                                probe()
-                            } else {
-                                showMcpPopover.toggle()
-                            }
+                            onPermissionModeChange(isSafe ? "bypassPermissions" : "default")
                         }) {
-                            if sdkProbing {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                    .frame(width: 34, height: 34)
-                            } else {
-                                Image(systemName: "puzzlepiece.extension")
-                                    .font(.system(size: 15))
-                                    .foregroundColor(
-                                        enabledMcps.count < availableMcps.count
-                                            ? .orange
-                                            : sdkLoaded ? .green : .secondary
-                                    )
-                                    .frame(width: 34, height: 34)
+                            HStack(spacing: 3) {
+                                Image(systemName: isSafe ? "shield" : "bolt.fill")
+                                    .font(.system(size: 10))
+                                Text(isSafe ? "Safe" : "YOLO")
+                                    .font(.caption2).bold()
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(isSafe ? Color.green.opacity(0.12) : Color.orange.opacity(0.12))
+                            .foregroundColor(isSafe ? .green : .orange)
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+
+                        // Attach images
+                        PhotosPicker(selection: $selectedItem, matching: .images) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 17))
+                                .foregroundColor(.secondary)
+                                .frame(width: 34, height: 34)
+                        }
+                        .onChange(of: selectedItem) { _, newItem in
+                            Task {
+                                if let data = try? await newItem?.loadTransferable(type: Data.self),
+                                   let image = UIImage(data: data),
+                                   let attachment = ImageCompressor.compressImage(image) {
+                                    attachments.append(attachment)
+                                }
                             }
                         }
-                        .disabled(sdkProbing)
-                        .sheet(isPresented: $showMcpPopover) {
-                            McpPanelView(
-                                mcps: availableMcps,
-                                enabledMcps: enabledMcps,
-                                onToggle: onToggleMcp,
-                                onSkillTap: { skillName in
-                                    text = "/\(skillName) "
-                                    showMcpPopover = false
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                        isFocused = true
-                                    }
-                                },
-                                onDismiss: { showMcpPopover = false }
-                            )
-                            .presentationDetents([.medium, .large])
-                            .presentationDragIndicator(.visible)
-                        }
-                        .onChange(of: sdkLoaded) { _, loaded in
-                            if sdkProbing && loaded {
-                                sdkProbing = false
-                                showMcpPopover = true
+
+                        // MCP toggle
+                        if !availableMcps.isEmpty {
+                            Button(action: {
+                                if !sdkLoaded && !sdkProbing, let probe = onProbeSdk {
+                                    sdkProbing = true
+                                    probe()
+                                } else {
+                                    showMcpPopover.toggle()
+                                }
+                            }) {
+                                if sdkProbing {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .frame(width: 34, height: 34)
+                                } else {
+                                    Image(systemName: "puzzlepiece.extension")
+                                        .font(.system(size: 15))
+                                        .foregroundColor(
+                                            enabledMcps.count < availableMcps.count
+                                                ? .orange
+                                                : sdkLoaded ? .green : .secondary
+                                        )
+                                        .frame(width: 34, height: 34)
+                                }
                             }
+                            .disabled(sdkProbing)
+                            .sheet(isPresented: $showMcpPopover) {
+                                McpPanelView(
+                                    mcps: availableMcps,
+                                    enabledMcps: enabledMcps,
+                                    onToggle: onToggleMcp,
+                                    onSkillTap: { skillName in
+                                        text = "/\(skillName) "
+                                        showMcpPopover = false
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                            isFocused = true
+                                        }
+                                    },
+                                    onDismiss: { showMcpPopover = false }
+                                )
+                                .presentationDetents([.medium, .large])
+                                .presentationDragIndicator(.visible)
+                            }
+                            .onChange(of: sdkLoaded) { _, loaded in
+                                if sdkProbing && loaded {
+                                    sdkProbing = false
+                                    showMcpPopover = true
+                                }
+                            }
+                        }
+
+                        // Attachment count indicator
+                        if !attachments.isEmpty {
+                            let imageCount = attachments.filter { $0.mediaType.hasPrefix("image/") }.count
+                            let fileCount = attachments.count - imageCount
+                            let label = [
+                                imageCount > 0 ? "\(imageCount) image\(imageCount > 1 ? "s" : "")" : nil,
+                                fileCount > 0 ? "\(fileCount) file\(fileCount > 1 ? "s" : "")" : nil
+                            ].compactMap { $0 }.joined(separator: ", ")
+                            Text(label)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .padding(.leading, 4)
                         }
                     }
 
-                    // Attachment count indicator
-                    if !attachments.isEmpty {
-                        let imageCount = attachments.filter { $0.mediaType.hasPrefix("image/") }.count
-                        let fileCount = attachments.count - imageCount
-                        let label = [
-                            imageCount > 0 ? "\(imageCount) image\(imageCount > 1 ? "s" : "")" : nil,
-                            fileCount > 0 ? "\(fileCount) file\(fileCount > 1 ? "s" : "")" : nil
-                        ].compactMap { $0 }.joined(separator: ", ")
-                        Text(label)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 4)
-                    }
-                }
+                    Spacer()
 
-                Spacer()
-
-                // Right: voice + send (+ abort when running)
-                HStack(spacing: 8) {
-                    // Voice input — two modes
-                    if speechService.isRecording {
-                        // Apple speech is active — tap to stop
-                        Button(action: { speechService.stopRecording() }) {
-                            micButtonLabel
-                        }
-                    } else if isLLMRecording {
-                        // LLM recording is active — tap to stop
-                        Button(action: { stopLLMRecording() }) {
-                            llmMicButtonLabel
-                        }
-                    } else {
-                        // Idle — two-level menu
+                    // Right: voice + send
+                    HStack(spacing: 12) {
+                        // Voice input menu
                         Menu {
                             // Level 1: LLM Voice
                             Button {
@@ -392,22 +423,23 @@ struct InputBarView: View {
                                 toggleRecording()
                             }
                         }
-                    }
 
-                    // Send button (always visible)
-                    Button(action: send) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                            .background(canSend ? Color.primary : Color.gray.opacity(0.3))
-                            .foregroundColor(canSend ? Color(UIColor.systemBackground) : .gray)
-                            .clipShape(Circle())
+                        // Send button
+                        Button(action: send) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                                .background(canSend ? Color.primary : Color.gray.opacity(0.3))
+                                .foregroundColor(canSend ? Color(UIColor.systemBackground) : .gray)
+                                .clipShape(Circle())
+                        }
+                        .disabled(!canSend)
                     }
-                    .disabled(!canSend)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 4)
+            .animation(.easeInOut(duration: 0.2), value: speechService.isRecording || isLLMRecording)
         }
         .background(Color(UIColor.systemBackground))
         .cornerRadius(16)
@@ -667,12 +699,6 @@ struct InputBarView: View {
     }
 
     private func send() {
-        if speechService.isRecording {
-            speechService.stopRecording()
-        }
-        if isLLMRecording {
-            stopLLMRecording()
-        }
         showFileMention = false
         mentionStartIndex = nil
         let msg = text.trimmingCharacters(in: .whitespacesAndNewlines)
