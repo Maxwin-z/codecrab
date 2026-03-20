@@ -774,7 +774,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 {message.images.map((img, i) => (
                   <img
                     key={i}
-                    src={`data:${img.mediaType};base64,${img.data}`}
+                    src={img.url || `data:${img.mediaType};base64,${img.data}`}
                     alt={img.name || `Image ${i + 1}`}
                     className="max-h-32 max-w-48 rounded-lg object-cover"
                   />

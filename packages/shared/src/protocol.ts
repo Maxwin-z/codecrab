@@ -325,6 +325,8 @@ export interface ChatMessageSummary {
   timestamp: number
   // Lightweight tool call info for history display
   toolCalls?: { name: string; id: string; input?: unknown; inputSummary: string; resultPreview?: string; isError?: boolean }[]
+  // Image references (URL-based, no base64 data) for history display
+  images?: { url: string; mediaType: string; name?: string }[]
   costUsd?: number
   durationMs?: number
 }
@@ -400,9 +402,10 @@ export type ServerMessage =
 // ============ Image Attachments ============
 
 export interface ImageAttachment {
-  data: string       // base64-encoded image data
+  data: string       // base64-encoded image data (empty when url is present)
   mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
   name?: string      // original filename
+  url?: string       // server-hosted image URL (when stored on disk)
 }
 
 // ============ Shared Types ============

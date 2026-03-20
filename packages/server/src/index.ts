@@ -18,6 +18,7 @@ import { chromeRouter } from './mcp/chrome/index.js'
 import { cronRouter, initCronSystem } from './mcp/cron/index.js'
 import { pushRouter, initPush } from './mcp/push/index.js'
 import soulRouter from './api/soul.js'
+import imagesRouter from './api/images.js'
 import { ensureSoulProject } from './soul/project.js'
 import { getAvailableMcps } from './mcp/index.js'
 import debugRouter from './api/debug.js'
@@ -105,6 +106,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<{ p
 
   // Public debug endpoints (no auth required, for troubleshooting)
   app.use('/api/debug', debugRouter)
+
+  // Public image serving (content-addressed, hash-based filenames — no auth needed)
+  app.use('/api/images', imagesRouter)
 
   // Channel system — create manager with engine context (DI to avoid circular deps)
   const PROJECTS_FILE = path.join(os.homedir(), '.codecrab', 'projects.json')

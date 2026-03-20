@@ -38,4 +38,12 @@ struct ImageAttachment: Codable, Equatable {
     let data: String
     let mediaType: String
     let name: String?
+    let url: String?
+
+    init(data: String, mediaType: String, name: String? = nil, url: String? = nil) {
+        self.data = data
+        self.mediaType = mediaType
+        self.name = name
+        self.url = url
+    }
 }

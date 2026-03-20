@@ -803,10 +803,23 @@ class WebSocketService: ObservableObject {
             // Strip inline metadata tags from assistant messages (defensive cleanup)
             let cleanContent = (role == "assistant") ? cleanStreamingText(content) : content
 
+            // Parse image refs from summary (URL-based, no base64)
+            var images: [ImageAttachment]? = nil
+            if let imagesArray = msgDict["images"] as? [[String: Any]], !imagesArray.isEmpty {
+                images = imagesArray.compactMap { imgDict in
+                    guard let mediaType = imgDict["mediaType"] as? String else { return nil }
+                    let url = imgDict["url"] as? String
+                    let name = imgDict["name"] as? String
+                    return ImageAttachment(data: "", mediaType: mediaType, name: name, url: url)
+                }
+                if images?.isEmpty == true { images = nil }
+            }
+
             let msg = ChatMessage(
                 id: id,
                 role: role,
                 content: cleanContent,
+                images: images,
                 toolCalls: toolCalls,
                 costUsd: costUsd,
                 durationMs: durationMs,

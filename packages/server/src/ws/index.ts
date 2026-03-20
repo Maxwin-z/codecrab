@@ -37,6 +37,7 @@ import {
 import { QueryQueue } from '../engine/query-queue.js'
 import { sendQueryCompletionPush } from '../mcp/push/index.js'
 import { triggerSoulEvolution } from '../soul/agent.js'
+import { saveAndConvertImages } from '../images.js'
 import type { QueuedQuery, QueryResult, QueryTimerState } from '../engine/query-queue.js'
 
 // Export for API use
@@ -1303,6 +1304,11 @@ function toMessageSummary(message: ChatMessage): import('@codecrab/shared').Chat
     })
   }
 
+  // Include image URL refs (no base64 data) for history display
+  const images = hasImages
+    ? message.images!.map((img) => ({ url: img.url || '', mediaType: img.mediaType, name: img.name }))
+    : undefined
+
   return {
     id: message.id,
     role: message.role,
@@ -1313,6 +1319,7 @@ function toMessageSummary(message: ChatMessage): import('@codecrab/shared').Chat
     hasImages,
     timestamp: message.timestamp,
     toolCalls,
+    images,
     costUsd: message.costUsd,
     durationMs: message.durationMs,
   }
@@ -2109,13 +2116,17 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         session = getOrCreateSessionForProject(client, client.clientId, projectId, clientState)
       }
 
-      // Create a new turn for this prompt
+      // Save images to disk and convert to URL refs (keep original base64 for SDK)
+      const originalImages = msg.images?.length ? msg.images : undefined
+      const urlImages = originalImages ? await saveAndConvertImages(originalImages) : undefined
+
+      // Create a new turn for this prompt (store URL refs, not base64)
       const turnTimestamp = Date.now()
       session.turns.push({
         prompt: {
           type: 'user',
           text: msg.prompt,
-          images: msg.images?.length ? msg.images : undefined,
+          images: urlImages,
         },
         agent: { messages: [], debugEvents: [] },
         timestamp: turnTimestamp,
@@ -2128,12 +2139,12 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
 
       persistSession(session)
 
-      // Build user message (will be broadcast when query starts executing)
+      // Build user message with URL refs (will be broadcast when query starts executing)
       const userMsg: ChatMessage = {
         id: `turn-${turnTimestamp}`,
         role: 'user',
         content: msg.prompt,
-        images: msg.images?.length ? msg.images : undefined,
+        images: urlImages,
         timestamp: turnTimestamp,
       }
 

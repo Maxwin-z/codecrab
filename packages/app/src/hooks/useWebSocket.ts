@@ -284,6 +284,9 @@ export function useWebSocket(): UseWebSocketReturn {
         isError: tc.isError,
       }))
     }
+    if (summary.images?.length) {
+      base.images = summary.images
+    }
     return base
   }
 
@@ -671,26 +674,7 @@ export function useWebSocket(): UseWebSocketReturn {
           const target = getTargetSession()
           if (target) {
             const { sState, isViewing } = target
-            sState.messages = msg.messages.map((summary: any) => {
-              const base: ChatMessage = {
-                id: summary.id,
-                role: summary.role,
-                content: stripMetaTags(summary.content || ''),
-                timestamp: summary.timestamp,
-              }
-              if (summary.costUsd != null) base.costUsd = summary.costUsd
-              if (summary.durationMs != null) base.durationMs = summary.durationMs
-              if (summary.toolCalls?.length) {
-                base.toolCalls = summary.toolCalls.map((tc: any) => ({
-                  name: tc.name,
-                  id: tc.id,
-                  input: tc.inputSummary || '',
-                  result: tc.resultPreview,
-                  isError: tc.isError,
-                }))
-              }
-              return base
-            })
+            sState.messages = msg.messages.map(parseSummaryToMessage)
             if (isViewing) needsRender = true
           }
           break
