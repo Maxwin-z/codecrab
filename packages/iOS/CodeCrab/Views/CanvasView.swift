@@ -47,7 +47,8 @@ struct CanvasView: View {
         let exportRect = bounds.insetBy(dx: -padding, dy: -padding)
         let scale = UIScreen.main.scale
 
-        // Render with background color matching the current theme
+        // Render with background color and trait collection matching the current theme
+        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
         let renderer = UIGraphicsImageRenderer(size: CGSize(
             width: exportRect.width * scale,
             height: exportRect.height * scale
@@ -56,7 +57,10 @@ struct CanvasView: View {
             let bgColor: UIColor = colorScheme == .dark ? .black : .white
             bgColor.setFill()
             ctx.fill(CGRect(origin: .zero, size: renderer.format.bounds.size))
-            let drawingImage = drawing.image(from: exportRect, scale: scale)
+            var drawingImage: UIImage!
+            traits.performAsCurrent {
+                drawingImage = drawing.image(from: exportRect, scale: scale)
+            }
             drawingImage.draw(in: CGRect(origin: .zero, size: renderer.format.bounds.size))
         }
         onDone(image)

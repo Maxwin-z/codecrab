@@ -652,31 +652,29 @@ struct MessageBubbleView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
                 if let images = message.images, !images.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack {
-                            ForEach(images.indices, id: \.self) { idx in
-                                let img = images[idx]
-                                if let urlStr = img.url, !urlStr.isEmpty,
-                                   let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url"),
-                                   let fullURL = URL(string: serverURL + urlStr) {
-                                    AsyncImage(url: fullURL) { image in
-                                        image
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(maxHeight: 128)
-                                            .cornerRadius(8)
-                                    } placeholder: {
-                                        ProgressView()
-                                            .frame(width: 64, height: 64)
-                                    }
-                                } else if let data = Data(base64Encoded: img.data),
-                                          let uiImage = UIImage(data: data) {
-                                    Image(uiImage: uiImage)
+                    HStack(spacing: 8) {
+                        ForEach(images.indices, id: \.self) { idx in
+                            let img = images[idx]
+                            if let urlStr = img.url, !urlStr.isEmpty,
+                               let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url"),
+                               let fullURL = URL(string: serverURL + urlStr) {
+                                AsyncImage(url: fullURL) { image in
+                                    image
                                         .resizable()
                                         .scaledToFit()
                                         .frame(maxHeight: 128)
                                         .cornerRadius(8)
+                                } placeholder: {
+                                    ProgressView()
+                                        .frame(width: 64, height: 64)
                                 }
+                            } else if let data = Data(base64Encoded: img.data),
+                                      let uiImage = UIImage(data: data) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxHeight: 128)
+                                    .cornerRadius(8)
                             }
                         }
                     }
