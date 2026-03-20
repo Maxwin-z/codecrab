@@ -3,7 +3,7 @@ import PhotosUI
 import Speech
 
 struct InputBarView: View {
-    let onSend: (String, [ImageAttachment]?, [String]?) -> Void
+    let onSend: (String, [ImageAttachment]?, [String]?) -> Bool
     let onAbort: () -> Void
     let onPermissionModeChange: (String) -> Void
     let isRunning: Bool
@@ -727,7 +727,8 @@ struct InputBarView: View {
         let msg = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty || !attachments.isEmpty else { return }
         speechService.learnFromEdit(msg)
-        onSend(msg, attachments.isEmpty ? nil : attachments, enabledMcps)
+        let sent = onSend(msg, attachments.isEmpty ? nil : attachments, enabledMcps)
+        guard sent else { return }
         text = ""
         attachments.removeAll()
     }

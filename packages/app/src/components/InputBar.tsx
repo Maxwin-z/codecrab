@@ -12,7 +12,7 @@ interface PreviewImage {
 }
 
 interface InputBarProps {
-  onSend: (text: string, images?: ImageAttachment[], enabledMcps?: string[]) => void
+  onSend: (text: string, images?: ImageAttachment[], enabledMcps?: string[]) => boolean
   onAbort: () => void
   isRunning: boolean
   isAborting?: boolean
@@ -175,7 +175,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     if (!trimmed || disabled) return
 
     const attachments = images.length > 0 ? images.map((img) => img.attachment) : undefined
-    onSend(trimmed, attachments, enabledMcps)
+    const sent = onSend(trimmed, attachments, enabledMcps)
+    if (!sent) return
 
     setText('')
     setImages([])

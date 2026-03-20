@@ -333,9 +333,9 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
 
   const showEmptyState = ws.messages.length === 0 && !ws.streamingText && !ws.streamingThinking && !ws.isRunning
 
-  const handleSend = (text: string, images?: ImageAttachment[], mcps?: string[]) => {
+  const handleSend = (text: string, images?: ImageAttachment[], mcps?: string[]): boolean => {
     if (text.startsWith('/')) {
-      ws.sendCommand(text)
+      return ws.sendCommand(text)
     } else {
       // Separate enabled custom MCPs from disabled SDK servers/skills
       const enabledCustomMcps = mcps?.filter((id) => !id.startsWith('sdk:') && !id.startsWith('skill:'))
@@ -345,7 +345,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
       const disabledSkills = skillEntries
         .filter((e) => !enabledIds.has(e.id))
         .map((e) => e.name)
-      ws.sendPrompt(
+      return ws.sendPrompt(
         text,
         images,
         enabledCustomMcps,

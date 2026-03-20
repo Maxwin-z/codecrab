@@ -890,21 +890,22 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [connect])
 
   // Send helper: stamps projectId + sessionId (viewingSessionId) on outgoing messages
-  const sendWithProject = useCallback((msg: Record<string, unknown>) => {
+  const sendWithProject = useCallback((msg: Record<string, unknown>): boolean => {
     const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
     const pid = activeProjectIdRef.current
-    if (!pid) return
+    if (!pid) return false
     const pState = projectStatesRef.current.get(pid)
     ws.send(JSON.stringify({
       projectId: pid,
       sessionId: pState?.sessionId || undefined,
       ...msg,
     }))
+    return true
   }, [])
 
-  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => {
-    sendWithProject({
+  const sendPrompt = useCallback((prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]): boolean => {
+    return sendWithProject({
       type: 'prompt',
       prompt,
       ...(images?.length ? { images } : {}),
@@ -914,10 +915,10 @@ export function useWebSocket(): UseWebSocketReturn {
     })
   }, [sendWithProject])
 
-  const sendCommand = useCallback((command: string) => {
+  const sendCommand = useCallback((command: string): boolean => {
     // Don't add user message locally — the server broadcasts user_message back
     // for all non-/clear commands (they're re-routed as prompts on the server).
-    sendWithProject({ type: 'command', command })
+    return sendWithProject({ type: 'command', command })
   }, [sendWithProject])
 
   const abort = useCallback((queryId?: string) => {

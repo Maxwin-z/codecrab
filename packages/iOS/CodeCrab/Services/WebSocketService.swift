@@ -1058,17 +1058,20 @@ class WebSocketService: ObservableObject {
         return trimmed.count > 60 ? String(trimmed.prefix(57)) + "..." : trimmed
     }
 
-    private func sendWebSocketMessage(_ dict: [String: Any]) {
+    @discardableResult
+    private func sendWebSocketMessage(_ dict: [String: Any]) -> Bool {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
-              let jsonString = String(data: data, encoding: .utf8) else { return }
-        let message = URLSessionWebSocketTask.Message.string(jsonString)
-        webSocketTask?.send(message) { _ in }
+              let jsonString = String(data: data, encoding: .utf8) else { return false }
+        guard let task = webSocketTask else { return false }
+        task.send(.string(jsonString)) { _ in }
+        return true
     }
 
     // MARK: - Actions
 
-    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil, disabledSdkServers: [String]? = nil, disabledSkills: [String]? = nil) {
-        guard let projectId = activeProjectId else { return }
+    @discardableResult
+    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil, disabledSdkServers: [String]? = nil, disabledSkills: [String]? = nil) -> Bool {
+        guard let projectId = activeProjectId else { return false }
 
         var payload: [String: Any] = [
             "type": "prompt",
@@ -1088,12 +1091,13 @@ class WebSocketService: ObservableObject {
         if let disabled = disabledSkills, !disabled.isEmpty {
             payload["disabledSkills"] = disabled
         }
-        sendWebSocketMessage(payload)
+        return sendWebSocketMessage(payload)
     }
 
-    func sendCommand(_ command: String) {
-        guard let projectId = activeProjectId else { return }
-        sendWebSocketMessage([
+    @discardableResult
+    func sendCommand(_ command: String) -> Bool {
+        guard let projectId = activeProjectId else { return false }
+        return sendWebSocketMessage([
             "type": "command",
             "command": command,
             "projectId": projectId,

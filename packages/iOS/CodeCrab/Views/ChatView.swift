@@ -397,12 +397,13 @@ struct ChatView: View {
         }
     }
 
-    private func handleSend(text: String, images: [ImageAttachment]?, mcps: [String]?) {
+    @discardableResult
+    private func handleSend(text: String, images: [ImageAttachment]?, mcps: [String]?) -> Bool {
         isNearBottom = true
         isInputFocused = false
         wsService.latestSummary = nil
         if text.hasPrefix("/") {
-            wsService.sendCommand(text)
+            return wsService.sendCommand(text)
         } else {
             // Separate enabled custom MCPs from disabled SDK servers/skills (mirrors web)
             let enabledCustomMcps = mcps?.filter { !$0.hasPrefix("sdk:") && !$0.hasPrefix("skill:") }
@@ -412,7 +413,7 @@ struct ChatView: View {
             let disabledSkills = skillEntries
                 .filter { !enabledIds.contains($0.id) }
                 .map { $0.name }
-            wsService.sendPrompt(
+            return wsService.sendPrompt(
                 text,
                 images: images,
                 enabledMcps: enabledCustomMcps,
