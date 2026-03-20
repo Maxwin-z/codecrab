@@ -2,6 +2,7 @@
 import { useState, useMemo } from 'react'
 import type { ChatMessage, DebugEvent } from '@codecrab/shared'
 import { stripMetaTags } from '@/lib/utils'
+import { FileLinkedText } from './FileLinkedText'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -412,7 +413,7 @@ function MessageModeText({ event }: { event: DebugEvent }) {
   if (!content) return null
   return (
     <div className="text-sm font-mono whitespace-pre-wrap break-words">
-      {content}
+      <FileLinkedText text={content} />
     </div>
   )
 }
@@ -742,7 +743,7 @@ function SdkEventInline({ event }: { event: DebugEvent }) {
       </div>
       {expanded && fullContent && (
         <div className="pl-4 mt-0.5 whitespace-pre-wrap break-all text-muted-foreground">
-          {fullContent.length > 2000 ? fullContent.slice(0, 2000) + '\n... (truncated)' : fullContent}
+          <FileLinkedText text={fullContent.length > 2000 ? fullContent.slice(0, 2000) + '\n... (truncated)' : fullContent} />
         </div>
       )}
     </div>
@@ -827,7 +828,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       )}
       {message.content && (
         <div className="bg-muted rounded-lg px-4 py-2 min-w-0">
-          <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+          <div className="text-sm whitespace-pre-wrap">
+            <FileLinkedText text={message.content} />
+          </div>
         </div>
       )}
       <span className="text-[10px] text-muted-foreground px-1 mt-1 block">{formatTimestamp(message.timestamp)}</span>

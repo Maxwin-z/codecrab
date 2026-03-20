@@ -175,6 +175,8 @@ struct MessageModeEventView: View {
 
 private struct MessageModeTextView: View {
     let event: SdkEvent
+    @State private var existingPaths: Set<String> = []
+    @State private var previewFilePath: String? = nil
 
     private var content: String {
         guard let data = event.data, case .string(let c) = data["content"] else { return "" }
@@ -186,12 +188,43 @@ private struct MessageModeTextView: View {
 
     var body: some View {
         if !content.isEmpty {
-            InlineSelectableText(
-                text: content,
-                font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
-                textColor: .label
-            )
+            Group {
+                if existingPaths.isEmpty {
+                    InlineSelectableText(
+                        text: content,
+                        font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
+                        textColor: .label
+                    )
+                } else {
+                    FileLinkedTextView(
+                        text: content,
+                        font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
+                        textColor: .label,
+                        existingPaths: existingPaths,
+                        onPathTap: { path in
+                            previewFilePath = path
+                        }
+                    )
+                }
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .sheet(isPresented: Binding(
+                get: { previewFilePath != nil },
+                set: { if !$0 { previewFilePath = nil } }
+            )) {
+                if let path = previewFilePath {
+                    FilePreviewSheet(
+                        filePath: path,
+                        fileName: (path as NSString).lastPathComponent
+                    )
+                }
+            }
+            .task(id: content) {
+                let detected = extractFilePaths(from: content)
+                guard !detected.isEmpty else { return }
+                let found = await probeFilePaths(detected)
+                existingPaths = found
+            }
         }
     }
 }

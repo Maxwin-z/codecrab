@@ -316,6 +316,29 @@ router.get('/raw', async (req, res) => {
   }
 })
 
+// Probe file existence (batch)
+router.post('/probe', async (req, res) => {
+  const { paths } = req.body as { paths: string[] }
+  if (!Array.isArray(paths) || paths.length === 0) {
+    res.status(400).json({ error: 'Missing paths array' })
+    return
+  }
+  const limited = paths.slice(0, 50)
+  const results: Record<string, { exists: boolean; isFile: boolean; size?: number }> = {}
+  await Promise.all(
+    limited.map(async (p) => {
+      try {
+        const resolved = path.resolve(p)
+        const stat = await fs.stat(resolved)
+        results[p] = { exists: true, isFile: stat.isFile(), size: stat.size }
+      } catch {
+        results[p] = { exists: false, isFile: false }
+      }
+    }),
+  )
+  res.json({ results })
+})
+
 // Create new folder
 router.post('/mkdir', async (req, res) => {
   const { path: dirPath, name } = req.body as { path?: string; name?: string }
