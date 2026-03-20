@@ -231,14 +231,6 @@ struct LoginView: View {
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                         Spacer()
-                                        Button {
-                                            auth.removeFromServerHistory(url)
-                                        } label: {
-                                            Image(systemName: "xmark")
-                                                .font(.caption2)
-                                                .foregroundColor(.secondary)
-                                                .padding(6)
-                                        }
                                     }
                                     .padding(.leading, 10)
                                     .padding(.vertical, 6)
