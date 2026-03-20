@@ -838,7 +838,7 @@ export async function getSessionHistory(sessionId: string, afterTurn?: number): 
   // Always include the in-progress turn even if previously fetched,
   // because its content keeps growing as the agent works.
   if (afterTurn) {
-    turns = turns.filter(t => t.timestamp > afterTurn || t === inProgressTurn)
+    turns = turns.filter(t => t.timestamp >= afterTurn || t === inProgressTurn)
   }
 
   // User messages as summaries

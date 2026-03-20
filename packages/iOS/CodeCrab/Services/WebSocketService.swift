@@ -885,24 +885,30 @@ class WebSocketService: ObservableObject {
                 if let messagesJson = json["messages"] as? [[String: Any]], !messagesJson.isEmpty {
                     let newMessages = parseMessageHistory(messagesJson)
                     if sid == self.sessionId {
-                        if isIncremental, let pts = processingTurnTs {
-                            // Keep cached messages before the in-progress turn, replace the rest
-                            self.messages = self.messages.filter { $0.timestamp < pts } + newMessages
-                            // Clear streaming state — the snapshot has all completed content;
-                            // ongoing streaming will resume via WebSocket deltas.
-                            self.streamingText = ""
-                            self.streamingThinking = ""
+                        if isIncremental {
+                            // Replace messages from the latest queried turn onwards with fresh server data.
+                            // The server returns turns with ts >= afterTurn, so discard cached messages
+                            // from that point to avoid duplicates and ensure the latest turn is complete.
+                            let cutoffTs = lastUserTs ?? 0
+                            self.messages = self.messages.filter { $0.timestamp < cutoffTs } + newMessages
+                            if processingTurnTs != nil {
+                                self.streamingText = ""
+                                self.streamingThinking = ""
+                            }
                         } else {
-                            self.messages = isIncremental ? self.messages + newMessages : newMessages
+                            self.messages = newMessages
                         }
                     } else if let pid = self.activeProjectId {
                         modifySessionState(projectId: pid, sessionId: sid) {
-                            if isIncremental, let pts = processingTurnTs {
-                                $0.messages = $0.messages.filter { $0.timestamp < pts } + newMessages
-                                $0.streamingText = ""
-                                $0.streamingThinking = ""
+                            if isIncremental {
+                                let cutoffTs = lastUserTs ?? 0
+                                $0.messages = $0.messages.filter { $0.timestamp < cutoffTs } + newMessages
+                                if processingTurnTs != nil {
+                                    $0.streamingText = ""
+                                    $0.streamingThinking = ""
+                                }
                             } else {
-                                $0.messages = isIncremental ? $0.messages + newMessages : newMessages
+                                $0.messages = newMessages
                             }
                         }
                     }
@@ -913,18 +919,20 @@ class WebSocketService: ObservableObject {
                 if let eventsArray = json["sdkEvents"] as? [[String: Any]], !eventsArray.isEmpty {
                     let newEvents = eventsArray.compactMap { parseSdkEvent($0) }
                     if sid == self.sessionId {
-                        if isIncremental, let pts = processingTurnTs {
-                            // SDK events have a ts field; keep events before the in-progress turn
-                            self.sdkEvents = self.sdkEvents.filter { $0.ts < pts } + newEvents
+                        if isIncremental {
+                            // Replace events from the latest queried turn onwards to ensure completeness.
+                            let cutoffTs = lastUserTs ?? 0
+                            self.sdkEvents = self.sdkEvents.filter { $0.ts < cutoffTs } + newEvents
                         } else {
-                            self.sdkEvents = isIncremental ? self.sdkEvents + newEvents : newEvents
+                            self.sdkEvents = newEvents
                         }
                     } else if let pid = self.activeProjectId {
                         modifySessionState(projectId: pid, sessionId: sid) {
-                            if isIncremental, let pts = processingTurnTs {
-                                $0.sdkEvents = $0.sdkEvents.filter { $0.ts < pts } + newEvents
+                            if isIncremental {
+                                let cutoffTs = lastUserTs ?? 0
+                                $0.sdkEvents = $0.sdkEvents.filter { $0.ts < cutoffTs } + newEvents
                             } else {
-                                $0.sdkEvents = isIncremental ? $0.sdkEvents + newEvents : newEvents
+                                $0.sdkEvents = newEvents
                             }
                         }
                     }
