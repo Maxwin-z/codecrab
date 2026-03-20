@@ -43,8 +43,8 @@ struct InputBarView: View {
     @State private var llmRecordingTimer: Timer?
     @State private var isLLMTranscribing = false
     @State private var voiceHint: String? = nil
-    private let llmRecorder = LLMAudioRecorderService()
-    private let llmVoiceService = MultimodalVoiceService()
+    @State private var llmRecorder = LLMAudioRecorderService()
+    @State private var llmVoiceService = MultimodalVoiceService()
 
     private var isSafe: Bool { permissionMode == "default" }
     private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty }
