@@ -5,4 +5,5 @@ export interface Project {
   icon: string
   createdAt: number
   updatedAt: number
+  lastActivityAt?: number
 }

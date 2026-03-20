@@ -1238,6 +1238,20 @@ export function deleteSession(sessionId: string): boolean {
   return deleted
 }
 
+// Get the latest session lastModified for each project (for enriching REST API responses)
+export async function getProjectLastActivityMap(): Promise<Map<string, number>> {
+  await syncSessionsFromDisk()
+  const result = new Map<string, number>()
+  for (const session of sessions.values()) {
+    if (!session.projectId || session.turns.length === 0) continue
+    const existing = result.get(session.projectId)
+    if (!existing || session.lastModified > existing) {
+      result.set(session.projectId, session.lastModified)
+    }
+  }
+  return result
+}
+
 // Broadcast message to all clients subscribed to a project
 export function broadcastToProject(projectId: string | undefined, message: ServerMessage, excludeConnectionId?: string) {
   if (!projectId) return

@@ -3,6 +3,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import type { Project } from '@codecrab/shared'
+import { getProjectLastActivityMap } from '../ws/index.js'
 
 const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
 const PROJECTS_FILE = path.join(CONFIG_DIR, 'projects.json')
@@ -28,11 +29,16 @@ async function writeProjects(projects: Project[]) {
 
 const router: RouterType = Router()
 
-// List all projects (sorted by updatedAt desc)
+// List all projects (sorted by last activity desc)
 router.get('/', async (_req, res) => {
   const projects = await readProjects()
-  projects.sort((a, b) => b.updatedAt - a.updatedAt)
-  res.json(projects)
+  const activityMap = await getProjectLastActivityMap()
+  const enriched = projects.map((p) => ({
+    ...p,
+    lastActivityAt: activityMap.get(p.id) ?? p.updatedAt,
+  }))
+  enriched.sort((a, b) => b.lastActivityAt! - a.lastActivityAt!)
+  res.json(enriched)
 })
 
 // Create project

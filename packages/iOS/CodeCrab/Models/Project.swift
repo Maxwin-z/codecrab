@@ -7,6 +7,7 @@ struct Project: Codable, Identifiable, Hashable, Equatable {
     let icon: String
     let createdAt: Double
     let updatedAt: Double
+    let lastActivityAt: Double?
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)

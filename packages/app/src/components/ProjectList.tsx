@@ -156,7 +156,7 @@ export function ProjectList({ onSelect, onUnauthorized }: ProjectListProps) {
                   <p className="text-xs text-muted-foreground break-all mt-0.5">{project.path}</p>
                   <div className="flex items-center justify-between mt-2">
                     <p className="text-xs text-muted-foreground/60">
-                      {formatDate(project.updatedAt)}
+                      {formatDate(project.lastActivityAt ?? project.updatedAt)}
                     </p>
                     {isProcessing ? (
                       <span className="text-xs text-amber-500 font-medium">Running</span>

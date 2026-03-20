@@ -28,12 +28,13 @@ const router: RouterType = Router()
 // List directory contents
 router.get('/', async (req, res) => {
   const dirPath = (req.query.path as string) || os.homedir()
+  const showHidden = req.query.showHidden === '1'
   try {
     const resolved = path.resolve(dirPath)
     const entries = await fs.readdir(resolved, { withFileTypes: true })
     const items = await Promise.all(
       entries
-        .filter((e) => !e.name.startsWith('.'))
+        .filter((e) => showHidden || !e.name.startsWith('.'))
         .filter((e) => !e.isDirectory() || !SKIP_DIRS.has(e.name))
         .map(async (e) => {
           const fullPath = path.join(resolved, e.name)
@@ -193,6 +194,8 @@ router.get('/search', async (req, res) => {
     const results: { name: string; path: string; relativePath: string; isDirectory: boolean }[] = []
     const MAX_DEPTH = 6
 
+    const showHidden = req.query.showHidden === '1'
+
     async function walk(dir: string, depth: number) {
       if (depth > MAX_DEPTH || results.length >= limit) return
       let entries
@@ -203,7 +206,7 @@ router.get('/search', async (req, res) => {
       }
       for (const e of entries) {
         if (results.length >= limit) break
-        if (e.name.startsWith('.')) continue
+        if (!showHidden && e.name.startsWith('.')) continue
         const fullPath = path.join(dir, e.name)
         const relativePath = path.relative(resolved, fullPath)
         if (e.isDirectory()) {

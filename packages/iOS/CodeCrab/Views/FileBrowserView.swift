@@ -96,6 +96,7 @@ struct FileBrowserView: View {
     @State private var parent: String? = nil
     @State private var isLoading = false
     @State private var searchText = ""
+    @State private var showHidden = false
     @State private var selectedFile: EnhancedFileEntry? = nil
     @State private var navigationStack: [String] = []
 
@@ -201,6 +202,17 @@ struct FileBrowserView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showHidden.toggle()
+                        if !currentPath.isEmpty {
+                            navigate(to: currentPath)
+                        }
+                    }) {
+                        Image(systemName: showHidden ? "eye" : "eye.slash")
+                            .font(.system(size: 15))
+                    }
                 }
             }
             .fullScreenCover(item: $selectedFile) { file in
@@ -326,7 +338,8 @@ struct FileBrowserView: View {
         Task {
             do {
                 let urlPath = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
-                let listing: EnhancedFileListing = try await APIClient.shared.fetch(path: "/api/files?path=\(urlPath)")
+                let hiddenParam = showHidden ? "&showHidden=1" : ""
+                let listing: EnhancedFileListing = try await APIClient.shared.fetch(path: "/api/files?path=\(urlPath)\(hiddenParam)")
                 currentPath = listing.current
                 parent = listing.parent
                 items = listing.items

@@ -21,6 +21,7 @@ import {
   Lock,
   Key,
   EyeOff,
+  Eye,
   Music,
   Globe,
   Paintbrush,
@@ -377,6 +378,7 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
   const [items, setItems] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [searchText, setSearchText] = useState('')
+  const [showHidden, setShowHidden] = useState(false)
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null)
   const [canGoBack, setCanGoBack] = useState(false)
 
@@ -391,10 +393,12 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
   }, [])
 
   // Fetch directory listing (returns resolved path)
-  const fetchDir = useCallback((dirPath: string): Promise<string | null> => {
+  const fetchDir = useCallback((dirPath: string, hidden?: boolean): Promise<string | null> => {
     setSearchText('')
     setLoading(true)
-    return authFetch(`/api/files?path=${encodeURIComponent(dirPath)}`)
+    const showH = hidden ?? showHidden
+    const qs = `path=${encodeURIComponent(dirPath)}${showH ? '&showHidden=1' : ''}`
+    return authFetch(`/api/files?${qs}`)
       .then((r) => r.json())
       .then((data: FileListing) => {
         setCurrentPath(data.current)
@@ -403,7 +407,7 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
       })
       .catch((err) => { console.error('Failed to fetch files:', err); return null })
       .finally(() => setLoading(false))
-  }, [])
+  }, [showHidden])
 
   // Initial load — push first history entry
   useEffect(() => {
@@ -537,6 +541,19 @@ export function FileBrowser({ projectPath, onClose }: FileBrowserProps) {
             </p>
           </div>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            const next = !showHidden
+            setShowHidden(next)
+            if (currentPath) fetchDir(currentPath, next)
+          }}
+          className="shrink-0"
+          title={showHidden ? 'Hide hidden files' : 'Show hidden files'}
+        >
+          {showHidden ? <Eye className="h-4.5 w-4.5" /> : <EyeOff className="h-4.5 w-4.5" />}
+        </Button>
       </header>
 
       {/* Breadcrumb */}

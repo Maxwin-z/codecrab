@@ -29,11 +29,12 @@ struct ProjectListView: View {
     }
 
     private func lastActiveTime(for project: Project) -> Double {
+        let restTime = project.lastActivityAt ?? project.updatedAt
         if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }),
            let lastMod = status.lastModified {
-            return lastMod
+            return max(lastMod, restTime)
         }
-        return project.updatedAt
+        return restTime
     }
 
     var body: some View {
@@ -243,11 +244,12 @@ struct ProjectCard: View {
     }
 
     private var lastActiveTime: Double {
+        let restTime = project.lastActivityAt ?? project.updatedAt
         if let status = wsService.projectStatuses.first(where: { $0.projectId == project.id }),
            let lastMod = status.lastModified {
-            return lastMod
+            return max(lastMod, restTime)
         }
-        return project.updatedAt
+        return restTime
     }
 
     @ViewBuilder
@@ -469,15 +471,15 @@ struct EditProjectSheet: View {
     }()
 
     let sampleProjects: [Project] = [
-        Project(id: "1", name: "Pencil SDK", path: "~/code/pencil-sdk", icon: "\u{270F}\u{FE0F}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 2 * 3600_000),
-        Project(id: "2", name: "Design System", path: "~/code/design-system", icon: "\u{1F3A8}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 5 * 3600_000),
-        Project(id: "3", name: "Lightning API", path: "~/code/lightning-api", icon: "\u{26A1}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 86400_000),
-        Project(id: "4", name: "ML Pipeline", path: "~/code/ml-pipeline", icon: "\u{1F9E0}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 3 * 86400_000),
-        Project(id: "5", name: "Launch App", path: "~/code/launch-app", icon: "\u{1F680}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 6 * 3600_000),
-        Project(id: "6", name: "Config Tools", path: "~/code/config-tools", icon: "\u{1F527}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 7 * 86400_000),
+        Project(id: "1", name: "Pencil SDK", path: "~/code/pencil-sdk", icon: "\u{270F}\u{FE0F}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 2 * 3600_000, lastActivityAt: nil),
+        Project(id: "2", name: "Design System", path: "~/code/design-system", icon: "\u{1F3A8}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 5 * 3600_000, lastActivityAt: nil),
+        Project(id: "3", name: "Lightning API", path: "~/code/lightning-api", icon: "\u{26A1}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 86400_000, lastActivityAt: nil),
+        Project(id: "4", name: "ML Pipeline", path: "~/code/ml-pipeline", icon: "\u{1F9E0}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 3 * 86400_000, lastActivityAt: nil),
+        Project(id: "5", name: "Launch App", path: "~/code/launch-app", icon: "\u{1F680}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 6 * 3600_000, lastActivityAt: nil),
+        Project(id: "6", name: "Config Tools", path: "~/code/config-tools", icon: "\u{1F527}", createdAt: 0, updatedAt: Date().timeIntervalSince1970 * 1000 - 7 * 86400_000, lastActivityAt: nil),
     ]
 
-    return NavigationStack {
+    NavigationStack {
         ProjectListPreviewWrapper(projects: sampleProjects)
             .environmentObject(wsService)
     }
