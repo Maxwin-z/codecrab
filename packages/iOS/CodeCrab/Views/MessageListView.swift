@@ -186,11 +186,12 @@ private struct MessageModeTextView: View {
 
     var body: some View {
         if !content.isEmpty {
-            Text(content)
-                .font(.body)
-                .fontDesign(.monospaced)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            InlineSelectableText(
+                text: content,
+                font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
+                textColor: .label
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -236,12 +237,12 @@ private struct MessageModeThinkingView: View {
                 .buttonStyle(PlainButtonStyle())
 
                 if expanded {
-                    Text(content)
-                        .font(.subheadline)
-                        .fontDesign(.monospaced)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    InlineSelectableText(
+                        text: content,
+                        font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .regular),
+                        textColor: .secondaryLabel
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -345,14 +346,14 @@ private struct MessageModeToolUseView: View {
             .buttonStyle(PlainButtonStyle())
 
             if expanded && !input.isEmpty {
-                Text(input)
-                    .font(.caption)
-                    .fontDesign(.monospaced)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 18)
-                    .padding(.top, 4)
-                    .textSelection(.enabled)
+                InlineSelectableText(
+                    text: input,
+                    font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular),
+                    textColor: .secondaryLabel
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 18)
+                .padding(.top, 4)
             }
         }
     }
@@ -421,14 +422,14 @@ private struct MessageModeToolResultView: View {
                 .buttonStyle(PlainButtonStyle())
 
                 if expanded {
-                    Text(content.count > 300 ? String(content.prefix(300)) + "\n… (truncated)" : content)
-                        .font(.caption)
-                        .fontDesign(.monospaced)
-                        .foregroundColor(isError ? .red : .secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 18)
-                        .padding(.top, 4)
-                        .textSelection(.enabled)
+                    InlineSelectableText(
+                        text: content.count > 300 ? String(content.prefix(300)) + "\n… (truncated)" : content,
+                        font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular),
+                        textColor: isError ? .systemRed : .secondaryLabel
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 18)
+                    .padding(.top, 4)
                 }
             }
         }
@@ -701,27 +702,26 @@ struct MessageBubbleView: View {
                 .buttonStyle(PlainButtonStyle())
 
                 if expandThinking {
-                    Text(thinking)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(8)
-                        .onLongPressGesture {
-                            selectableText = SelectableTextItem(content: thinking)
-                        }
+                    InlineSelectableText(
+                        text: thinking,
+                        font: .preferredFont(forTextStyle: .caption1),
+                        textColor: .secondaryLabel
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(8)
                 }
             }
 
             // Content
             if !message.content.isEmpty {
-                Text(message.content)
-                    .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onLongPressGesture {
-                        selectableText = SelectableTextItem(content: message.content)
-                    }
+                InlineSelectableText(
+                    text: message.content,
+                    font: .preferredFont(forTextStyle: .body),
+                    textColor: .label
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // Timestamp
@@ -798,12 +798,42 @@ struct SelectableTextView: UIViewRepresentable {
     }
 }
 
+/// Inline selectable text using UITextView — supports native text selection
+/// within ScrollView without gesture conflicts.
+struct InlineSelectableText: UIViewRepresentable {
+    let text: String
+    var font: UIFont = .preferredFont(forTextStyle: .body)
+    var textColor: UIColor = .label
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.font = font
+        tv.textColor = textColor
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+        uiView.font = font
+        uiView.textColor = textColor
+    }
+}
+
 // MARK: - Tool Call View
 
 struct ToolCallView: View {
     let tool: ToolCall
     @State private var expanded = false
-    @State private var selectableText: SelectableTextItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -839,13 +869,11 @@ struct ToolCallView: View {
                         Text("Input:")
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                        Text(formatJSON(tool.input))
-                            .font(.caption)
-                            .fontDesign(.monospaced)
-                            .foregroundColor(.secondary)
-                    }
-                    .onLongPressGesture {
-                        selectableText = SelectableTextItem(content: formatJSON(tool.input))
+                        InlineSelectableText(
+                            text: formatJSON(tool.input),
+                            font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular),
+                            textColor: .secondaryLabel
+                        )
                     }
 
                     // Result
@@ -854,13 +882,11 @@ struct ToolCallView: View {
                             Text("Result:")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
-                            Text(truncate(result, max: 300))
-                                .font(.caption)
-                                .fontDesign(.monospaced)
-                                .foregroundColor(tool.isError == true ? .red : .secondary)
-                        }
-                        .onLongPressGesture {
-                            selectableText = SelectableTextItem(content: result)
+                            InlineSelectableText(
+                                text: truncate(result, max: 300),
+                                font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular),
+                                textColor: tool.isError == true ? .systemRed : .secondaryLabel
+                            )
                         }
                     }
                 }
@@ -875,9 +901,6 @@ struct ToolCallView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(UIColor.separator), lineWidth: 0.5)
         )
-        .sheet(item: $selectableText) { item in
-            SelectableTextSheet(text: item.content)
-        }
     }
 
     private var statusColor: Color {
