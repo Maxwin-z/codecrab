@@ -25,6 +25,7 @@ struct InputBarView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var showMcpPopover = false
     @State private var sdkProbing = false
+    @State private var showCanvas = false
     @State private var showLocalePicker = false
     @State private var micPulse = false
     @State private var showFileMention = false
@@ -279,6 +280,17 @@ struct InputBarView: View {
                         }
                         .buttonStyle(.plain)
 
+                        // Canvas (iPad only)
+                        if UIDevice.current.userInterfaceIdiom == .pad {
+                            Button(action: { showCanvas = true }) {
+                                Image(systemName: "pencil.tip.crop.circle")
+                                    .font(.system(size: 17))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         // Attach images
                         PhotosPicker(selection: $selectedItem, matching: .images) {
                             Image(systemName: "paperclip")
@@ -486,6 +498,17 @@ struct InputBarView: View {
                 externalAttachments = []
                 isFocused = true
             }
+        }
+        .fullScreenCover(isPresented: $showCanvas) {
+            CanvasView(
+                onDone: { image in
+                    showCanvas = false
+                    if let attachment = ImageCompressor.compressImage(image) {
+                        attachments.append(attachment)
+                    }
+                },
+                onCancel: { showCanvas = false }
+            )
         }
     }
 
