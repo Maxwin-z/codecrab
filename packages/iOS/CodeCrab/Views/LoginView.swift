@@ -212,6 +212,49 @@ struct LoginView: View {
                             .padding(10)
                         }
 
+                        // Recent servers history
+                        if !serverHistory.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Recent Servers")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .textCase(.uppercase)
+
+                                ForEach(serverHistory, id: \.self) { url in
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 20)
+                                        Text(url)
+                                            .font(.system(.subheadline, design: .monospaced))
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Spacer()
+                                        Button {
+                                            auth.removeFromServerHistory(url)
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                                .padding(6)
+                                        }
+                                    }
+                                    .padding(.leading, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(8)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        auth.setServerURL(url)
+                                        selectedServer = nil
+                                        isChangingServer = false
+                                        checkServerReachability()
+                                    }
+                                }
+                            }
+                        }
+
                         // Manual input toggle
                         Button {
                             showManualInput.toggle()
@@ -366,6 +409,12 @@ struct LoginView: View {
                 selectServer(scanner.discoveredServers[0])
             }
         }
+    }
+
+    private var serverHistory: [String] {
+        let history = auth.getServerHistory()
+        let current = cachedServerURL ?? ""
+        return history.filter { $0 != current }
     }
 
     private var hasServerConfigured: Bool {

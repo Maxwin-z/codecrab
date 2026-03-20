@@ -8,6 +8,8 @@ class AuthService: ObservableObject {
     @Published var isLoading: Bool = true
     
     private let serverURLKey = "codecrab_server_url"
+    private let serverHistoryKey = "codecrab_server_history"
+    private let maxHistoryCount = 10
     
     func getToken() -> String? {
         return KeychainHelper.shared.getToken()
@@ -30,11 +32,32 @@ class AuthService: ObservableObject {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalUrl = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
         UserDefaults.standard.set(finalUrl, forKey: serverURLKey)
+        addToServerHistory(finalUrl)
         SharedDataManager.shared.syncCredentials()
     }
 
     func clearServerURL() {
         UserDefaults.standard.removeObject(forKey: serverURLKey)
+    }
+
+    func getServerHistory() -> [String] {
+        return UserDefaults.standard.stringArray(forKey: serverHistoryKey) ?? []
+    }
+
+    private func addToServerHistory(_ url: String) {
+        var history = getServerHistory()
+        history.removeAll { $0 == url }
+        history.insert(url, at: 0)
+        if history.count > maxHistoryCount {
+            history = Array(history.prefix(maxHistoryCount))
+        }
+        UserDefaults.standard.set(history, forKey: serverHistoryKey)
+    }
+
+    func removeFromServerHistory(_ url: String) {
+        var history = getServerHistory()
+        history.removeAll { $0 == url }
+        UserDefaults.standard.set(history, forKey: serverHistoryKey)
     }
     
     func verifyToken(_ token: String) async throws -> Bool {
