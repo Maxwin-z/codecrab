@@ -129,7 +129,14 @@ struct FileLinkedTextView: UIViewRepresentable {
         if uiView.attributedText?.string != text || context.coordinator.lastPaths != existingPaths {
             uiView.attributedText = newAttr
             context.coordinator.lastPaths = existingPaths
+            uiView.invalidateIntrinsicContentSize()
         }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        let size = uiView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        return CGSize(width: width, height: size.height)
     }
 
     private func buildAttributedString() -> NSAttributedString {
