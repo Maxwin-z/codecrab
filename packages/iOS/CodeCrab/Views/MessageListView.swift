@@ -679,9 +679,13 @@ struct MessageBubbleView: View {
                         }
                     }
                 }
-                Text(message.content)
-                    .font(.body)
-                    .fontWeight(.medium)
+                InlineSelectableText(
+                    text: message.content,
+                    font: .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .medium),
+                    textColor: .white,
+                    tintColor: .white,
+                    hugsContent: true
+                )
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                     .background(
@@ -691,22 +695,18 @@ struct MessageBubbleView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 3)
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
                             .stroke(Color.white.opacity(0.2), lineWidth: 1)
                     )
-                    .onLongPressGesture {
-                        selectableText = SelectableTextItem(content: message.content)
-                    }
                 Text(formatMessageTime(message.timestamp))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.trailing, 4)
             }
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.80, alignment: .trailing)
         }
     }
 
@@ -849,6 +849,9 @@ struct InlineSelectableText: UIViewRepresentable {
     let text: String
     var font: UIFont = .preferredFont(forTextStyle: .body)
     var textColor: UIColor = .label
+    var tintColor: UIColor? = nil
+    /// When true, the view shrinks to fit its text content instead of filling available width.
+    var hugsContent: Bool = false
 
     func makeUIView(context: Context) -> UITextView {
         let tv = UITextView()
@@ -860,8 +863,12 @@ struct InlineSelectableText: UIViewRepresentable {
         tv.textContainer.lineFragmentPadding = 0
         tv.font = font
         tv.textColor = textColor
+        if let tint = tintColor {
+            tv.tintColor = tint
+        }
+        let hug: UILayoutPriority = hugsContent ? .defaultHigh : .defaultLow
         tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tv.setContentHuggingPriority(hug, for: .horizontal)
         return tv
     }
 
@@ -872,12 +879,16 @@ struct InlineSelectableText: UIViewRepresentable {
         }
         uiView.font = font
         uiView.textColor = textColor
+        if let tint = tintColor {
+            uiView.tintColor = tint
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let width = proposal.width ?? UIScreen.main.bounds.width
-        let size = uiView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
-        return CGSize(width: width, height: size.height)
+        let maxWidth = proposal.width ?? UIScreen.main.bounds.width
+        let fitted = uiView.sizeThatFits(CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude))
+        let width = hugsContent ? min(ceil(fitted.width), maxWidth) : maxWidth
+        return CGSize(width: width, height: fitted.height)
     }
 }
 
