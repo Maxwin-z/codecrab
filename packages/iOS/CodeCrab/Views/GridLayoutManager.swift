@@ -101,7 +101,8 @@ class GridLayoutManager: ObservableObject {
     @Published var activeCellIndex: Int = 0
 
     var activeCell: GridCellState {
-        cells[activeCellIndex]
+        guard activeCellIndex < cells.count else { return cells[0] }
+        return cells[activeCellIndex]
     }
 
     var isSingleLayout: Bool {

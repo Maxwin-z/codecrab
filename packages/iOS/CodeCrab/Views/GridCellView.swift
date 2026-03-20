@@ -11,11 +11,14 @@ struct GridCellView: View {
     @Binding var shareSessionId: String?
 
     private var cellState: GridCellState {
-        gridManager.cells[cellIndex]
+        guard cellIndex < gridManager.cells.count else {
+            return GridCellState(id: cellIndex)
+        }
+        return gridManager.cells[cellIndex]
     }
 
     private var isActive: Bool {
-        gridManager.activeCellIndex == cellIndex
+        cellIndex < gridManager.cells.count && gridManager.activeCellIndex == cellIndex
     }
 
     private var showChrome: Bool {
