@@ -2,6 +2,12 @@
 
 const SERVER_URL_KEY = 'codecrab_server_url'
 
+/** Get the base path from Vite's base config (e.g. '/codecrab' or '') */
+function getBasePath(): string {
+  const base = import.meta.env.BASE_URL
+  return base === '/' ? '' : base.replace(/\/$/, '')
+}
+
 /** Get the stored custom server URL (e.g. "http://192.168.1.50:4200") or null for same-origin */
 export function getServerUrl(): string | null {
   return localStorage.getItem(SERVER_URL_KEY)
@@ -30,8 +36,11 @@ export function getApiBaseUrl(): string {
  * If a custom server is configured, prepends the server URL.
  */
 export function buildApiUrl(path: string): string {
-  const base = getApiBaseUrl()
-  return base ? `${base}${path}` : path
+  const serverUrl = getServerUrl()
+  if (serverUrl) {
+    return `${serverUrl}${path}`
+  }
+  return `${getBasePath()}${path}`
 }
 
 /**
@@ -45,9 +54,9 @@ export function buildWsUrl(path: string): string {
     const wsUrl = serverUrl.replace(/^http/, 'ws')
     return `${wsUrl}${path}`
   }
-  // Same-origin
+  // Same-origin — include base path so reverse proxy can route correctly
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}${path}`
+  return `${protocol}//${window.location.host}${getBasePath()}${path}`
 }
 
 /**

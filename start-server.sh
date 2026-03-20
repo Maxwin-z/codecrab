@@ -13,7 +13,8 @@ cd "$SCRIPT_DIR"
 case "${1:-start}" in
   start)
     echo "Starting $APP_NAME on port $PORT ..."
-    PORT=$PORT pm2 start packages/server/dist/index.js \
+    PORT=$PORT pm2 start packages/server/src/index.ts \
+      --interpreter ./node_modules/.bin/tsx \
       --name "$APP_NAME" \
       --cwd "$SCRIPT_DIR" \
       --update-env
