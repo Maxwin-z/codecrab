@@ -1634,6 +1634,83 @@ function getOrCreateClientStateForProject(
   return clientState
 }
 
+/**
+ * Consume remaining events from the executeQuery generator after the main result
+ * has been received but background tasks (SDK agents) are still running.
+ *
+ * This runs as a detached async function — the main query has already returned
+ * so the queue is free to process new queries. We keep consuming events to:
+ * 1. Keep the SDK subprocess alive (the generator holds the stream open)
+ * 2. Forward task progress/completion events to WebSocket clients
+ * 3. Log events to the session turn for history
+ */
+async function consumeBackgroundTasks(
+  iterator: AsyncIterator<{ type: string; data?: unknown }>,
+  projectId: string,
+  session: Session,
+  currentTurn: import('@codecrab/shared').SessionTurn | undefined,
+  logEvent: (type: import('@codecrab/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => void,
+): Promise<void> {
+  const tag = `[bg-tasks:${projectId.slice(-6)}]`
+  console.log(`${tag} Background task consumer started`)
+
+  try {
+    while (true) {
+      const { value: event, done } = await iterator.next()
+      if (done) break
+
+      if (event.type === 'background_task_update') {
+        const td = event.data as any
+        console.log(`${tag} Task ${td.taskId} ${td.status}: ${td.summary || td.description || ''}`)
+
+        // Forward to WebSocket clients
+        broadcastToProject(projectId, {
+          type: 'background_task_update',
+          taskId: td.taskId,
+          status: td.status,
+          description: td.description,
+          summary: td.summary,
+          usage: td.usage,
+          projectId,
+          sessionId: session.sessionId,
+        })
+
+        // Log to session turn
+        logEvent(
+          td.status === 'progress' ? 'task_progress' : 'task_notification',
+          `${td.status}: ${td.summary || td.description || ''}`,
+          {
+            taskId: td.taskId,
+            status: td.status,
+            summary: td.summary,
+            description: td.description,
+            ...(td.usage || {}),
+          },
+          null,
+          td.taskId,
+        )
+
+        // Send push notification when a task completes or fails
+        if (td.status === 'completed' || td.status === 'failed') {
+          const pushMsg = td.status === 'completed'
+            ? `后台任务完成: ${td.summary || td.taskId}`
+            : `后台任务失败: ${td.summary || td.taskId}`
+          sendQueryCompletionPush(pushMsg, projectId, session.sessionId)
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`${tag} Error consuming background tasks:`, err.message)
+  } finally {
+    // Clean up the iterator
+    try { await iterator.return?.() } catch { /* ignore */ }
+    console.log(`${tag} Background task consumer finished`)
+
+    // Persist session with updated turn data
+    persistSession(session)
+  }
+}
+
 // Internal: execute a user query (called by the queue when it's this query's turn)
 async function executeUserQuery(
   client: Client,
@@ -1818,7 +1895,16 @@ async function executeUserQuery(
     }, images, enabledMcps, disabledSdkServers, disabledSkills)
 
     let finalText = ''
-    for await (const event of stream) {
+    let hasBackgroundTasks = false
+
+    // Use manual iteration so we can detach the iterator for background task
+    // consumption without closing the generator (for-await-of calls return() on break)
+    const iterator = stream[Symbol.asyncIterator]()
+    let iterDone = false
+    while (!iterDone) {
+      const { value: event, done } = await iterator.next()
+      if (done) { iterDone = true; break }
+
       switch (event.type) {
         case 'system_init': {
           // Forward SDK MCP servers and skills to clients
@@ -1865,12 +1951,20 @@ async function executeUserQuery(
           })
           break
         }
+        case 'background_tasks_active': {
+          // Background tasks are still running after result — detach them
+          const taskData = event.data as any
+          hasBackgroundTasks = true
+          tsLog('[ws]', `Background tasks active — project=${projectId}, tasks=${taskData.taskIds.join(', ')}`)
+          iterDone = true // Exit main loop, but DON'T close the iterator
+          break
+        }
         // ask_user_question is now handled via the onAskUserQuestion callback
         // in canUseTool, which broadcasts to clients and waits for answers.
       }
     }
 
-    // Reset engine accumulation state; extract summary/suggestions from final content
+    // --- Post-processing: store message, extract summary, etc. ---
     const assistantMsg = storeAssistantMessage(clientState)
     if (assistantMsg) {
       session.lastModified = Date.now()
@@ -1932,6 +2026,17 @@ async function executeUserQuery(
       triggerSoulEvolutionAsync(prompt, finalText)
     } else {
       console.log(`[SOUL] Skipped — internal project: ${projectId}`)
+    }
+
+    // If background tasks are running, spawn a detached consumer that keeps the
+    // SDK subprocess alive until all tasks complete. The main query returns
+    // immediately so the queue can process new queries.
+    if (hasBackgroundTasks) {
+      consumeBackgroundTasks(iterator, projectId, session, currentTurn, logEvent)
+        .catch((err) => {
+          console.error(`[ws] Background task consumer error — project=${projectId}:`, err.message)
+        })
+      tsLog('[ws]', `Query returning with background tasks still active — project=${projectId}`)
     }
 
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }

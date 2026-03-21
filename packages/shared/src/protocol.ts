@@ -362,6 +362,15 @@ export interface ProjectActivityMessage {
   textSnippet?: string
 }
 
+export interface BackgroundTaskUpdateMessage extends ServerProjectContext {
+  type: 'background_task_update'
+  taskId: string
+  status: 'started' | 'progress' | 'completed' | 'failed' | 'stopped'
+  description?: string
+  summary?: string
+  usage?: { totalTokens?: number; toolUses?: number; durationMs?: number }
+}
+
 export type ServerMessage =
   | SystemMessage
   | StreamDeltaMessage
@@ -398,6 +407,7 @@ export type ServerMessage =
   | SdkEventMessage
   | SdkEventHistoryMessage
   | ProjectActivityMessage
+  | BackgroundTaskUpdateMessage
 
 // ============ Image Attachments ============
 

@@ -955,6 +955,10 @@ export function buildQueryOptions(
         `you MUST use the Bash tool with run_in_background: true. Never run server processes in the foreground — ` +
         `they will block the session and prevent further interaction. After starting the server in the background, ` +
         `tell the user the URL they can visit.` +
+        `\n\nIMPORTANT: For commands that are known to take extremely long (e.g. brew install --cask mactex, ` +
+        `apt install texlive-full, or other multi-gigabyte downloads/installs that may exceed 10 minutes), ` +
+        `use the Bash tool with run_in_background: true, then periodically check progress with the TaskOutput tool ` +
+        `until the task completes. Report progress to the user along the way.` +
         `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
         `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
         `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.` +
@@ -1242,20 +1246,30 @@ export async function* executeQuery(
       })
     }
 
-    // Auto-disable sandbox for Bash commands that require full system access
-    // (e.g. xcodebuild install to real devices needs Keychain & USB access)
-    if (toolName === 'Bash' && typeof input.command === 'string') {
-      const cmd = input.command
-      const needsFullAccess =
-        cmd.includes('xcodebuild') ||
-        cmd.includes('ios-deploy') ||
-        cmd.includes('ideviceinstaller') ||
-        cmd.includes('xcrun devicectl') ||
-        cmd.includes('xcrun simctl install') ||
-        cmd.includes('codesign')
-      if (needsFullAccess && !input.dangerouslyDisableSandbox) {
-        opts.updateToolInput?.({ ...input, dangerouslyDisableSandbox: true })
-        console.log(`[canUseTool] Auto-disabled sandbox for Bash command: ${cmd.slice(0, 80)}`)
+    // Auto-tune Bash tool inputs:
+    // 1. Raise default timeout to max (10min) so long-running commands aren't killed
+    // 2. Disable sandbox — our own permission layer (canUseTool in Safe mode,
+    //    bypassPermissions in YOLO mode) is the real safety gate. The SDK sandbox
+    //    on top of that breaks too many legitimate dev commands (git, ssh, curl,
+    //    brew, docker, npm, etc.) without adding meaningful security.
+    if (toolName === 'Bash') {
+      let updated = { ...input }
+      let didUpdate = false
+
+      // Raise timeout to max (600s) for foreground commands without an explicit timeout.
+      // The SDK default is 120s which kills legitimate long-running installs/builds.
+      if (!input.run_in_background && !input.timeout) {
+        updated.timeout = 600_000
+        didUpdate = true
+      }
+
+      if (!input.dangerouslyDisableSandbox) {
+        updated.dangerouslyDisableSandbox = true
+        didUpdate = true
+      }
+
+      if (didUpdate) {
+        opts.updateToolInput?.(updated)
       }
     }
 
@@ -1325,6 +1339,7 @@ export async function* executeQuery(
 
   const isResuming = !!options.resume
   const tag = logPrefix(client.projectId)
+  let bgTaskTimeout: NodeJS.Timeout | null = null
 
   try {
     console.log(`${tag} Starting query...`)
@@ -1360,10 +1375,64 @@ export async function* executeQuery(
     let gotResult = false
     const streamLog = createStreamLogState()
     const sdkLog = callbacks.onSdkLog || (() => {})
+
+    // Track background tasks so we don't kill the stream while they're running
+    const pendingTasks = new Map<string, { description: string; startedAt: number }>()
+
     for await (const message of stream) {
       logSdkMessage(tag, message, streamLog)
       emitSdkLog(message, sdkLog)
       messageCount++
+
+      // Track background tasks from system messages
+      if (message.type === 'system' && 'subtype' in message) {
+        const msg = message as any
+        if (msg.subtype === 'task_started') {
+          pendingTasks.set(msg.task_id, {
+            description: msg.description || '',
+            startedAt: Date.now(),
+          })
+          console.log(`${tag} Background task started: ${msg.task_id} (pending: ${pendingTasks.size})`)
+        } else if (msg.subtype === 'task_notification') {
+          pendingTasks.delete(msg.task_id)
+          console.log(`${tag} Background task ${msg.status}: ${msg.task_id} (pending: ${pendingTasks.size})`)
+
+          // Yield task notification so ws layer can forward to clients
+          yield {
+            type: 'background_task_update',
+            data: {
+              taskId: msg.task_id,
+              status: msg.status,
+              summary: msg.summary,
+              usage: msg.usage,
+            },
+          }
+
+          // If we already got the result and this was the last pending task, close
+          if (gotResult && pendingTasks.size === 0) {
+            console.log(`${tag} All background tasks completed, closing stream`)
+            try { stream.close() } catch { /* already closing */ }
+            break
+          }
+        } else if (msg.subtype === 'task_progress' && gotResult) {
+          // After result, yield progress updates so ws layer can forward heartbeats
+          yield {
+            type: 'background_task_update',
+            data: {
+              taskId: msg.task_id,
+              status: 'progress',
+              description: msg.description,
+              summary: msg.summary,
+              usage: msg.usage ? {
+                totalTokens: msg.usage.total_tokens,
+                toolUses: msg.usage.tool_uses,
+                durationMs: msg.usage.duration_ms,
+              } : undefined,
+            },
+          }
+        }
+      }
+
       // Capture sessionId from init
       if (
         message.type === 'system' &&
@@ -1447,15 +1516,40 @@ export async function* executeQuery(
       // Process message and yield events
       yield* processMessage(message, client, callbacks)
 
-      // Break out of the loop once we've received the result message.
-      // The SDK subprocess may linger if a background process (run_in_background)
-      // holds stdout open, which would keep the stream alive indefinitely.
+      // Handle result message — close stream only if no background tasks are pending
       if (message.type === 'result') {
         gotResult = true
-        console.log(`${tag} Result received, closing stream`)
-        // Forcefully close the SDK subprocess so it doesn't block
-        try { stream.close() } catch { /* already closing */ }
-        break
+
+        if (pendingTasks.size === 0) {
+          // No background tasks — close immediately (original behavior)
+          console.log(`${tag} Result received, no background tasks, closing stream`)
+          try { stream.close() } catch { /* already closing */ }
+          break
+        }
+
+        // Background tasks still running — keep stream alive
+        console.log(`${tag} Result received, waiting for ${pendingTasks.size} background task(s): ${[...pendingTasks.keys()].join(', ')}`)
+
+        // Yield a marker so the ws layer knows to release the queue
+        yield {
+          type: 'background_tasks_active',
+          data: {
+            taskIds: [...pendingTasks.keys()],
+            descriptions: [...pendingTasks.values()].map(t => t.description),
+          },
+        }
+
+        // Safety timeout: don't wait forever for background tasks (30 minutes)
+        const BG_TASK_TIMEOUT_MS = 30 * 60 * 1000
+        bgTaskTimeout = setTimeout(() => {
+          console.warn(`${tag} Background tasks timed out after ${BG_TASK_TIMEOUT_MS / 1000}s, force closing stream`)
+          console.warn(`${tag} Remaining tasks: ${[...pendingTasks.keys()].join(', ')}`)
+          try { stream.close() } catch { /* already closing */ }
+        }, BG_TASK_TIMEOUT_MS)
+
+        // The for-await loop continues consuming task_progress and task_notification
+        // events until all tasks complete (handled in the task_notification branch above)
+        // or the safety timeout fires.
       }
     }
     console.log(`${tag} Stream completed, ${messageCount} messages (gotResult: ${gotResult})`)
@@ -1488,11 +1582,19 @@ export async function* executeQuery(
     }
   } finally {
     console.log(`${tag} Cleaning up query`)
-    // Clear active query
-    client.activeQuery = null
+    // Clear background task safety timeout
+    if (bgTaskTimeout) clearTimeout(bgTaskTimeout)
+
+    // Clear active query — only if it's still ours (a new query may have started
+    // while background tasks were being consumed, overwriting activeQuery)
+    if (client.activeQuery?.abort === abortController) {
+      client.activeQuery = null
+    }
     if (client.projectId) {
       const project = getOrCreateProjectState(client.projectId)
-      project.activeQuery = null
+      if (project.activeQuery?.abort === abortController) {
+        project.activeQuery = null
+      }
     }
 
     // Update session status
