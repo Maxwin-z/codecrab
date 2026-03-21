@@ -1,5 +1,7 @@
 // MessageList — renders chat messages with optional SDK event timeline
 import { useState, useMemo } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ChatMessage, DebugEvent } from '@codecrab/shared'
 import { stripMetaTags } from '@/lib/utils'
 import { FileLinkedText } from './FileLinkedText'
@@ -18,6 +20,30 @@ interface TurnGroup {
   id: string
   userMessage?: ChatMessage
   agentEvents: DebugEvent[]
+}
+
+// Renders text as markdown or plain text based on renderMarkdown flag
+function TextContent({ text, renderMarkdown }: { text: string; renderMarkdown?: boolean }) {
+  if (renderMarkdown) {
+    return (
+      <div className="prose prose-sm dark:prose-invert max-w-none
+        prose-headings:font-semibold prose-headings:tracking-tight
+        prose-h1:text-base prose-h1:mb-2 prose-h1:mt-3
+        prose-h2:text-sm prose-h2:mt-3 prose-h2:mb-1
+        prose-h3:text-sm prose-h3:mt-2
+        prose-p:leading-relaxed prose-p:my-1.5 prose-p:text-sm
+        prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+        prose-code:text-xs prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+        prose-pre:bg-muted prose-pre:text-xs prose-pre:rounded-lg prose-pre:p-3 prose-pre:my-2
+        prose-li:my-0.5 prose-li:text-sm
+        prose-ul:my-1.5 prose-ol:my-1.5
+        prose-table:text-xs
+      ">
+        <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+      </div>
+    )
+  }
+  return <FileLinkedText text={text} />
 }
 
 export function MessageList({ messages, streamingText, streamingThinking, isRunning, sdkEvents = [], onResumeSession }: MessageListProps) {
@@ -191,6 +217,7 @@ function AgentResponseView({
   onResumeSession?: (sessionId: string) => void
 }) {
   const [showDebug, setShowDebug] = useState(false)
+  const [renderMarkdown, setRenderMarkdown] = useState(true)
 
   const messageEvents = useMemo(
     () =>
@@ -270,9 +297,9 @@ function AgentResponseView({
           if (event.type === 'tool_use' && ((event.data?.toolName as string) === 'Agent' || (event.data?.toolName as string) === 'Task')) {
             const toolId = event.data?.toolId as string
             const group = toolId ? subagentGroups.get(toolId) : undefined
-            return <SubagentCard key={i} toolUseEvent={event} group={group} isStreaming={isStreaming} />
+            return <SubagentCard key={i} toolUseEvent={event} group={group} isStreaming={isStreaming} renderMarkdown={renderMarkdown} />
           }
-          return <MessageModeEventView key={i} event={event} isStreaming={isStreaming} />
+          return <MessageModeEventView key={i} event={event} isStreaming={isStreaming} renderMarkdown={renderMarkdown} />
         })
       )}
 
@@ -289,6 +316,18 @@ function AgentResponseView({
           <span>{showDebug ? '🐛' : '💬'}</span>
           <span>{showDebug ? 'Debug' : 'Message'}</span>
         </button>
+        {!showDebug && (
+          <button
+            onClick={() => setRenderMarkdown(!renderMarkdown)}
+            className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full ${
+              renderMarkdown
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-500/10'
+                : 'text-muted-foreground bg-muted/50'
+            } hover:opacity-80 transition-opacity`}
+          >
+            <span>{renderMarkdown ? 'Md' : 'Txt'}</span>
+          </button>
+        )}
         {!showDebug && isStreaming && <StreamingDots />}
       </div>
     </div>
@@ -301,10 +340,12 @@ function SubagentCard({
   toolUseEvent,
   group,
   isStreaming,
+  renderMarkdown,
 }: {
   toolUseEvent: DebugEvent
   group?: SubagentGroup
   isStreaming: boolean
+  renderMarkdown?: boolean
 }) {
   const status = group?.taskNotification?.data?.status as string | undefined
   const isRunning = !status && isStreaming
@@ -375,7 +416,7 @@ function SubagentCard({
           {hasInnerEvents && (
             <div className="pl-3 border-l-2 border-purple-500/20 space-y-1">
               {group.events.map((evt, j) => (
-                <MessageModeEventView key={j} event={evt} isStreaming={isStreaming} />
+                <MessageModeEventView key={j} event={evt} isStreaming={isStreaming} renderMarkdown={renderMarkdown} />
               ))}
             </div>
           )}
@@ -392,10 +433,10 @@ function SubagentCard({
 
 // ─── Message Mode Views ─────────────────────────────────────────────────
 
-function MessageModeEventView({ event, isStreaming }: { event: DebugEvent; isStreaming: boolean }) {
+function MessageModeEventView({ event, isStreaming, renderMarkdown }: { event: DebugEvent; isStreaming: boolean; renderMarkdown?: boolean }) {
   switch (event.type) {
     case 'text':
-      return <MessageModeText event={event} />
+      return <MessageModeText event={event} renderMarkdown={renderMarkdown} />
     case 'thinking':
       return <MessageModeThinking event={event} defaultExpanded={isStreaming} />
     case 'tool_use':
@@ -407,10 +448,17 @@ function MessageModeEventView({ event, isStreaming }: { event: DebugEvent; isStr
   }
 }
 
-function MessageModeText({ event }: { event: DebugEvent }) {
+function MessageModeText({ event, renderMarkdown }: { event: DebugEvent; renderMarkdown?: boolean }) {
   const raw = (event.data?.content as string) || ''
   const content = stripMetaTags(raw)
   if (!content) return null
+  if (renderMarkdown) {
+    return (
+      <div className="text-sm break-words">
+        <TextContent text={content} renderMarkdown />
+      </div>
+    )
+  }
   return (
     <div className="text-sm font-mono whitespace-pre-wrap break-words">
       <FileLinkedText text={content} />
