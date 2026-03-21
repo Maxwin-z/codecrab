@@ -290,52 +290,26 @@ export function useWebSocket(): UseWebSocketReturn {
     return base
   }
 
-  // Fetch session history via HTTP with incremental support.
-  // If the session has cached data, sends afterTurn to only fetch new turns.
+  // Fetch session history via HTTP. Always does a full replace to avoid
+  // duplication caused by client-generated IDs not matching server IDs.
   const fetchSessionHistoryRef = useRef(async (projectId: string, sessionId: string) => {
     try {
       const pState = getProjectState(projectId)
       const sState = getSessionState(pState, sessionId)
 
-      // Find last cached user message timestamp for incremental fetch
-      const lastUserMsg = [...sState.messages].reverse().find(m => m.role === 'user')
-      const afterTurn = lastUserMsg?.timestamp
-      const url = afterTurn
-        ? `/api/sessions/${encodeURIComponent(sessionId)}/history?afterTurn=${afterTurn}`
-        : `/api/sessions/${encodeURIComponent(sessionId)}/history`
-
+      const url = `/api/sessions/${encodeURIComponent(sessionId)}/history`
       const res = await authFetch(url)
       if (!res.ok) return
       const data = await res.json()
 
-      // Merge messages: use processingTurnTimestamp to replace in-progress data (like iOS)
       if (data.messages?.length) {
-        const newMessages = data.messages.map(parseSummaryToMessage)
-        const processingTurnTs = data.processingTurnTimestamp as number | undefined
-        if (afterTurn && processingTurnTs) {
-          // Keep cached messages before the in-progress turn, replace the rest
-          // with the authoritative API snapshot (matches iOS merge strategy)
-          sState.messages = sState.messages.filter((m) => m.timestamp < processingTurnTs).concat(newMessages)
-          sState.streamingText = ''
-          sState.streamingThinking = ''
-        } else if (afterTurn) {
-          // No in-progress turn: deduplicate by ID before appending
-          const existingIds = new Set(sState.messages.map((m) => m.id))
-          const unique = newMessages.filter((m: ChatMessage) => !existingIds.has(m.id))
-          if (unique.length) {
-            sState.messages = [...sState.messages, ...unique]
-          }
-        } else {
-          sState.messages = newMessages
-        }
+        sState.messages = data.messages.map(parseSummaryToMessage)
+        sState.streamingText = ''
+        sState.streamingThinking = ''
       }
 
       if (data.sdkEvents?.length) {
-        if (afterTurn) {
-          sState.sdkEvents = [...sState.sdkEvents, ...data.sdkEvents]
-        } else {
-          sState.sdkEvents = data.sdkEvents
-        }
+        sState.sdkEvents = data.sdkEvents
       }
 
       // Summary and suggestions always reflect latest state
@@ -963,10 +937,11 @@ export function useWebSocket(): UseWebSocketReturn {
     // Cancel any pending switch_project session assignment — this explicit resume takes priority
     pState.awaitingSessionSwitch = false
     pState.sessionId = sessionId
-    // Keep existing cached state for instant rendering; HTTP fetch will merge incremental data
-    if (!pState.sessionStates.has(sessionId)) {
-      pState.sessionStates.set(sessionId, createEmptySessionState())
-    }
+    // Always reset session state so the HTTP fetch does a full replace.
+    // Keeping stale cached data causes duplication because client-generated message IDs
+    // (from WebSocket streaming) don't match server-generated IDs (from HTTP history),
+    // making incremental dedup fail.
+    pState.sessionStates.set(sessionId, createEmptySessionState())
     triggerRender()
     sendWithProject({ type: 'resume_session', sessionId })
   }, [getProjectState, sendWithProject, triggerRender])
