@@ -325,6 +325,7 @@ function AgentResponseView({
                 : 'text-muted-foreground bg-muted/50'
             } hover:opacity-80 transition-opacity`}
           >
+            <span>{renderMarkdown ? '📝' : '📄'}</span>
             <span>{renderMarkdown ? 'Md' : 'Txt'}</span>
           </button>
         )}
