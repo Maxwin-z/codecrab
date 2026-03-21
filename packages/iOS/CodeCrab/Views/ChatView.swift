@@ -73,6 +73,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            sessionUsageBar
             messagesSection
             bottomControlsSection
         }
@@ -492,6 +493,48 @@ struct ChatView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return "\(minutes)m \(seconds)s"
+    }
+
+    // MARK: - Session Usage Bar
+
+    @ViewBuilder
+    private var sessionUsageBar: some View {
+        if let usage = wsService.sessionUsage {
+            HStack(spacing: 8) {
+                let totalTokensK = Double(usage.totalInputTokens + usage.totalOutputTokens) / 1000.0
+                Text("$\(usage.totalCostUsd, specifier: "%.4f")")
+                    .fontDesign(.monospaced)
+                Text("·").foregroundStyle(.quaternary)
+                Text("\(totalTokensK, specifier: "%.1f")k tok")
+                    .fontDesign(.monospaced)
+                Text("·").foregroundStyle(.quaternary)
+                Text("\(usage.queryCount)q")
+                    .fontDesign(.monospaced)
+                if usage.contextWindowUsed > 0 && usage.contextWindowMax > 0 {
+                    Text("·").foregroundStyle(.quaternary)
+                    let ratio = Double(usage.contextWindowUsed) / Double(usage.contextWindowMax)
+                    GeometryReader { _ in
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.2))
+                            .frame(width: 48, height: 6)
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(ratio > 0.8 ? Color.red : ratio > 0.5 ? Color.yellow : Color.blue)
+                                    .frame(width: min(48, 48 * ratio), height: 6)
+                            }
+                    }
+                    .frame(width: 48, height: 6)
+                    Text("\(Int(ratio * 100))%")
+                        .fontDesign(.monospaced)
+                }
+                Spacer()
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+            .background(Color(UIColor.secondarySystemBackground))
+        }
     }
 
     private var showExecSession: Binding<Bool> {

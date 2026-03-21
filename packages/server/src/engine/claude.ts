@@ -95,6 +95,19 @@ export interface ClientState {
   sdkTools?: string[]
 }
 
+// Session-level cumulative usage tracking
+export interface SessionUsage {
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCacheReadTokens: number
+  totalCacheCreateTokens: number
+  totalCostUsd: number
+  totalDurationMs: number
+  queryCount: number
+  /** input_tokens from the most recent message_start (context window utilization) */
+  contextWindowUsed: number
+}
+
 // Project-level state (shared across clients)
 export interface ProjectState {
   projectId: string
@@ -107,6 +120,7 @@ export interface ProjectState {
   lastActivity: number
   pendingQuestion?: { toolId: string; questions: any[] } | null
   pendingPermissionRequest?: any | null
+  sessionUsage?: SessionUsage
 }
 
 // Session status tracking
@@ -726,6 +740,67 @@ export function getProjectState(projectId: string): ProjectState | undefined {
   return projects.get(projectId)
 }
 
+// Get or create session usage for a project
+export function getSessionUsage(projectId: string): SessionUsage {
+  const project = getOrCreateProjectState(projectId)
+  if (!project.sessionUsage) {
+    project.sessionUsage = {
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCacheCreateTokens: 0,
+      totalCostUsd: 0,
+      totalDurationMs: 0,
+      queryCount: 0,
+      contextWindowUsed: 0,
+    }
+  }
+  return project.sessionUsage
+}
+
+// Reset session usage (e.g. when switching sessions)
+export function resetSessionUsage(projectId: string): void {
+  const project = projects.get(projectId)
+  if (project) {
+    project.sessionUsage = undefined
+  }
+}
+
+// Context window size lookup by model identifier
+const CONTEXT_WINDOW_SIZES: Record<string, number> = {
+  // Claude models
+  'claude-opus-4-20250514': 200000,
+  'claude-sonnet-4-20250514': 200000,
+  'claude-sonnet-4-5-20250514': 200000,
+  'claude-haiku-4-5-20251001': 200000,
+  'claude-3-5-sonnet-20241022': 200000,
+  'claude-3-5-haiku-20241022': 200000,
+  'claude-3-opus-20240229': 200000,
+  // OpenAI models
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'gpt-4-turbo': 128000,
+  'o1': 200000,
+  'o1-mini': 128000,
+  'o3': 200000,
+  'o3-mini': 200000,
+  'o4-mini': 200000,
+  // Google models
+  'gemini-2.5-pro': 1000000,
+  'gemini-2.5-flash': 1000000,
+  'gemini-2.0-flash': 1000000,
+}
+
+export function getContextWindowSize(modelId?: string): number {
+  if (!modelId) return 200000 // default
+  // Try exact match first, then prefix match
+  if (CONTEXT_WINDOW_SIZES[modelId]) return CONTEXT_WINDOW_SIZES[modelId]
+  for (const [key, size] of Object.entries(CONTEXT_WINDOW_SIZES)) {
+    if (modelId.startsWith(key)) return size
+  }
+  return 200000 // default fallback
+}
+
 // Get all project IDs that have active queries running
 export function getActiveProjectIds(): string[] {
   const result: string[] = []
@@ -814,6 +889,7 @@ export function loadModelsFromConfig(): ModelInfo[] {
     value: m.id,
     displayName: m.name,
     description: `${m.provider}${m.baseUrl ? ` (${m.baseUrl})` : ''}`,
+    contextWindowSize: getContextWindowSize(m.modelId),
   }))
   cachedModels = models
   return models
@@ -1172,7 +1248,7 @@ export async function* executeQuery(
     onSessionInit: (sessionId: string) => void
     onPermissionRequest: (requestId: string, toolName: string, input: unknown, reason: string) => void
     onAskUserQuestion: (toolId: string, questions: unknown[]) => void
-    onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }) => void
+    onUsage: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindowUsed: number }) => void
     onSdkLog?: (type: string, detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => void
   },
   images?: ImageAttachment[],
@@ -1212,6 +1288,7 @@ export async function* executeQuery(
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
+    contextWindowUsed: 0,
   }
 
   // Build options via shared builder (testable independently)
@@ -1509,6 +1586,8 @@ export async function* executeQuery(
           queryUsage.cacheReadTokens += usage.cache_read_input_tokens || 0
           queryUsage.cacheCreationTokens +=
             usage.cache_creation_input_tokens || 0
+          // input_tokens represents the total context sent to the API for this turn
+          queryUsage.contextWindowUsed = usage.input_tokens || 0
           callbacks.onUsage({ ...queryUsage })
         }
       }

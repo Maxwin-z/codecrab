@@ -45,6 +45,7 @@ struct ProjectChatState {
     var sdkTools: [String] = []
     var activityHeartbeat: ActivityHeartbeat? = nil
     var queryQueue: [QueueItem] = []
+    var sessionUsage: SessionUsage? = nil
 }
 
 struct ActivityHeartbeat: Equatable {
@@ -58,6 +59,18 @@ struct ProjectActivity: Equatable {
     var activityType: String  // "thinking" | "text" | "tool_use" | "idle"
     var toolName: String?
     var textSnippet: String?
+}
+
+struct SessionUsage: Equatable {
+    var totalInputTokens: Int
+    var totalOutputTokens: Int
+    var totalCacheReadTokens: Int
+    var totalCacheCreateTokens: Int
+    var totalCostUsd: Double
+    var totalDurationMs: Double
+    var queryCount: Int
+    var contextWindowUsed: Int
+    var contextWindowMax: Int
 }
 
 @MainActor
@@ -106,6 +119,7 @@ class WebSocketService: ObservableObject {
     @Published var sdkTools: [String] = []
     @Published var activityHeartbeat: ActivityHeartbeat? = nil
     @Published var queryQueue: [QueueItem] = []
+    @Published var sessionUsage: SessionUsage? = nil
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
@@ -567,6 +581,7 @@ class WebSocketService: ObservableObject {
                 clearSessionPublished()
                 self.sessionId = ""
                 self.pendingPermission = nil
+                self.sessionUsage = nil
                 if let pid = projectId {
                     runningProjectIds.remove(pid)
                     // After /clear, server sends a new system init with the new session ID.
@@ -574,6 +589,7 @@ class WebSocketService: ObservableObject {
                     ensureProjectState(pid)
                     projectStates[pid]!.sessionId = ""
                     projectStates[pid]!.awaitingSessionSwitch = true
+                    projectStates[pid]!.sessionUsage = nil
                 }
                 self.isAborting = false
             }
@@ -682,6 +698,23 @@ class WebSocketService: ObservableObject {
                     contentSnippet: snippet,
                     elapsedSeconds: Int(elapsedMs / 1000)
                 ))
+            }
+        case "session_usage":
+            if isCurrentProject, let pid = projectId {
+                let usage = SessionUsage(
+                    totalInputTokens: json["totalInputTokens"] as? Int ?? 0,
+                    totalOutputTokens: json["totalOutputTokens"] as? Int ?? 0,
+                    totalCacheReadTokens: json["totalCacheReadTokens"] as? Int ?? 0,
+                    totalCacheCreateTokens: json["totalCacheCreateTokens"] as? Int ?? 0,
+                    totalCostUsd: json["totalCostUsd"] as? Double ?? 0,
+                    totalDurationMs: json["totalDurationMs"] as? Double ?? 0,
+                    queryCount: json["queryCount"] as? Int ?? 0,
+                    contextWindowUsed: json["contextWindowUsed"] as? Int ?? 0,
+                    contextWindowMax: json["contextWindowMax"] as? Int ?? 0
+                )
+                self.sessionUsage = usage
+                ensureProjectState(pid)
+                projectStates[pid]!.sessionUsage = usage
             }
         case "cron_task_completed":
             guard isCurrentProject else { break }
@@ -1318,6 +1351,7 @@ class WebSocketService: ObservableObject {
             projectStates[current]!.sdkTools = sdkTools
             projectStates[current]!.activityHeartbeat = activityHeartbeat
             projectStates[current]!.queryQueue = queryQueue
+            projectStates[current]!.sessionUsage = sessionUsage
         }
 
         activeProjectId = projectId
@@ -1338,6 +1372,7 @@ class WebSocketService: ObservableObject {
         sdkTools = state.sdkTools
         activityHeartbeat = state.activityHeartbeat
         queryQueue = state.queryQueue
+        sessionUsage = state.sessionUsage
         sessionId = state.sessionId
 
         // Restore viewing session's per-session state

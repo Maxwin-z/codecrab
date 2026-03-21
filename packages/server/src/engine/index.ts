@@ -26,9 +26,13 @@ export {
   getSessionStatuses,
   getCachedModels,
   generateSessionId,
+  getSessionUsage,
+  resetSessionUsage,
+  getContextWindowSize,
   type ClientState,
   type ProjectState,
   type SessionStatus,
+  type SessionUsage,
   type ModelConfig,
 } from './claude.js'
 

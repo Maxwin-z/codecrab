@@ -453,43 +453,74 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         </Button>
       </header>
 
-      {/* Connection status */}
-      <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground border-b shrink-0">
-        <span className={`w-1.5 h-1.5 rounded-full ${
-          ws.activityHeartbeat
-            ? ws.activityHeartbeat.paused
-              ? 'bg-yellow-500'
-              : 'bg-green-500 animate-pulse'
-            : ws.connected ? 'bg-green-500' : 'bg-red-500'
-        }`} />
-        <span>{ws.connected ? 'Connected' : 'Disconnected'}</span>
-        {ws.sessionId && (
-          <>
+      {/* Connection status + session usage */}
+      <div className="flex items-center justify-between px-4 py-1.5 text-xs text-muted-foreground border-b shrink-0">
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            ws.activityHeartbeat
+              ? ws.activityHeartbeat.paused
+                ? 'bg-yellow-500'
+                : 'bg-green-500 animate-pulse'
+              : ws.connected ? 'bg-green-500' : 'bg-red-500'
+          }`} />
+          <span>{ws.connected ? 'Connected' : 'Disconnected'}</span>
+          {ws.sessionId && (
+            <>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-muted-foreground font-mono">{ws.sessionId.slice(-6)}</span>
+            </>
+          )}
+          {ws.activityHeartbeat && (
+            <>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-muted-foreground">
+                {ws.activityHeartbeat.paused
+                  ? 'Waiting for input'
+                  : ws.activityHeartbeat.lastActivityType === 'text_delta'
+                    ? 'Streaming'
+                    : ws.activityHeartbeat.lastActivityType === 'thinking_delta'
+                      ? 'Thinking'
+                      : ws.activityHeartbeat.lastActivityType === 'tool_use'
+                        ? `Tool: ${ws.activityHeartbeat.lastToolName || 'unknown'}`
+                        : ws.activityHeartbeat.lastActivityType === 'tool_result'
+                          ? 'Processing result'
+                          : 'Working'}
+              </span>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-muted-foreground font-mono">
+                {Math.floor(ws.activityHeartbeat.elapsedMs / 60000)}m {Math.floor((ws.activityHeartbeat.elapsedMs % 60000) / 1000)}s
+              </span>
+            </>
+          )}
+        </div>
+        {ws.sessionUsage && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span className="font-mono">${ws.sessionUsage.totalCostUsd.toFixed(4)}</span>
             <span className="text-muted-foreground/50">·</span>
-            <span className="text-muted-foreground font-mono">{ws.sessionId.slice(-6)}</span>
-          </>
-        )}
-        {ws.activityHeartbeat && (
-          <>
+            <span className="font-mono">{((ws.sessionUsage.totalInputTokens + ws.sessionUsage.totalOutputTokens) / 1000).toFixed(1)}k tok</span>
             <span className="text-muted-foreground/50">·</span>
-            <span className="text-muted-foreground">
-              {ws.activityHeartbeat.paused
-                ? 'Waiting for input'
-                : ws.activityHeartbeat.lastActivityType === 'text_delta'
-                  ? 'Streaming'
-                  : ws.activityHeartbeat.lastActivityType === 'thinking_delta'
-                    ? 'Thinking'
-                    : ws.activityHeartbeat.lastActivityType === 'tool_use'
-                      ? `Tool: ${ws.activityHeartbeat.lastToolName || 'unknown'}`
-                      : ws.activityHeartbeat.lastActivityType === 'tool_result'
-                        ? 'Processing result'
-                        : 'Working'}
-            </span>
-            <span className="text-muted-foreground/50">·</span>
-            <span className="text-muted-foreground font-mono">
-              {Math.floor(ws.activityHeartbeat.elapsedMs / 60000)}m {Math.floor((ws.activityHeartbeat.elapsedMs % 60000) / 1000)}s
-            </span>
-          </>
+            <span className="font-mono">{ws.sessionUsage.queryCount}q</span>
+            {ws.sessionUsage.contextWindowUsed > 0 && (
+              <>
+                <span className="text-muted-foreground/50">·</span>
+                <div className="flex items-center gap-1" title={`Context: ${(ws.sessionUsage.contextWindowUsed / 1000).toFixed(0)}k / ${(ws.sessionUsage.contextWindowMax / 1000).toFixed(0)}k tokens`}>
+                  <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        ws.sessionUsage.contextWindowUsed / ws.sessionUsage.contextWindowMax > 0.8
+                          ? 'bg-red-500'
+                          : ws.sessionUsage.contextWindowUsed / ws.sessionUsage.contextWindowMax > 0.5
+                            ? 'bg-yellow-500'
+                            : 'bg-blue-500'
+                      }`}
+                      style={{ width: `${Math.min(100, (ws.sessionUsage.contextWindowUsed / ws.sessionUsage.contextWindowMax) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="font-mono">{Math.round((ws.sessionUsage.contextWindowUsed / ws.sessionUsage.contextWindowMax) * 100)}%</span>
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
 

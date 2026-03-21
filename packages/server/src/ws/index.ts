@@ -33,6 +33,9 @@ import {
   getModelDisplayName,
   getDefaultModelConfig,
   probeSdkInit,
+  getSessionUsage,
+  resetSessionUsage,
+  getContextWindowSize,
 } from '../engine/claude.js'
 import { QueryQueue } from '../engine/query-queue.js'
 import { sendQueryCompletionPush } from '../mcp/push/index.js'
@@ -559,6 +562,9 @@ async function executeCronQuery(
         logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
         queryQueue.touchActivity(queuedQuery.id, 'usage')
         maybeSendActivityHeartbeat(projectId, execSessionId, queuedQuery.id)
+        // Update session-level usage tracking
+        const su = getSessionUsage(projectId)
+        su.contextWindowUsed = usage.contextWindowUsed
       },
       onSdkLog: (type, detail, data, parentToolUseId, taskId) => {
         logEvent(type as any, detail, data, parentToolUseId, taskId)
@@ -1888,6 +1894,11 @@ async function executeUserQuery(
         logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
         queryQueue.touchActivity(queuedQuery.id, 'usage')
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+        // Track latest per-query cumulative usage (for session accumulation at result time)
+        lastQueryUsage = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheCreationTokens: usage.cacheCreationTokens }
+        // Update context window utilization
+        const su = getSessionUsage(projectId)
+        su.contextWindowUsed = usage.contextWindowUsed
       },
       onSdkLog: (type, detail, data, parentToolUseId, taskId) => {
         logEvent(type as any, detail, data, parentToolUseId, taskId)
@@ -1896,6 +1907,7 @@ async function executeUserQuery(
 
     let finalText = ''
     let hasBackgroundTasks = false
+    let lastQueryUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }
 
     // Use manual iteration so we can detach the iterator for background task
     // consumption without closing the generator (for-await-of calls return() on break)
@@ -1949,6 +1961,17 @@ async function executeUserQuery(
             projectId,
             sessionId: session.sessionId,
           })
+          // Accumulate session-level cost, duration, and token counts
+          {
+            const su = getSessionUsage(projectId)
+            su.totalCostUsd += resultData.costUsd || 0
+            su.totalDurationMs += resultData.durationMs || 0
+            su.totalInputTokens += lastQueryUsage.inputTokens
+            su.totalOutputTokens += lastQueryUsage.outputTokens
+            su.totalCacheReadTokens += lastQueryUsage.cacheReadTokens
+            su.totalCacheCreateTokens += lastQueryUsage.cacheCreationTokens
+            su.queryCount += 1
+          }
           break
         }
         case 'background_tasks_active': {
@@ -2068,6 +2091,25 @@ async function executeUserQuery(
       sessionId: session.sessionId,
       queryId: queuedQuery.id,
     })
+    // Broadcast session usage after query completes
+    {
+      const su = getSessionUsage(projectId)
+      const modelConfig = getDefaultModelConfig()
+      broadcastToProject(projectId, {
+        type: 'session_usage',
+        projectId,
+        sessionId: session.sessionId,
+        totalInputTokens: su.totalInputTokens,
+        totalOutputTokens: su.totalOutputTokens,
+        totalCacheReadTokens: su.totalCacheReadTokens,
+        totalCacheCreateTokens: su.totalCacheCreateTokens,
+        totalCostUsd: su.totalCostUsd,
+        totalDurationMs: su.totalDurationMs,
+        queryCount: su.queryCount,
+        contextWindowUsed: su.contextWindowUsed,
+        contextWindowMax: getContextWindowSize(modelConfig?.modelId),
+      })
+    }
     broadcastProjectStatuses()
   }
 }
@@ -2318,6 +2360,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
         const projState = getOrCreateProjectState(projectId)
         projState.messages = []
         projState.sessionId = undefined
+        resetSessionUsage(projectId)
 
         // Clear client state
         clientState.sessionId = undefined

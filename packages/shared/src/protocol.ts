@@ -157,6 +157,21 @@ export interface ResultMessage extends ServerProjectContext {
   isError?: boolean
 }
 
+export interface SessionUsageMessage extends ServerProjectContext {
+  type: 'session_usage'
+  /** Cumulative session totals */
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCacheReadTokens: number
+  totalCacheCreateTokens: number
+  totalCostUsd: number
+  totalDurationMs: number
+  queryCount: number
+  /** Context window utilization (from latest API turn) */
+  contextWindowUsed: number   // input_tokens from most recent message_start
+  contextWindowMax: number    // model's context window size
+}
+
 export interface QueryStartMessage extends ServerProjectContext {
   type: 'query_start'
   queryId?: string
@@ -408,6 +423,7 @@ export type ServerMessage =
   | SdkEventHistoryMessage
   | ProjectActivityMessage
   | BackgroundTaskUpdateMessage
+  | SessionUsageMessage
 
 // ============ Image Attachments ============
 
@@ -440,6 +456,7 @@ export interface ModelInfo {
   supportedEffortLevels?: string[]
   supportsAdaptiveThinking?: boolean
   supportsFastMode?: boolean
+  contextWindowSize?: number  // model's max context window in tokens
 }
 
 export interface ChatMessage {

@@ -164,6 +164,18 @@ interface ProjectChatState {
   } | null
   // Query queue for this project
   queryQueue: QueueItem[]
+  // Session usage tracking
+  sessionUsage: {
+    totalInputTokens: number
+    totalOutputTokens: number
+    totalCacheReadTokens: number
+    totalCacheCreateTokens: number
+    totalCostUsd: number
+    totalDurationMs: number
+    queryCount: number
+    contextWindowUsed: number
+    contextWindowMax: number
+  } | null
 }
 
 function createEmptyProjectState(): ProjectChatState {
@@ -182,6 +194,7 @@ function createEmptyProjectState(): ProjectChatState {
     sdkTools: [],
     activityHeartbeat: null,
     queryQueue: [],
+    sessionUsage: null,
   }
 }
 
@@ -208,6 +221,7 @@ export interface UseWebSocketReturn {
   sdkEvents: DebugEvent[]
   activityHeartbeat: ProjectChatState['activityHeartbeat']
   queryQueue: QueueItem[]
+  sessionUsage: ProjectChatState['sessionUsage']
   sdkLoaded: boolean
   probeSdk: () => void
   sendPrompt: (prompt: string, images?: ImageAttachment[], enabledMcps?: string[], disabledSdkServers?: string[], disabledSkills?: string[]) => void
@@ -604,6 +618,7 @@ export function useWebSocket(): UseWebSocketReturn {
           if (sid) {
             pState.sessionStates.set(sid, createEmptySessionState())
           }
+          pState.sessionUsage = null
           needsRender = true
           break
         }
@@ -754,6 +769,23 @@ export function useWebSocket(): UseWebSocketReturn {
             sState.sdkEvents = (msg as any).events
             if (isViewing) needsRender = true
           }
+          break
+        }
+
+        case 'session_usage': {
+          const su = msg as any
+          pState.sessionUsage = {
+            totalInputTokens: su.totalInputTokens,
+            totalOutputTokens: su.totalOutputTokens,
+            totalCacheReadTokens: su.totalCacheReadTokens,
+            totalCacheCreateTokens: su.totalCacheCreateTokens,
+            totalCostUsd: su.totalCostUsd,
+            totalDurationMs: su.totalDurationMs,
+            queryCount: su.queryCount,
+            contextWindowUsed: su.contextWindowUsed,
+            contextWindowMax: su.contextWindowMax,
+          }
+          needsRender = true
           break
         }
 
@@ -1079,6 +1111,7 @@ export function useWebSocket(): UseWebSocketReturn {
     projectStatuses,
     activityHeartbeat: activeState.activityHeartbeat,
     queryQueue: activeState.queryQueue,
+    sessionUsage: activeState.sessionUsage,
     sdkMcpServers: activeState.sdkMcpServers,
     sdkSkills: activeState.sdkSkills,
     sdkTools: activeState.sdkTools,
