@@ -86,6 +86,7 @@ struct AgentResponseView: View {
     let isStreaming: Bool
     var onResumeSession: ((String) -> Void)? = nil
     @State private var showDebug = false
+    @State private var renderMarkdown = false
 
     private static let messageTypes: Set<String> = ["thinking", "text", "tool_use", "tool_result", "cron_task_completed"]
 
@@ -113,7 +114,7 @@ struct AgentResponseView: View {
                     } else if event.type == "result", let data = event.data, case .string(_) = data["execSessionId"] {
                         CronResultView(event: event, onResumeSession: onResumeSession)
                     } else {
-                        MessageModeEventView(event: event, isStreaming: isStreaming)
+                        MessageModeEventView(event: event, isStreaming: isStreaming, renderMarkdown: renderMarkdown)
                     }
                 }
             }
@@ -130,8 +131,17 @@ struct AgentResponseView: View {
                 .padding(.top, 2)
             }
 
-            // Toggle button (bottom-left)
-            HStack {
+            // Auto-switch to markdown when query completes
+            .onChange(of: isStreaming) { _, streaming in
+                if !streaming {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        renderMarkdown = true
+                    }
+                }
+            }
+
+            // Toggle buttons (bottom-left)
+            HStack(spacing: 6) {
                 Button(action: { withAnimation(.easeInOut(duration: 0.15)) { showDebug.toggle() } }) {
                     HStack(spacing: 3) {
                         Image(systemName: showDebug ? "ladybug.fill" : "bubble.left.fill")
@@ -145,6 +155,21 @@ struct AgentResponseView: View {
                     .background(Capsule().fill(Color(UIColor.tertiarySystemFill)))
                 }
                 .buttonStyle(PlainButtonStyle())
+                if !isStreaming && !showDebug {
+                    Button(action: { withAnimation(.easeInOut(duration: 0.15)) { renderMarkdown.toggle() } }) {
+                        HStack(spacing: 3) {
+                            Text(renderMarkdown ? "📝" : "📄")
+                                .font(.system(size: 9))
+                            Text(renderMarkdown ? "Md" : "Txt")
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .foregroundStyle(renderMarkdown ? .blue : .secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color(UIColor.tertiarySystemFill)))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
                 Spacer()
             }
         }
@@ -156,11 +181,12 @@ struct AgentResponseView: View {
 struct MessageModeEventView: View {
     let event: SdkEvent
     let isStreaming: Bool
+    var renderMarkdown: Bool = false
 
     var body: some View {
         switch event.type {
         case "text":
-            MessageModeTextView(event: event)
+            MessageModeTextView(event: event, renderMarkdown: renderMarkdown)
         case "thinking":
             MessageModeThinkingView(event: event, isStreaming: isStreaming)
         case "tool_use":
@@ -175,6 +201,7 @@ struct MessageModeEventView: View {
 
 private struct MessageModeTextView: View {
     let event: SdkEvent
+    var renderMarkdown: Bool = false
     @State private var existingPaths: Set<String> = []
     @State private var previewFilePath: String? = nil
 
@@ -189,7 +216,9 @@ private struct MessageModeTextView: View {
     var body: some View {
         if !content.isEmpty {
             Group {
-                if existingPaths.isEmpty {
+                if renderMarkdown {
+                    MarkdownContentView(content: content)
+                } else if existingPaths.isEmpty {
                     InlineSelectableText(
                         text: content,
                         font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
@@ -226,6 +255,266 @@ private struct MessageModeTextView: View {
                 existingPaths = found
             }
         }
+    }
+}
+
+// MARK: - Markdown Content View
+
+private struct MarkdownContentView: View {
+    let content: String
+
+    private enum TableAlignment {
+        case left, center, right
+    }
+
+    private enum BlockKind {
+        case text(String)
+        case code(language: String, content: String)
+        case table(headers: [String], alignments: [TableAlignment], rows: [[String]])
+    }
+
+    private struct ContentBlock: Identifiable {
+        let id = UUID()
+        let kind: BlockKind
+    }
+
+    private var blocks: [ContentBlock] {
+        // First pass: split by code fences
+        var rawBlocks: [(isCode: Bool, language: String, text: String)] = []
+        let lines = content.components(separatedBy: "\n")
+        var buffer: [String] = []
+        var inCode = false
+        var lang = ""
+
+        for line in lines {
+            if !inCode && line.hasPrefix("```") {
+                let text = buffer.joined(separator: "\n")
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    rawBlocks.append((false, "", text))
+                }
+                buffer = []
+                inCode = true
+                lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            } else if inCode && line.hasPrefix("```") {
+                rawBlocks.append((true, lang, buffer.joined(separator: "\n")))
+                buffer = []
+                inCode = false
+                lang = ""
+            } else {
+                buffer.append(line)
+            }
+        }
+        if !buffer.isEmpty {
+            let text = buffer.joined(separator: "\n")
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                rawBlocks.append((inCode, inCode ? lang : "", text))
+            }
+        }
+
+        // Second pass: extract tables from text blocks
+        var result: [ContentBlock] = []
+        for raw in rawBlocks {
+            if raw.isCode {
+                result.append(ContentBlock(kind: .code(language: raw.language, content: raw.text)))
+            } else {
+                result.append(contentsOf: extractTables(from: raw.text))
+            }
+        }
+        return result
+    }
+
+    // MARK: Table Detection
+
+    private func extractTables(from text: String) -> [ContentBlock] {
+        let lines = text.components(separatedBy: "\n")
+        var result: [ContentBlock] = []
+        var textBuffer: [String] = []
+        var i = 0
+
+        while i < lines.count {
+            if i + 2 <= lines.count,
+               isTableRow(lines[i]),
+               i + 1 < lines.count && isTableSeparator(lines[i + 1]) {
+                let accum = textBuffer.joined(separator: "\n")
+                if !accum.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    result.append(ContentBlock(kind: .text(accum)))
+                }
+                textBuffer = []
+
+                let headers = parseTableRow(lines[i])
+                let alignments = parseAlignments(lines[i + 1], count: headers.count)
+                var rows: [[String]] = []
+                var j = i + 2
+                while j < lines.count && isTableRow(lines[j]) {
+                    rows.append(parseTableRow(lines[j]))
+                    j += 1
+                }
+                result.append(ContentBlock(kind: .table(headers: headers, alignments: alignments, rows: rows)))
+                i = j
+            } else {
+                textBuffer.append(lines[i])
+                i += 1
+            }
+        }
+
+        let accum = textBuffer.joined(separator: "\n")
+        if !accum.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            result.append(ContentBlock(kind: .text(accum)))
+        }
+        return result
+    }
+
+    private func isTableRow(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.contains("|") && !trimmed.hasPrefix("```")
+    }
+
+    private func isTableSeparator(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") && trimmed.contains("-") else { return false }
+        let allowed = CharacterSet(charactersIn: "|-: ")
+        return trimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    private func parseTableRow(_ line: String) -> [String] {
+        var s = line.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("|") { s = String(s.dropFirst()) }
+        if s.hasSuffix("|") { s = String(s.dropLast()) }
+        return s.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func parseAlignments(_ line: String, count: Int) -> [TableAlignment] {
+        let cells = parseTableRow(line)
+        return (0..<count).map { idx in
+            guard idx < cells.count else { return .left }
+            let c = cells[idx].trimmingCharacters(in: .whitespaces)
+            if c.hasPrefix(":") && c.hasSuffix(":") { return .center }
+            if c.hasSuffix(":") { return .right }
+            return .left
+        }
+    }
+
+    private func swiftUIAlignment(_ a: TableAlignment) -> Alignment {
+        switch a {
+        case .left: return .leading
+        case .center: return .center
+        case .right: return .trailing
+        }
+    }
+
+    // MARK: Body
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(blocks) { block in
+                switch block.kind {
+                case .code(let language, let code):
+                    codeBlockView(language: language, code: code)
+                case .text(let text):
+                    inlineMarkdownView(text)
+                case .table(let headers, let alignments, let rows):
+                    tableView(headers: headers, alignments: alignments, rows: rows)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Code Block
+
+    private func codeBlockView(language: String, code: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !language.isEmpty {
+                Text(language)
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 6)
+            }
+            InlineSelectableText(
+                text: code,
+                font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular),
+                textColor: .label
+            )
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(8)
+    }
+
+    // MARK: Inline Markdown
+
+    @ViewBuilder
+    private func inlineMarkdownView(_ text: String) -> some View {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        if let attributed = try? AttributedString(markdown: text, options: options) {
+            Text(attributed)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: Table
+
+    @ViewBuilder
+    private func tableView(headers: [String], alignments: [TableAlignment], rows: [[String]]) -> some View {
+        let colCount = headers.count
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                // Header
+                GridRow {
+                    ForEach(0..<colCount, id: \.self) { idx in
+                        Text(headers[idx])
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .fontDesign(.monospaced)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: swiftUIAlignment(idx < alignments.count ? alignments[idx] : .left))
+                    }
+                }
+                .background(Color(UIColor.tertiarySystemBackground))
+
+                // Separator
+                GridRow {
+                    Rectangle()
+                        .fill(Color(UIColor.separator))
+                        .frame(height: 1)
+                        .gridCellColumns(colCount)
+                }
+
+                // Data rows
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                    GridRow {
+                        ForEach(0..<colCount, id: \.self) { colIdx in
+                            Text(colIdx < row.count ? row[colIdx] : "")
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .frame(maxWidth: .infinity, alignment: swiftUIAlignment(colIdx < alignments.count ? alignments[colIdx] : .left))
+                        }
+                    }
+                    .background(rowIdx % 2 == 1 ? Color(UIColor.secondarySystemBackground).opacity(0.3) : Color.clear)
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color(UIColor.separator), lineWidth: 0.5)
+        )
     }
 }
 
