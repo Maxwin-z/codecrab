@@ -243,6 +243,16 @@ struct ChatView: View {
         .onTapGesture {
             isInputFocused = false
         }
+        .overlay(alignment: .bottomTrailing) {
+            QueryQueueBarView(
+                items: wsService.queryQueue,
+                currentSessionId: wsService.sessionId,
+                onAbort: { queryId in wsService.abort(queryId: queryId) },
+                onDequeue: { queryId in wsService.dequeueQuery(queryId) },
+                onExecuteNow: { queryId in wsService.executeNow(queryId) },
+                isAborting: wsService.isAborting
+            )
+        }
     }
 
     // MARK: - Bottom Controls
@@ -281,20 +291,6 @@ struct ChatView: View {
             } onDeny: {
                 wsService.respondToPermission(requestId: pp.requestId, allow: false)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 4)
-        }
-
-        // Query Queue
-        if !wsService.queryQueue.isEmpty {
-            QueryQueueBarView(
-                items: wsService.queryQueue,
-                currentSessionId: wsService.sessionId,
-                onAbort: { queryId in wsService.abort(queryId: queryId) },
-                onDequeue: { queryId in wsService.dequeueQuery(queryId) },
-                onExecuteNow: { queryId in wsService.executeNow(queryId) },
-                isAborting: wsService.isAborting
-            )
             .padding(.horizontal)
             .padding(.vertical, 4)
         }
