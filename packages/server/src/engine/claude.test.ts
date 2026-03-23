@@ -303,7 +303,8 @@ describe('abortQuery', () => {
     expect(projState.activeQuery).toBeNull()
   })
 
-  it('should call close() on queryObj if available', () => {
+  it('should call close() on queryObj after a delay', async () => {
+    vi.useFakeTimers()
     const state = createClientState(clientId, undefined, '/tmp')
     const closeFn = vi.fn()
     state.activeQuery = {
@@ -312,10 +313,14 @@ describe('abortQuery', () => {
     }
 
     abortQuery(state)
+    expect(closeFn).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(500)
     expect(closeFn).toHaveBeenCalledOnce()
+    vi.useRealTimers()
   })
 
   it('should not throw if queryObj.close() throws', () => {
+    vi.useFakeTimers()
     const state = createClientState(clientId, undefined, '/tmp')
     state.activeQuery = {
       abort: new AbortController(),
@@ -326,6 +331,8 @@ describe('abortQuery', () => {
 
     expect(() => abortQuery(state)).not.toThrow()
     expect(state.activeQuery).toBeNull()
+    expect(() => vi.advanceTimersByTime(500)).not.toThrow()
+    vi.useRealTimers()
   })
 })
 

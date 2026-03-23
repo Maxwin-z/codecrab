@@ -1901,15 +1901,20 @@ export function handleQuestionResponse(
 // Abort active query
 export function abortQuery(client: ClientState): boolean {
   if (client.activeQuery) {
+    const queryObj = client.activeQuery.queryObj
     // Signal abort via AbortController
     client.activeQuery.abort.abort()
-    // Forcefully close the SDK subprocess if available
-    if (client.activeQuery.queryObj) {
-      try {
-        client.activeQuery.queryObj.close()
-      } catch {
-        // Ignore close errors (process may already be dead)
-      }
+    // Delay forceful close to let the abort signal propagate through the SDK
+    // (avoids "Operation aborted" crash when SDK tries to write deny response
+    // to a subprocess that was killed synchronously after abort)
+    if (queryObj) {
+      setTimeout(() => {
+        try {
+          queryObj.close()
+        } catch {
+          // Ignore close errors (process may already be dead)
+        }
+      }, 500)
     }
     client.activeQuery = null
 
