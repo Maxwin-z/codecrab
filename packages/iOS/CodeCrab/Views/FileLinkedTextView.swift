@@ -168,15 +168,16 @@ struct FileLinkedTextView: UIViewRepresentable {
         var onPathTap: ((String) -> Void)?
         var lastPaths: Set<String> = []
 
-        func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
-            if URL.scheme == "filepreview" {
-                let path = URL.absoluteString
-                    .replacingOccurrences(of: "filepreview://", with: "")
-                    .removingPercentEncoding ?? URL.path
-                onPathTap?(path)
-                return false
+        func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
+            if case .link(let url) = textItem.content, url.scheme == "filepreview" {
+                return UIAction { _ in
+                    let path = url.absoluteString
+                        .replacingOccurrences(of: "filepreview://", with: "")
+                        .removingPercentEncoding ?? url.path
+                    self.onPathTap?(path)
+                }
             }
-            return true
+            return defaultAction
         }
     }
 }
