@@ -234,7 +234,7 @@ async function getGitFiles(root: string): Promise<string[] | null> {
   try {
     // Get tracked + untracked-but-not-ignored files (respects .gitignore)
     const { stdout } = await execAsync(
-      'git ls-files --cached --others --exclude-standard',
+      'git -c core.quotePath=false ls-files --cached --others --exclude-standard',
       { cwd: root, maxBuffer: 10 * 1024 * 1024 },
     )
     return stdout.split('\n').filter(Boolean)
