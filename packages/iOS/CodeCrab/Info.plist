@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>CodeCrab uses the camera to scan QR codes for quick server login.</string>
+	<string>CodeCrab uses the camera to scan QR codes and take photos to attach to your messages.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

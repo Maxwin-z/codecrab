@@ -26,6 +26,7 @@ struct InputBarView: View {
     @State private var showMcpPopover = false
     @State private var sdkProbing = false
     @State private var showCanvas = false
+    @State private var showCamera = false
     @State private var showLocalePicker = false
     @State private var micPulse = false
     @State private var showFileMention = false
@@ -308,6 +309,15 @@ struct InputBarView: View {
                             }
                         }
 
+                        // Camera capture
+                        Button(action: { showCamera = true }) {
+                            Image(systemName: "camera")
+                                .font(.system(size: 16))
+                                .foregroundColor(.secondary)
+                                .frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+
                         // MCP toggle
                         if !availableMcps.isEmpty {
                             Button(action: {
@@ -509,6 +519,17 @@ struct InputBarView: View {
                     }
                 },
                 onCancel: { showCanvas = false }
+            )
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPickerView(
+                onCapture: { image in
+                    showCamera = false
+                    if let attachment = ImageCompressor.compressImage(image) {
+                        attachments.append(attachment)
+                    }
+                },
+                onCancel: { showCamera = false }
             )
         }
     }
