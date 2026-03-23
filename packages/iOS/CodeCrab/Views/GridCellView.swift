@@ -259,6 +259,8 @@ struct GridSessionListView: View {
 // MARK: - Grid Chat Wrapper
 
 /// Wraps ChatView for grid cells. Connects to WebSocket only when the cell is active.
+/// When a cell is inactive, it displays a cached snapshot of its last state so that
+/// multiple cells can show different projects' chats simultaneously.
 struct GridChatWrapper: View {
     let route: ChatRoute
     let cellIndex: Int
@@ -268,24 +270,72 @@ struct GridChatWrapper: View {
     @Binding var shareAttachments: [ImageAttachment]
     @Binding var shareSessionId: String?
 
+    // Cached state for inactive display
+    @State private var cachedMessages: [ChatMessage] = []
+    @State private var cachedStreamingText: String = ""
+    @State private var cachedStreamingThinking: String = ""
+    @State private var cachedSdkEvents: [SdkEvent] = []
+    @State private var cachedIsRunning: Bool = false
+    @State private var hasBeenActivated: Bool = false
+
     var body: some View {
-        ChatView(
-            project: route.project,
-            initialSessionId: route.sessionId,
-            pendingAttachments: $shareAttachments,
-            pendingSessionId: $shareSessionId,
-            autoConnect: false
-        )
+        Group {
+            if isActiveCell {
+                ChatView(
+                    project: route.project,
+                    initialSessionId: route.sessionId,
+                    pendingAttachments: $shareAttachments,
+                    pendingSessionId: $shareSessionId,
+                    autoConnect: false
+                )
+            } else if hasBeenActivated {
+                InactiveChatContentView(
+                    project: route.project,
+                    messages: cachedMessages,
+                    streamingText: cachedStreamingText,
+                    streamingThinking: cachedStreamingThinking,
+                    sdkEvents: cachedSdkEvents,
+                    isRunning: cachedIsRunning
+                )
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.tertiary)
+                    Text("Tap to start chatting")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
         .onAppear {
             if isActiveCell {
+                hasBeenActivated = true
                 switchToThisSession()
             }
         }
-        .onChange(of: isActiveCell) { _, active in
-            if active {
-                switchToThisSession()
+        .onChange(of: isActiveCell) { wasActive, nowActive in
+            if wasActive && !nowActive {
+                // Becoming inactive: capture snapshot of current state
+                cacheCurrentState()
+            }
+            if nowActive {
+                hasBeenActivated = true
+                // Defer to ensure sibling cells have cached their state first
+                DispatchQueue.main.async {
+                    switchToThisSession()
+                }
             }
         }
+    }
+
+    private func cacheCurrentState() {
+        cachedMessages = wsService.messages
+        cachedStreamingText = wsService.displayStreamingText
+        cachedStreamingThinking = wsService.streamingThinking
+        cachedSdkEvents = wsService.sdkEvents
+        cachedIsRunning = wsService.isRunning
     }
 
     private func switchToThisSession() {
@@ -297,5 +347,49 @@ struct GridChatWrapper: View {
         } else {
             wsService.newChat()
         }
+    }
+}
+
+// MARK: - Inactive Chat Content View
+
+/// Read-only view of a chat cell's cached state, shown when the cell is not active.
+/// Displays the messages snapshot without interactive controls.
+struct InactiveChatContentView: View {
+    let project: Project
+    let messages: [ChatMessage]
+    let streamingText: String
+    let streamingThinking: String
+    let sdkEvents: [SdkEvent]
+    let isRunning: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if messages.isEmpty && streamingText.isEmpty && streamingThinking.isEmpty && !isRunning {
+                VStack {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.tertiary)
+                        Text("Tap to continue chatting")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                }
+            } else {
+                ScrollView {
+                    MessageListView(
+                        messages: messages,
+                        streamingText: streamingText,
+                        streamingThinking: streamingThinking,
+                        isRunning: isRunning,
+                        sdkEvents: sdkEvents
+                    )
+                    .padding()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

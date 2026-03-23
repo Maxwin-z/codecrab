@@ -77,7 +77,7 @@ enum CellContent: Equatable {
         case .soul: return "Soul"
         case .cron: return "Tasks"
         case .projectSessions(let p): return "\(p.icon) \(p.name)"
-        case .chat(let r): return "\(r.project.icon) Chat"
+        case .chat(let r): return "\(r.project.icon) \(r.project.name)"
         }
     }
 }
