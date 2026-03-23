@@ -11,30 +11,50 @@ struct CanvasView: View {
     @State private var hasStrokes = false
 
     var body: some View {
-        NavigationStack {
+        ZStack(alignment: .top) {
             CanvasRepresentable(canvasView: $canvasView, toolPicker: $toolPicker, hasStrokes: $hasStrokes, colorScheme: colorScheme)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle("Canvas")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { onCancel() }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { exportAndDone() }
-                            .fontWeight(.semibold)
-                            .disabled(!hasStrokes)
-                    }
-                    ToolbarItem(placement: .secondaryAction) {
-                        Button {
-                            canvasView.drawing = PKDrawing()
-                            hasStrokes = false
-                        } label: {
-                            Label("Clear", systemImage: "trash")
-                        }
-                        .disabled(!hasStrokes)
-                    }
+                .ignoresSafeArea()
+
+            // Floating toolbar
+            HStack(spacing: 12) {
+                Button {
+                    onCancel()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
                 }
+
+                Spacer()
+
+                Button {
+                    canvasView.drawing = PKDrawing()
+                    hasStrokes = false
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .disabled(!hasStrokes)
+
+                Button {
+                    exportAndDone()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .background(hasStrokes ? AnyShapeStyle(.tint) : AnyShapeStyle(.ultraThinMaterial))
+                        .foregroundStyle(hasStrokes ? .white : .primary)
+                        .clipShape(Circle())
+                }
+                .disabled(!hasStrokes)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
         }
     }
 

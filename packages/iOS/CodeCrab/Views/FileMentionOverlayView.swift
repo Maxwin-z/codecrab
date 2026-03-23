@@ -144,7 +144,7 @@ struct FileMentionOverlayView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 200)
+                .frame(minHeight: 160, maxHeight: 360)
             }
         }
         .background(Color(UIColor.secondarySystemBackground))
