@@ -33,8 +33,8 @@ function TextContent({ text, renderMarkdown }: { text: string; renderMarkdown?: 
         prose-h3:text-sm prose-h3:mt-2
         prose-p:leading-relaxed prose-p:my-1.5 prose-p:text-sm
         prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-        prose-code:text-xs prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
-        prose-pre:bg-muted prose-pre:text-xs prose-pre:rounded-lg prose-pre:p-3 prose-pre:my-2
+        prose-code:text-xs prose-code:bg-zinc-100 prose-code:text-zinc-800 dark:prose-code:bg-zinc-800 dark:prose-code:text-zinc-200 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+        prose-pre:bg-zinc-100 prose-pre:text-zinc-800 dark:prose-pre:bg-zinc-900 dark:prose-pre:text-zinc-200 prose-pre:text-xs prose-pre:rounded-lg prose-pre:p-3 prose-pre:my-2
         prose-li:my-0.5 prose-li:text-sm
         prose-ul:my-1.5 prose-ol:my-1.5
         prose-table:text-xs
