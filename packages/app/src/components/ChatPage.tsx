@@ -655,6 +655,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
         onToggleMcp={handleToggleMcp}
         sdkLoaded={ws.sdkLoaded}
         onProbeSdk={ws.probeSdk}
+        projectPath={project?.path}
       />
 
       {/* Exec Session Sheet */}

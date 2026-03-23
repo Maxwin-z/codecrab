@@ -1,6 +1,7 @@
-// InputBar — user text input with image upload and drag & drop support
+// InputBar — user text input with image upload, drag & drop, and @file mention support
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import type { ImageAttachment, McpInfo, PermissionMode } from '@codecrab/shared'
+import { authFetch } from '@/lib/auth'
 
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const MAX_LONG_EDGE = 1568
@@ -9,6 +10,13 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 interface PreviewImage {
   attachment: ImageAttachment
   previewUrl: string // object URL for thumbnail display
+}
+
+interface MentionResult {
+  name: string
+  path: string
+  relativePath: string
+  isDirectory: boolean
 }
 
 interface InputBarProps {
@@ -25,6 +33,7 @@ interface InputBarProps {
   onToggleMcp?: (mcpId: string) => void
   sdkLoaded?: boolean
   onProbeSdk?: () => void
+  projectPath?: string
 }
 
 /** Compress and resize an image file, returns base64 ImageAttachment */
@@ -88,7 +97,7 @@ export interface InputBarHandle {
   setText: (text: string) => void
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange, availableMcps, enabledMcps, onToggleMcp, sdkLoaded, onProbeSdk }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onAbort, isRunning, isAborting, disabled, currentModel, permissionMode, onPermissionModeChange, availableMcps, enabledMcps, onToggleMcp, sdkLoaded, onProbeSdk, projectPath }, ref) {
   const [text, setText] = useState('')
   const [images, setImages] = useState<PreviewImage[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -98,6 +107,107 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
+
+  // --- @ file mention state ---
+  const [mentionActive, setMentionActive] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionResults, setMentionResults] = useState<MentionResult[]>([])
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionLoading, setMentionLoading] = useState(false)
+  const mentionAnchorRef = useRef<number>(-1) // cursor position of the '@'
+  const mentionDebounceRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const mentionListRef = useRef<HTMLDivElement>(null)
+
+  // --- @ mention: search files ---
+  const searchFiles = useCallback(async (query: string) => {
+    if (!projectPath) return
+    setMentionLoading(true)
+    try {
+      const params = new URLSearchParams({ root: projectPath, limit: '20' })
+      if (query) params.set('q', query)
+      const res = await authFetch(`/api/files/search?${params}`)
+      if (!res.ok) return
+      const data: MentionResult[] = await res.json()
+      setMentionResults(data)
+      setMentionIndex(0)
+    } catch {
+      // ignore search errors
+    } finally {
+      setMentionLoading(false)
+    }
+  }, [projectPath])
+
+  // Detect @ trigger and extract query from text changes
+  const handleMentionDetect = useCallback((value: string, cursorPos: number) => {
+    if (!projectPath) {
+      setMentionActive(false)
+      return
+    }
+    // Walk backwards from cursor to find an unescaped '@' that starts a mention
+    // A mention starts with '@' preceded by start-of-string or whitespace
+    let atPos = -1
+    for (let i = cursorPos - 1; i >= 0; i--) {
+      const ch = value[i]
+      if (ch === ' ' || ch === '\n') break // hit whitespace before finding '@'
+      if (ch === '@') {
+        // Valid if at start of string or preceded by whitespace
+        if (i === 0 || value[i - 1] === ' ' || value[i - 1] === '\n') {
+          atPos = i
+        }
+        break
+      }
+    }
+
+    if (atPos === -1) {
+      setMentionActive(false)
+      return
+    }
+
+    const query = value.slice(atPos + 1, cursorPos)
+    mentionAnchorRef.current = atPos
+    setMentionActive(true)
+    setMentionQuery(query)
+
+    // Debounce the search
+    if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current)
+    mentionDebounceRef.current = setTimeout(() => searchFiles(query), 150)
+  }, [projectPath, searchFiles])
+
+  // Select a mention result: replace @query with the relative path
+  const selectMention = useCallback((result: MentionResult) => {
+    const atPos = mentionAnchorRef.current
+    if (atPos === -1) return
+    const el = textareaRef.current
+    const cursorPos = el?.selectionStart ?? text.length
+    const before = text.slice(0, atPos)
+    const after = text.slice(cursorPos)
+    const insertPath = result.relativePath + (result.isDirectory ? '/' : '')
+    const newText = before + '@' + insertPath + ' ' + after
+    setText(newText)
+    setMentionActive(false)
+    setMentionResults([])
+
+    // Move cursor to after the inserted path
+    const newCursorPos = atPos + 1 + insertPath.length + 1
+    setTimeout(() => {
+      if (el) {
+        el.focus()
+        el.selectionStart = el.selectionEnd = newCursorPos
+      }
+    }, 0)
+  }, [text])
+
+  // Close mention on Escape or when clicking outside
+  useEffect(() => {
+    if (!mentionActive) return
+    const handleClick = (e: MouseEvent) => {
+      if (mentionListRef.current && !mentionListRef.current.contains(e.target as Node)) {
+        setMentionActive(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [mentionActive])
 
   useImperativeHandle(ref, () => ({
     setText: (t: string) => {
@@ -189,6 +299,30 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const isComposingRef = useRef(false)
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle @ mention keyboard navigation
+    if (mentionActive && mentionResults.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex((prev) => (prev + 1) % mentionResults.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex((prev) => (prev - 1 + mentionResults.length) % mentionResults.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        selectMention(mentionResults[mentionIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionActive(false)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && e.metaKey && !isComposingRef.current) {
       e.preventDefault()
       handleSubmit()
@@ -304,15 +438,57 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         )}
 
         {/* Textarea */}
+        {/* @ mention dropdown */}
+        {mentionActive && (mentionResults.length > 0 || mentionLoading) && (
+          <div
+            ref={mentionListRef}
+            className="mx-3 mt-2 max-h-[240px] overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
+          >
+            {mentionLoading && mentionResults.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>
+            )}
+            {mentionResults.map((result, i) => (
+              <button
+                key={result.path}
+                onClick={() => selectMention(result)}
+                onMouseEnter={() => setMentionIndex(i)}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors ${
+                  i === mentionIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                }`}
+              >
+                <span className="shrink-0 text-muted-foreground">
+                  {result.isDirectory ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  )}
+                </span>
+                <span className="truncate flex-1 font-mono text-xs">{result.relativePath}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value
+            setText(val)
+            // Detect @ mention trigger
+            const cursorPos = e.target.selectionStart ?? val.length
+            handleMentionDetect(val, cursorPos)
+          }}
           onKeyDown={handleKeyDown}
           onCompositionStart={() => { isComposingRef.current = true }}
           onCompositionEnd={() => { isComposingRef.current = false }}
           onPaste={handlePaste}
-          placeholder="Cmd+Enter to send"
+          placeholder="Cmd+Enter to send · @ to mention files"
           disabled={disabled}
           rows={1}
           className="w-full min-h-[44px] max-h-[150px] bg-transparent px-4 pt-3 pb-1 text-sm resize-none placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
