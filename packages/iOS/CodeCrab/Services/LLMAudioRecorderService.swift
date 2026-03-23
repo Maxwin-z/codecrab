@@ -25,8 +25,8 @@ class LLMAudioRecorderService {
         return Date().timeIntervalSince(start)
     }
 
-    /// Maximum recording duration (60 seconds)
-    static let maxDuration: TimeInterval = 60
+    /// Maximum recording duration (120 seconds)
+    static let maxDuration: TimeInterval = 120
 
     func startRecording() throws {
         audioBuffer = []

@@ -478,6 +478,7 @@ struct InputBarView: View {
         }
         .onChange(of: speechService.authorizationStatus) { _, status in
             if status == .authorized {
+                isFocused = false
                 speechService.startRecording(existingText: text)
             }
         }
@@ -565,6 +566,8 @@ struct InputBarView: View {
         case .notDetermined:
             speechService.requestAuthorization()
         case .authorized:
+            // Hide keyboard when recording starts
+            isFocused = false
             speechService.startRecording(existingText: text)
         default:
             break
@@ -575,6 +578,9 @@ struct InputBarView: View {
 
     private func startLLMRecording() {
         guard !isLLMRecording else { return }
+
+        // Hide keyboard when recording starts
+        isFocused = false
 
         llmRecorder.onAudioLevel = { [self] level in
             Task { @MainActor in
