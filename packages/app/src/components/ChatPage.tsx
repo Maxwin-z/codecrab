@@ -554,7 +554,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
       </div>
 
       {/* Summary bar */}
-      {ws.latestSummary && (
+      {ws.latestSummary && !ws.isRunning && (
         <div className="border-t bg-emerald-50 dark:bg-emerald-950/30 px-4 py-2 flex items-center gap-2 shrink-0">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
           <p className="text-xs text-emerald-700 dark:text-emerald-300 flex-1 min-w-0 truncate">
