@@ -21,6 +21,7 @@ struct LoginView: View {
     /// nil = not checked yet, true = reachable, false = unreachable
     @State private var serverReachable: Bool? = nil
     @State private var isCheckingServer: Bool = false
+    @State private var showQRScanner: Bool = false
 
     private var cachedServerURL: String? {
         auth.getServerURL()
@@ -344,6 +345,28 @@ struct LoginView: View {
                     .padding(12)
                     .background(Color(.systemGray6))
                     .cornerRadius(10)
+
+                    // QR Code scan button
+                    #if canImport(UIKit) && !os(macOS)
+                    Button {
+                        showQRScanner = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "qrcode.viewfinder")
+                                .font(.body)
+                            Text("Scan QR Code")
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.bordered)
+                    .sheet(isPresented: $showQRScanner) {
+                        QRScannerView { scannedCode in
+                            handleQRCode(scannedCode)
+                        }
+                    }
+                    #endif
                 }
                 .frame(maxWidth: 360)
 
@@ -459,6 +482,38 @@ struct LoginView: View {
                 serverReachable = false
             }
             isCheckingServer = false
+        }
+    }
+
+    private func handleQRCode(_ code: String) {
+        // Parse codecrab://login?server=http://IP:PORT&token=TOKEN
+        guard let url = URL(string: code),
+              url.scheme == "codecrab",
+              url.host == "login" || url.host() == "login",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            errorMsg = "Invalid QR code. Please scan the QR code shown in the server terminal."
+            return
+        }
+
+        let serverURL = queryItems.first(where: { $0.name == "server" })?.value
+        let scannedToken = queryItems.first(where: { $0.name == "token" })?.value
+
+        if let serverURL, !serverURL.isEmpty {
+            auth.setServerURL(serverURL)
+            selectedServer = nil
+            isChangingServer = false
+            serverReachable = nil
+            checkServerReachability()
+        }
+
+        if let scannedToken, !scannedToken.isEmpty {
+            token = scannedToken
+        }
+
+        // Auto-login if both server and token were provided
+        if serverURL != nil && scannedToken != nil {
+            login()
         }
     }
 

@@ -22,7 +22,8 @@ import imagesRouter from './api/images.js'
 import { ensureSoulProject } from './soul/project.js'
 import { getAvailableMcps } from './mcp/index.js'
 import debugRouter from './api/debug.js'
-import { ensureToken, authMiddleware } from './auth/index.js'
+import { ensureToken, authMiddleware, getToken } from './auth/index.js'
+import qrcodeTerminal from 'qrcode-terminal'
 import { setupWebSocket, executePromptInSession, broadcastToProject, queryQueue } from './ws/index.js'
 import {
   createClientState,
@@ -36,6 +37,19 @@ import {
 import { ChannelManager, createChannelRouter, createWebhookRouter } from '@codecrab/channels'
 import type { ChannelEngineContext } from '@codecrab/channels'
 import os from 'os'
+
+/** Get first non-internal IPv4 address for LAN access */
+function getLocalIP(): string {
+  const interfaces = os.networkInterfaces()
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address
+      }
+    }
+  }
+  return 'localhost'
+}
 
 export interface StartServerOptions {
   port?: number
@@ -227,9 +241,23 @@ export async function startServer(options: StartServerOptions = {}): Promise<{ p
     console.error('[server] Failed to restore channel instances:', err)
   }
 
+  // Get token for QR code (already ensured above)
+  const token = await getToken()
+
   return new Promise((resolve) => {
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`[server] listening on http://0.0.0.0:${PORT}`)
+
+      // Print QR code for mobile login
+      if (token) {
+        const localIP = getLocalIP()
+        const loginURL = `codecrab://login?server=http://${localIP}:${PORT}&token=${token}`
+        console.log(`\n  Scan to login from iOS:`)
+        qrcodeTerminal.generate(loginURL, { small: true }, (qr: string) => {
+          console.log(qr)
+        })
+      }
+
       resolve({ port: PORT })
     })
 
