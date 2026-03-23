@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct SoulPageView: View {
     @State private var soul: SoulDocument?
@@ -8,6 +9,7 @@ struct SoulPageView: View {
     @State private var isEditing = false
     @State private var editDraft = ""
     @State private var isSaving = false
+    @ObservedObject private var soulSettings = SoulSettings.shared
 
     private var maxLength: Int { status?.maxLength ?? 4000 }
     private var overLimit: Bool { editDraft.count > maxLength }
@@ -21,6 +23,23 @@ struct SoulPageView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
+                        if !isEditing {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Soul Evolution")
+                                        .font(.subheadline.weight(.medium))
+                                    Text(soulSettings.isEnabled ? "Profile evolves with each conversation" : "Evolution paused")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Toggle("", isOn: $soulSettings.isEnabled)
+                                    .labelsHidden()
+                            }
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
+                        }
+
                         if !hasSoul && !isEditing {
                             emptyState
                         }

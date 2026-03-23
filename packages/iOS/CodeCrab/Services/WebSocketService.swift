@@ -298,6 +298,11 @@ class WebSocketService: ObservableObject {
                         recentlyEndedProjectIds.remove(status.projectId)
                     }
                 }
+                // End Live Activity if the active project is no longer running
+                // (handles the case where query_end was missed during WS disconnection)
+                if let pid = activeProjectId, !runningProjectIds.contains(pid) {
+                    LiveActivityService.shared.endActivity()
+                }
             }
         case "project_activity":
             if let pid = json["projectId"] as? String,
@@ -1136,6 +1141,9 @@ class WebSocketService: ObservableObject {
         }
         if let disabled = disabledSkills, !disabled.isEmpty {
             payload["disabledSkills"] = disabled
+        }
+        if !SoulSettings.shared.isEnabled {
+            payload["soulEnabled"] = false
         }
         return sendWebSocketMessage(payload)
     }

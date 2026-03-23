@@ -3,20 +3,18 @@ import SwiftUI
 struct SoulCardView: View {
     var refreshID = UUID()
     var onTap: () -> Void = {}
+    @ObservedObject private var soulSettings = SoulSettings.shared
     @State private var soul: SoulDocument?
     @State private var status: SoulStatus?
     @State private var recentEvolution: [EvolutionEntry] = []
 
     var body: some View {
-        Button {
-            onTap()
-        } label: {
-            cardContent
-        }
-        .buttonStyle(.plain)
-        .task(id: refreshID) {
-            await fetchSoulData()
-        }
+        cardContent
+            .contentShape(Rectangle())
+            .onTapGesture { onTap() }
+            .task(id: refreshID) {
+                await fetchSoulData()
+            }
     }
 
     @ViewBuilder
@@ -28,11 +26,11 @@ struct SoulCardView: View {
             HStack(spacing: 8) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.purple.opacity(0.15))
+                        .fill(soulSettings.isEnabled ? Color.purple.opacity(0.15) : Color.secondary.opacity(0.1))
                         .frame(width: 32, height: 32)
                     Image(systemName: hasSoul ? "person.fill" : "brain")
                         .font(.system(size: 14))
-                        .foregroundColor(hasSoul ? .purple : .secondary)
+                        .foregroundColor(soulSettings.isEnabled ? (hasSoul ? .purple : .secondary) : .secondary.opacity(0.5))
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -59,6 +57,7 @@ struct SoulCardView: View {
                         .foregroundColor(.secondary.opacity(0.6))
                         .monospacedDigit()
                 }
+
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundColor(.secondary.opacity(0.3))
@@ -83,7 +82,16 @@ struct SoulCardView: View {
             }
 
             // Latest evolution
-            if let latest = recentEvolution.last {
+            if !soulSettings.isEnabled {
+                HStack(spacing: 4) {
+                    Image(systemName: "pause.circle")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text("Evolution paused")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.5))
+                }
+            } else if let latest = recentEvolution.last {
                 HStack(spacing: 4) {
                     Image(systemName: "sparkles")
                         .font(.caption2)

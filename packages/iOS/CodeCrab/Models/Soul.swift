@@ -1,4 +1,25 @@
 import Foundation
+import Combine
+import SwiftUI
+
+// MARK: - Soul Settings
+
+class SoulSettings: ObservableObject {
+    static let shared = SoulSettings()
+
+    @Published var isEnabled: Bool {
+        didSet { UserDefaults.standard.set(isEnabled, forKey: "soul_enabled") }
+    }
+
+    private init() {
+        // Default to true if not set
+        if UserDefaults.standard.object(forKey: "soul_enabled") == nil {
+            self.isEnabled = true
+        } else {
+            self.isEnabled = UserDefaults.standard.bool(forKey: "soul_enabled")
+        }
+    }
+}
 
 struct SoulDocument: Codable {
     let content: String

@@ -131,15 +131,6 @@ struct AgentResponseView: View {
                 .padding(.top, 2)
             }
 
-            // Auto-switch to markdown when query completes
-            .onChange(of: isStreaming) { _, streaming in
-                if !streaming {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        renderMarkdown = true
-                    }
-                }
-            }
-
             // Toggle buttons (bottom-left)
             HStack(spacing: 6) {
                 Button(action: { withAnimation(.easeInOut(duration: 0.15)) { showDebug.toggle() } }) {
@@ -171,6 +162,14 @@ struct AgentResponseView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
                 Spacer()
+            }
+        }
+        // Auto-switch to markdown when query completes
+        .onChange(of: isStreaming) { _, streaming in
+            if !streaming {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    renderMarkdown = true
+                }
             }
         }
     }

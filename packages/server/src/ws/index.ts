@@ -1731,6 +1731,7 @@ async function executeUserQuery(
   queuedQuery: QueuedQuery,
   userMsg: ChatMessage,
   turn: import('@codecrab/shared').SessionTurn,
+  soulEnabled?: boolean,
 ): Promise<QueryResult> {
   // Link queue abort to engine abort
   queuedQuery.abortController.signal.addEventListener('abort', () => {
@@ -2044,8 +2045,11 @@ async function executeUserQuery(
 
     // Trigger SOUL evolution asynchronously (fire-and-forget)
     // Skip for internal projects (e.g. __soul__ itself) to avoid infinite loops
-    console.log(`[SOUL] Query complete — projectId=${projectId}, finalText=${finalText.length} chars, prompt=${prompt.length} chars`)
-    if (projectId && !projectId.startsWith('__')) {
+    // Skip if client explicitly disabled soul evolution
+    console.log(`[SOUL] Query complete — projectId=${projectId}, finalText=${finalText.length} chars, prompt=${prompt.length} chars, soulEnabled=${soulEnabled}`)
+    if (soulEnabled === false) {
+      console.log(`[SOUL] Skipped — soul evolution disabled by client`)
+    } else if (projectId && !projectId.startsWith('__')) {
       triggerSoulEvolutionAsync(prompt, finalText)
     } else {
       console.log(`[SOUL] Skipped — internal project: ${projectId}`)
@@ -2302,6 +2306,8 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
       const capturedTurn = session.turns[session.turns.length - 1]
 
       // Enqueue the query
+      const capturedSoulEnabled = msg.soulEnabled
+
       const { queryId } = queryQueue.enqueue({
         type: 'user',
         projectId,
@@ -2327,6 +2333,7 @@ async function handleClientMessage(ws: WebSocket, client: Client, msg: ClientMes
             queuedQuery,
             userMsg,
             capturedTurn,
+            capturedSoulEnabled,
           )
         },
       })
