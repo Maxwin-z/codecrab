@@ -757,7 +757,10 @@ struct InputBarView: View {
         let atIndex = atRange.lowerBound
         let isAtStart = atIndex == newText.startIndex
         let charBefore = isAtStart ? nil : newText[newText.index(before: atIndex)]
-        let validTrigger = isAtStart || charBefore == " " || charBefore == "\n"
+        // Allow trigger after whitespace, newline, or any non-ASCII char (e.g. CJK).
+        // Only reject when preceded by ASCII letter/digit (looks like an email: user@...)
+        let isEmailLikeContext = charBefore.map { $0.isASCII && ($0.isLetter || $0.isNumber) } ?? false
+        let validTrigger = isAtStart || !isEmailLikeContext
 
         guard validTrigger else {
             if showFileMention {
