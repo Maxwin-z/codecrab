@@ -29,6 +29,9 @@ export const DEFAULT_MAX_TURNS = 200
 /** Thinking effort level (server default) */
 export const DEFAULT_EFFORT: 'low' | 'medium' | 'high' | 'max' = 'high'
 
+/** Safety timeout for background tasks — resets on each task_progress event */
+const BG_TASK_TIMEOUT_MS = 30 * 60 * 1000
+
 /** Read-only tools auto-approved in Safe mode (default permissionMode).
  *  All other tools go through canUseTool callback for client approval. */
 export const SAFE_MODE_ALLOWED_TOOLS: readonly string[] = [
@@ -1492,6 +1495,16 @@ export async function* executeQuery(
             break
           }
         } else if (msg.subtype === 'task_progress' && gotResult) {
+          // Reset safety timeout — the task is still making progress
+          if (bgTaskTimeout) {
+            clearTimeout(bgTaskTimeout)
+            bgTaskTimeout = setTimeout(() => {
+              console.warn(`${tag} Background tasks timed out after ${BG_TASK_TIMEOUT_MS / 1000}s of no progress, force closing stream`)
+              console.warn(`${tag} Remaining tasks: ${[...pendingTasks.keys()].join(', ')}`)
+              try { stream.close() } catch { /* already closing */ }
+            }, BG_TASK_TIMEOUT_MS)
+          }
+
           // After result, yield progress updates so ws layer can forward heartbeats
           yield {
             type: 'background_task_update',
@@ -1619,7 +1632,7 @@ export async function* executeQuery(
         }
 
         // Safety timeout: don't wait forever for background tasks (30 minutes)
-        const BG_TASK_TIMEOUT_MS = 30 * 60 * 1000
+        // Note: BG_TASK_TIMEOUT_MS is module-level so task_progress can reset the timer
         bgTaskTimeout = setTimeout(() => {
           console.warn(`${tag} Background tasks timed out after ${BG_TASK_TIMEOUT_MS / 1000}s, force closing stream`)
           console.warn(`${tag} Remaining tasks: ${[...pendingTasks.keys()].join(', ')}`)
