@@ -40,6 +40,7 @@ import {
 import { QueryQueue } from '../engine/query-queue.js'
 import { sendQueryCompletionPush } from '../mcp/push/index.js'
 import { triggerSoulEvolution } from '../soul/agent.js'
+import { isSoulEvolutionEnabled, setSoulEvolutionEnabled } from '../soul/settings.js'
 import { saveAndConvertImages } from '../images.js'
 import type { QueuedQuery, QueryResult, QueryTimerState } from '../engine/query-queue.js'
 
@@ -2045,10 +2046,15 @@ async function executeUserQuery(
 
     // Trigger SOUL evolution asynchronously (fire-and-forget)
     // Skip for internal projects (e.g. __soul__ itself) to avoid infinite loops
-    // Skip if client explicitly disabled soul evolution
-    console.log(`[SOUL] Query complete — projectId=${projectId}, finalText=${finalText.length} chars, prompt=${prompt.length} chars, soulEnabled=${soulEnabled}`)
-    if (soulEnabled === false) {
-      console.log(`[SOUL] Skipped — soul evolution disabled by client`)
+    // Check server-side persisted setting as source of truth
+    // If client explicitly sends soulEnabled, persist it to server settings
+    if (typeof soulEnabled === 'boolean') {
+      setSoulEvolutionEnabled(soulEnabled)
+    }
+    const evolutionEnabled = isSoulEvolutionEnabled()
+    console.log(`[SOUL] Query complete — projectId=${projectId}, finalText=${finalText.length} chars, prompt=${prompt.length} chars, evolutionEnabled=${evolutionEnabled}`)
+    if (!evolutionEnabled) {
+      console.log(`[SOUL] Skipped — soul evolution disabled`)
     } else if (projectId && !projectId.startsWith('__')) {
       triggerSoulEvolutionAsync(prompt, finalText)
     } else {

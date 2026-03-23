@@ -15,6 +15,7 @@ export interface PromptMessage extends ProjectContext {
   enabledMcps?: string[]        // Custom MCP IDs to enable for this query (default: all)
   disabledSdkServers?: string[] // SDK MCP server names to disable for this query
   disabledSkills?: string[]     // Skill names to disable for this query
+  soulEnabled?: boolean         // Client toggle for soul evolution (persisted server-side)
 }
 
 export interface CommandMessage extends ProjectContext {

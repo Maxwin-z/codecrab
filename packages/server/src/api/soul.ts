@@ -6,6 +6,8 @@
 //   POST   /api/soul/evolve    — Trigger SOUL evolution via SoulAgent
 //   GET    /api/soul/log       — Get evolution history
 //   GET    /api/soul/status    — Get SOUL status
+//   GET    /api/soul/settings  — Get SOUL settings (evolution toggle etc.)
+//   PUT    /api/soul/settings  — Update SOUL settings
 //   GET    /api/soul/insights  — List insights
 //   GET    /api/soul/insights/:topic — Get a specific insight
 
@@ -16,6 +18,7 @@ import { ensureSoulProject, getSoulProjectDir } from '../soul/project.js'
 import { parseSoulMarkdown, serializeSoulMarkdown } from '../soul/markdown.js'
 import { SOUL_MAX_LENGTH } from '../soul/types.js'
 import { triggerSoulEvolution } from '../soul/agent.js'
+import { loadSoulSettings, saveSoulSettings } from '../soul/settings.js'
 import type { SoulDocument, EvolutionEntry } from '../soul/types.js'
 
 const router: RouterType = Router()
@@ -166,6 +169,31 @@ router.get('/status', (_req, res) => {
     })
   } catch (err) {
     res.status(500).json({ error: 'Failed to get status', details: String(err) })
+  }
+})
+
+// GET /api/soul/settings — get soul settings
+router.get('/settings', (_req, res) => {
+  try {
+    ensureSoulProject()
+    res.json(loadSoulSettings())
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load settings', details: String(err) })
+  }
+})
+
+// PUT /api/soul/settings — update soul settings
+router.put('/settings', (req, res) => {
+  try {
+    ensureSoulProject()
+    const current = loadSoulSettings()
+    if (typeof req.body.evolutionEnabled === 'boolean') {
+      current.evolutionEnabled = req.body.evolutionEnabled
+    }
+    saveSoulSettings(current)
+    res.json(current)
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save settings', details: String(err) })
   }
 })
 

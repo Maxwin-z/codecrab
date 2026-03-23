@@ -24,7 +24,7 @@ function timeAgo(iso: string): string {
 
 export function SoulPage({ onUnauthorized }: SoulPageProps) {
   const navigate = useNavigate()
-  const { soul, status, recentEvolution, loading, refresh } = useSoul(onUnauthorized)
+  const { soul, status, settings, recentEvolution, loading, refresh, setEvolutionEnabled } = useSoul(onUnauthorized)
   const [editing, setEditing] = useState(false)
   const [editDraft, setEditDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -89,7 +89,21 @@ export function SoulPage({ onUnauthorized }: SoulPageProps) {
           <h1 className="text-lg font-semibold">SOUL Profile</h1>
           {status && <span className="text-xs text-muted-foreground tabular-nums">v{status.soulVersion}</span>}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          {/* Evolution toggle */}
+          {settings && !editing && (
+            <button
+              onClick={() => setEvolutionEnabled(!settings.evolutionEnabled)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                settings.evolutionEnabled
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              <Sparkles className="h-3 w-3" />
+              {settings.evolutionEnabled ? 'Auto-evolve On' : 'Auto-evolve Off'}
+            </button>
+          )}
           {editing ? (
             <>
               <Button variant="ghost" size="sm" onClick={cancelEdit}>
