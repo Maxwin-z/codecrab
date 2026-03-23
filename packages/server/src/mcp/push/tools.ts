@@ -3,7 +3,7 @@
 import { z } from 'zod/v4'
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { isApnsConfigured, broadcastPush } from './apns.js'
-import { getDeviceTokens } from './store.js'
+import { getLastActiveDeviceToken } from './store.js'
 
 export const pushTools = [
   tool(
@@ -33,8 +33,8 @@ The notification will be sent to all registered iOS devices via Apple Push Notif
         }
       }
 
-      const tokens = getDeviceTokens()
-      if (tokens.length === 0) {
+      const token = getLastActiveDeviceToken()
+      if (!token) {
         return {
           content: [
             {
@@ -46,14 +46,12 @@ The notification will be sent to all registered iOS devices via Apple Push Notif
         }
       }
 
-      const results = await broadcastPush(tokens, input.title, input.body)
-      const sent = results.filter((r) => r.success).length
-      const failed = results.filter((r) => !r.success)
+      const results = await broadcastPush([token], input.title, input.body)
+      const result = results[0]
 
-      let text = `Push notification sent to ${sent}/${tokens.length} device(s).`
-      if (failed.length > 0) {
-        text += `\nFailed: ${failed.map((f) => f.reason).join(', ')}`
-      }
+      let text = result?.success
+        ? `Push notification sent to device ${token.slice(0, 8)}...`
+        : `Push notification failed: ${result?.reason}`
 
       return {
         content: [{ type: 'text' as const, text }],

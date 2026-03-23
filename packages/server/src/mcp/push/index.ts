@@ -10,7 +10,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { initApns, isApnsConfigured, broadcastPush } from './apns.js'
-import { getDeviceTokens } from './store.js'
+import { getLastActiveDeviceToken } from './store.js'
 
 const PROJECTS_FILE = path.join(os.homedir(), '.codecrab', 'projects.json')
 
@@ -36,18 +36,17 @@ function getProjectDisplayName(projectId: string): string {
  *  Best-effort — never throws. */
 export async function sendQueryCompletionPush(summary: string, projectId: string, sessionId: string): Promise<void> {
   if (!isApnsConfigured()) return
-  const tokens = getDeviceTokens()
-  if (tokens.length === 0) return
+  const token = getLastActiveDeviceToken()
+  if (!token) return
 
   try {
     const title = getProjectDisplayName(projectId)
-    console.log(`[Push] Sending completion push — title="${title}" projectId=${projectId} sessionId=${sessionId} devices=${tokens.length}`)
-    const results = await broadcastPush(tokens, title, summary, { projectId, sessionId })
-    const succeeded = results.filter(r => r.success).length
-    const failed = results.filter(r => !r.success)
-    console.log(`[Push] Broadcast done — ${succeeded}/${results.length} succeeded`)
-    if (failed.length > 0) {
-      failed.forEach(r => console.log(`[Push]   failed: ${r.token.slice(0, 8)}... reason=${r.reason}`))
+    console.log(`[Push] Sending completion push — title="${title}" projectId=${projectId} sessionId=${sessionId} device=${token.slice(0, 8)}...`)
+    const results = await broadcastPush([token], title, summary, { projectId, sessionId })
+    if (results[0]?.success) {
+      console.log(`[Push] Push sent to ${token.slice(0, 8)}...`)
+    } else {
+      console.log(`[Push] Push failed for ${token.slice(0, 8)}... reason=${results[0]?.reason}`)
     }
   } catch (err: any) {
     console.error(`[Push] Failed to send completion push: ${err.message}`)

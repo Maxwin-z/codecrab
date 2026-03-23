@@ -10,6 +10,7 @@ export interface PushDevice {
   token: string
   label?: string
   registeredAt: string
+  lastActiveAt: string
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
@@ -38,16 +39,19 @@ function writeDevices(devices: PushDevice[]): void {
 
 export function registerDevice(token: string, label?: string): PushDevice {
   const devices = readDevices()
+  const now = new Date().toISOString()
   const existing = devices.find((d) => d.token === token)
   if (existing) {
     if (label) existing.label = label
+    existing.lastActiveAt = now
     writeDevices(devices)
     return existing
   }
   const device: PushDevice = {
     token,
     label,
-    registeredAt: new Date().toISOString(),
+    registeredAt: now,
+    lastActiveAt: now,
   }
   devices.push(device)
   writeDevices(devices)
@@ -69,4 +73,16 @@ export function getDevices(): PushDevice[] {
 
 export function getDeviceTokens(): string[] {
   return readDevices().map((d) => d.token)
+}
+
+/** Get the most recently active device token (for push targeting) */
+export function getLastActiveDeviceToken(): string | null {
+  const devices = readDevices()
+  if (devices.length === 0) return null
+  const sorted = [...devices].sort((a, b) => {
+    const aTime = a.lastActiveAt || a.registeredAt
+    const bTime = b.lastActiveAt || b.registeredAt
+    return bTime.localeCompare(aTime)
+  })
+  return sorted[0].token
 }
