@@ -468,7 +468,7 @@ struct ChatView: View {
 
     private var heartbeatDotColor: Color {
         if let hb = wsService.activityHeartbeat {
-            return hb.paused ? .yellow : .green
+            return hb.paused ? .yellow : .orange
         }
         return wsService.connected ? .green : .red
     }
