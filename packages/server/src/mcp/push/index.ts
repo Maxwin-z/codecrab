@@ -53,5 +53,27 @@ export async function sendQueryCompletionPush(summary: string, projectId: string
   }
 }
 
+/** Send push notification when a background query asks a user question.
+ *  Best-effort — never throws. */
+export async function sendAskUserQuestionPush(questions: { question: string }[], projectId: string, sessionId: string): Promise<void> {
+  if (!isApnsConfigured()) return
+  const token = getLastActiveDeviceToken()
+  if (!token) return
+
+  try {
+    const title = getProjectDisplayName(projectId)
+    const body = questions.length > 0 ? questions[0].question : 'A question needs your answer'
+    console.log(`[Push] Sending ask_user_question push — title="${title}" projectId=${projectId} sessionId=${sessionId} device=${token.slice(0, 8)}...`)
+    const results = await broadcastPush([token], title, body, { projectId, sessionId })
+    if (results[0]?.success) {
+      console.log(`[Push] Push sent to ${token.slice(0, 8)}...`)
+    } else {
+      console.log(`[Push] Push failed for ${token.slice(0, 8)}... reason=${results[0]?.reason}`)
+    }
+  } catch (err: any) {
+    console.error(`[Push] Failed to send ask_user_question push: ${err.message}`)
+  }
+}
+
 export { pushTools } from './tools.js'
 export { default as pushRouter } from './routes.js'

@@ -38,7 +38,7 @@ import {
   getContextWindowSize,
 } from '../engine/claude.js'
 import { QueryQueue } from '../engine/query-queue.js'
-import { sendQueryCompletionPush } from '../mcp/push/index.js'
+import { sendQueryCompletionPush, sendAskUserQuestionPush } from '../mcp/push/index.js'
 import { triggerSoulEvolution } from '../soul/agent.js'
 import { isSoulEvolutionEnabled, setSoulEvolutionEnabled } from '../soul/settings.js'
 import { saveAndConvertImages } from '../images.js'
@@ -1891,6 +1891,7 @@ async function executeUserQuery(
         } as any)
         queryQueue.pauseTimeout(queuedQuery.id)
         maybeSendActivityHeartbeat(projectId, session.sessionId, queuedQuery.id)
+        sendAskUserQuestionPush(questions as { question: string }[], projectId, session.sessionId)
       },
       onUsage: (usage) => {
         logEvent('usage', `in:${usage.inputTokens} out:${usage.outputTokens} cache_read:${usage.cacheReadTokens} cache_create:${usage.cacheCreationTokens}`, usage as any)
