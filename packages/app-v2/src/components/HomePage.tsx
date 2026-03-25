@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { authFetch } from '@/lib/auth'
 import { useWs } from '@/hooks/WebSocketContext'
-import { FolderOpen, ArrowRight } from 'lucide-react'
+import { FolderOpen, ArrowRight, Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface Project {
   id: string
@@ -40,37 +41,47 @@ export function HomePage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           <p className="text-muted-foreground">Select a project to start coding</p>
         </div>
 
-        <div className="space-y-2">
-          {projects.map(p => (
-            <button
-              key={p.id}
-              className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors text-left cursor-pointer group"
-              onClick={() => handleSelectProject(p)}
-            >
-              <span className="text-2xl">{p.icon || '📁'}</span>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium flex items-center gap-2">
-                  {p.name}
-                  {getStatus(p.id) === 'processing' && (
-                    <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground truncate">{p.path}</div>
-              </div>
-              <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-            </button>
-          ))}
-
-          {projects.length === 0 && (
-            <div className="text-center py-12 space-y-3">
-              <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground" />
-              <p className="text-muted-foreground">No projects configured</p>
-              <p className="text-xs text-muted-foreground">
-                Set up projects in <code className="bg-muted px-1 rounded">~/.codecrab/projects.json</code>
-              </p>
+        {projects.length > 0 ? (
+          <>
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={() => navigate('/projects/new')}>
+                <Plus className="h-4 w-4 mr-1" />
+                New Project
+              </Button>
             </div>
-          )}
-        </div>
+
+            <div className="space-y-2">
+              {projects.map(p => (
+                <button
+                  key={p.id}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors text-left cursor-pointer group"
+                  onClick={() => handleSelectProject(p)}
+                >
+                  <span className="text-2xl">{p.icon || '📁'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium flex items-center gap-2">
+                      {p.name}
+                      {getStatus(p.id) === 'processing' && (
+                        <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">{p.path}</div>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 space-y-4">
+            <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground" />
+            <p className="text-muted-foreground">No projects yet</p>
+            <Button variant="outline" onClick={() => navigate('/projects/new')}>
+              <Plus className="h-4 w-4 mr-1" />
+              Create your first project
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

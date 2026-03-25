@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import type { ProjectConfig, PermissionMode } from '../types/index.js'
@@ -6,6 +6,10 @@ import type { ProjectConfig, PermissionMode } from '../types/index.js'
 const CONFIG_DIR = join(homedir(), '.codecrab')
 const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json')
 const MODELS_FILE = join(CONFIG_DIR, 'models.json')
+
+async function ensureConfigDir() {
+  await mkdir(CONFIG_DIR, { recursive: true })
+}
 
 export class ProjectManager {
   private projects = new Map<string, ProjectConfig>()
@@ -62,6 +66,19 @@ export class ProjectManager {
     }
   }
 
+  private async persist(): Promise<void> {
+    await ensureConfigDir()
+    const projects = Array.from(this.projects.values()).map(p => ({
+      id: p.id,
+      name: p.name,
+      path: p.path,
+      icon: p.icon,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+    }))
+    await writeFile(PROJECTS_FILE, JSON.stringify(projects, null, 2))
+  }
+
   list(): ProjectConfig[] {
     return Array.from(this.projects.values())
   }
@@ -77,4 +94,70 @@ export class ProjectManager {
   getDefaultModel(projectId: string): string {
     return this.projectModels.get(projectId) || this.defaultModel
   }
+
+  /** Create a new project. Returns the created project or throws on validation error. */
+  async create(params: { name: string; path: string; icon?: string }): Promise<ProjectConfig> {
+    if (!params.name || !params.path) {
+      throw new ProjectValidationError('Missing name or path')
+    }
+
+    // Check for duplicate path
+    for (const p of this.projects.values()) {
+      if (p.path === params.path) {
+        throw new ProjectConflictError('A project already exists for this directory')
+      }
+    }
+
+    const now = Date.now()
+    const config: ProjectConfig = {
+      id: `proj-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      name: params.name,
+      path: params.path,
+      icon: params.icon || '📁',
+      defaultModel: this.defaultModel,
+      defaultPermissionMode: 'default' as PermissionMode,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    this.projects.set(config.id, config)
+    await this.persist()
+    return config
+  }
+
+  /** Update an existing project's name and/or icon. */
+  async update(projectId: string, params: { name?: string; icon?: string }): Promise<ProjectConfig> {
+    const config = this.projects.get(projectId)
+    if (!config) {
+      throw new ProjectNotFoundError('Project not found')
+    }
+
+    if (params.name) config.name = params.name
+    if (params.icon) config.icon = params.icon
+    config.updatedAt = Date.now()
+
+    await this.persist()
+    return config
+  }
+
+  /** Delete a project by ID. */
+  async delete(projectId: string): Promise<void> {
+    if (!this.projects.has(projectId)) {
+      throw new ProjectNotFoundError('Project not found')
+    }
+    this.projects.delete(projectId)
+    await this.persist()
+  }
+}
+
+export class ProjectValidationError extends Error {
+  constructor(message: string) { super(message); this.name = 'ProjectValidationError' }
+}
+
+export class ProjectConflictError extends Error {
+  constructor(message: string) { super(message); this.name = 'ProjectConflictError' }
+}
+
+export class ProjectNotFoundError extends Error {
+  constructor(message: string) { super(message); this.name = 'ProjectNotFoundError' }
 }

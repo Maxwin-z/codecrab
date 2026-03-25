@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams, useLocation } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { authFetch } from '@/lib/auth'
 import { cn } from '@/lib/utils'
-import { Search, Settings, FolderOpen } from 'lucide-react'
+import { Search, Settings, FolderOpen, Plus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
 interface Project {
@@ -19,6 +19,7 @@ export function AppSidebar({
   onUnauthorized?: () => void
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const { projectStatuses, switchProject } = useWs()
   const [projects, setProjects] = useState<Project[]>([])
@@ -34,9 +35,10 @@ export function AppSidebar({
     } catch { /* ignore */ }
   }, [onUnauthorized])
 
+  // Reload projects on mount and on route changes (e.g. after creating a project)
   useEffect(() => {
     loadProjects()
-  }, [loadProjects])
+  }, [loadProjects, location.pathname])
 
   const filtered = projects.filter(p =>
     p.name.toLowerCase().includes(filter.toLowerCase()),
@@ -109,6 +111,14 @@ export function AppSidebar({
             <p className="text-xs text-muted-foreground">No projects yet</p>
           </div>
         )}
+
+        <button
+          className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
+          onClick={() => navigate('/projects/new')}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          New project
+        </button>
       </div>
 
       {/* Footer */}
