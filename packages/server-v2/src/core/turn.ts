@@ -1,6 +1,7 @@
 import type { CoreEngine } from './index.js'
 import type { SessionManager } from './session.js'
 import { QueryQueue } from './queue.js'
+import { tsLog, C } from '../logger.js'
 import type { AgentInterface, TurnSubmitParams, QueuedQuery, AgentStreamEvent, TurnType } from '../types/index.js'
 
 export class TurnManager {
@@ -55,6 +56,14 @@ export class TurnManager {
     }
 
     const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    const projectName = this.core.projects.get(params.projectId)?.name || params.projectId
+    const tag = `${C.yellow}[turn]${C.reset}`
+    tsLog(`${tag} ${C.bold}▶ start${C.reset}  project=${C.bold}${projectName}${C.reset}  session=${params.sessionId.slice(0, 12)}…  model=${C.bold}${session.model}${C.reset}  mode=${session.permissionMode}`)
+    const promptPreview = (params.prompt || '').length > 150
+      ? params.prompt.slice(0, 150) + '…'
+      : params.prompt || ''
+    tsLog(`${tag}   ${C.cyan}prompt:${C.reset} ${C.green}${promptPreview}${C.reset}`)
 
     // Update session status
     this.sessions.setStatus(params.sessionId, 'processing')
@@ -122,6 +131,7 @@ export class TurnManager {
         })
       }
     } catch (error: any) {
+      tsLog(`${tag} ${C.red}${C.bold}✗ error${C.reset}  project=${C.bold}${projectName}${C.reset}  ${error.message || 'Unknown error'}`)
       this.core.emit('turn:error', {
         projectId: params.projectId,
         sessionId: params.sessionId,
@@ -260,7 +270,13 @@ export class TurnManager {
         })
         break
 
-      case 'result':
+      case 'result': {
+        const durationSec = (event.durationMs / 1000).toFixed(1)
+        const costStr = event.costUsd != null ? `$${event.costUsd.toFixed(4)}` : '?'
+        const pName = this.core.projects.get(ctx.projectId)?.name || ctx.projectId
+        const turnTag = `${C.yellow}[turn]${C.reset}`
+        tsLog(`${turnTag} ${C.green}${C.bold}✅ done${C.reset}  project=${C.bold}${pName}${C.reset}  cost=${costStr}  duration=${durationSec}s  tokens: in=${event.usage.inputTokens} out=${event.usage.outputTokens} cache_read=${event.usage.cacheReadTokens}`)
+
         // Update session usage
         this.sessions.addUsage(ctx.sessionId, {
           inputTokens: event.usage.inputTokens,
@@ -287,6 +303,7 @@ export class TurnManager {
           backgroundTaskIds: event.backgroundTaskIds,
         })
         break
+      }
 
       case 'sdk_event':
         this.core.emit('turn:sdk_event', {

@@ -5,6 +5,7 @@ import type { Broadcaster } from './broadcaster.js'
 import type { Client } from '../types/index.js'
 import type { ClientMessage } from '@codecrab/shared'
 import { verifyWebSocketToken } from './auth.js'
+import { tsLog, C } from '../logger.js'
 
 let connectionCounter = 0
 
@@ -47,6 +48,7 @@ export function setupWebSocket(server: Server, core: CoreEngine, broadcaster: Br
     }
 
     broadcaster.addClient(client)
+    tsLog(`${C.green}[ws]${C.reset} ${C.bold}connected${C.reset}  client=${clientId}  conn=${connectionId}`)
 
     ws.on('message', (data: Buffer) => {
       try {
@@ -61,10 +63,12 @@ export function setupWebSocket(server: Server, core: CoreEngine, broadcaster: Br
     })
 
     ws.on('close', () => {
+      tsLog(`${C.dim}[ws] disconnected${C.reset}  client=${clientId}  conn=${connectionId}`)
       broadcaster.removeClient(connectionId)
     })
 
     ws.on('error', () => {
+      tsLog(`${C.red}[ws] error${C.reset}  client=${clientId}  conn=${connectionId}`)
       broadcaster.removeClient(connectionId)
     })
   })
@@ -126,6 +130,15 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     return
   }
 
+  // Log the incoming prompt
+  const project = core.projects.get(projectId)
+  const projectName = project?.name || projectId
+  const promptPreview = (message.prompt || '').length > 200
+    ? message.prompt.slice(0, 200) + '…'
+    : message.prompt || ''
+  tsLog(`${C.cyan}[ws]${C.reset} ${C.bold}◆ prompt${C.reset}  project=${C.bold}${projectName}${C.reset}  client=${client.clientId}`)
+  tsLog(`${C.cyan}[ws]${C.reset}   ${C.green}${promptPreview}${C.reset}`)
+
   // Get or create session
   let sessionId = message.sessionId
   const sub = client.subscribedProjects.get(projectId)
@@ -135,7 +148,6 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
 
   if (!sessionId) {
     // Create new session
-    const project = core.projects.get(projectId)
     if (!project) {
       broadcaster.send(client, { type: 'error', message: 'Project not found' })
       return

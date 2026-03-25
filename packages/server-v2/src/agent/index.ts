@@ -7,6 +7,7 @@
 
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
 import { buildExtensionServers } from './extensions/index.js'
+import { tsLog, logSdkMessage, createStreamLogState, C } from '../logger.js'
 import type {
   AgentInterface,
   AgentQueryOptions,
@@ -389,10 +390,16 @@ export class ClaudeAgent implements AgentInterface {
     // Track the resolved session ID (may differ from sessionKey after init)
     let resolvedSessionId = sessionKey
 
+    // SDK stream logging state
+    const logTag = `${C.blue}[SDK]${C.reset}`
+    const logState = createStreamLogState()
+
     try {
       let currentSessionId = options.resume || ''
 
       for await (const msg of q) {
+        // Log every raw SDK message for debugging
+        logSdkMessage(logTag, msg, logState)
         // ── system messages ───────────────────────────────────────────
         if (msg.type === 'system') {
           const m = msg as any
