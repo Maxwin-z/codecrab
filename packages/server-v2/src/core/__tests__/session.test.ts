@@ -11,7 +11,7 @@ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     name: 'Test Project',
     path: '/tmp/test-project',
     icon: '',
-    defaultModel: 'claude-sonnet-4-6',
+    defaultProviderId: 'claude-sonnet-4-6',
     defaultPermissionMode: 'default' as PermissionMode,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -33,22 +33,22 @@ describe('SessionManager', () => {
   })
 
   describe('create', () => {
-    it('should create a session meta with the project default model', () => {
-      const project = makeProject({ defaultModel: 'claude-opus-4' })
+    it('should create a session meta with the project default provider', () => {
+      const project = makeProject({ defaultProviderId: 'claude-opus-4' })
       const meta = manager.create('proj-1', project)
 
       expect(meta.sdkSessionId).toBe('')
       expect(meta.projectId).toBe('proj-1')
       expect(meta.status).toBe('idle')
-      expect(meta.model).toBe('claude-opus-4')
+      expect(meta.providerId).toBe('claude-opus-4')
       expect(meta.permissionMode).toBe('default')
       expect(meta.usage.queryCount).toBe(0)
     })
 
-    it('should lock the model at creation time via overrides', () => {
+    it('should lock the provider at creation time via overrides', () => {
       const project = makeProject()
-      const meta = manager.create('proj-1', project, { model: 'claude-opus-4' })
-      expect(meta.model).toBe('claude-opus-4')
+      const meta = manager.create('proj-1', project, { providerId: 'claude-opus-4' })
+      expect(meta.providerId).toBe('claude-opus-4')
     })
 
     it('should accept cron job overrides', () => {

@@ -8,7 +8,7 @@ import crypto from 'node:crypto'
 import type { CoreEngine } from '../core/index.js'
 import { ProjectValidationError, ProjectConflictError, ProjectNotFoundError } from '../core/project.js'
 import { authMiddleware, getToken, validateToken, generateToken, readConfig, writeConfig } from './auth.js'
-import type { ModelConfig, ModelSettings, DetectResult } from '@codecrab/shared'
+import type { ProviderConfig, ProviderSettings, DetectResult } from '@codecrab/shared'
 
 const execFileAsync = promisify(execFile)
 const CONFIG_DIR = path.join(os.homedir(), '.codecrab')
@@ -24,16 +24,21 @@ async function ensureConfigDir() {
   await fs.mkdir(CONFIG_DIR, { recursive: true })
 }
 
-async function readModels(): Promise<ModelSettings> {
+async function readProviders(): Promise<ProviderSettings> {
   try {
     const data = await fs.readFile(MODELS_FILE, 'utf-8')
-    return JSON.parse(data)
+    const raw = JSON.parse(data)
+    // Backward compat: normalize old field names
+    return {
+      providers: raw.providers || raw.models || [],
+      defaultProviderId: raw.defaultProviderId || raw.defaultModelId,
+    }
   } catch {
-    return { models: [] }
+    return { providers: [] }
   }
 }
 
-async function writeModels(settings: ModelSettings) {
+async function writeProviders(settings: ProviderSettings) {
   await ensureConfigDir()
   await fs.writeFile(MODELS_FILE, JSON.stringify(settings, null, 2))
 }
@@ -127,7 +132,7 @@ export function createRouter(core: CoreEngine): Router {
 
   router.use('/api/projects', authMiddleware)
   router.use('/api/sessions', authMiddleware)
-  router.use('/api/models', authMiddleware)
+  router.use('/api/providers', authMiddleware)
   router.use('/api/setup', authMiddleware)
 
   // Projects
@@ -232,81 +237,81 @@ export function createRouter(core: CoreEngine): Router {
     res.json({ ok: true })
   })
 
-  // Setup — model management
+  // Setup — provider management
   router.get('/api/setup/status', async (_req: Request, res: Response) => {
-    const settings = await readModels()
-    res.json({ initialized: settings.models.length > 0, modelCount: settings.models.length })
+    const settings = await readProviders()
+    res.json({ initialized: settings.providers.length > 0, providerCount: settings.providers.length })
   })
 
-  router.get('/api/setup/models', async (_req: Request, res: Response) => {
-    const settings = await readModels()
-    const masked = settings.models.map((m: ModelConfig) => ({
-      ...m,
-      apiKey: m.apiKey ? `${m.apiKey.slice(0, 8)}...${m.apiKey.slice(-4)}` : undefined,
+  router.get('/api/setup/providers', async (_req: Request, res: Response) => {
+    const settings = await readProviders()
+    const masked = settings.providers.map((p: ProviderConfig) => ({
+      ...p,
+      apiKey: p.apiKey ? `${p.apiKey.slice(0, 8)}...${p.apiKey.slice(-4)}` : undefined,
     }))
-    res.json({ models: masked, defaultModelId: settings.defaultModelId })
+    res.json({ providers: masked, defaultProviderId: settings.defaultProviderId })
   })
 
-  router.post('/api/setup/models', async (req: Request, res: Response) => {
-    const { name, provider, apiKey, baseUrl, modelId } = req.body as Partial<ModelConfig>
+  router.post('/api/setup/providers', async (req: Request, res: Response) => {
+    const { name, provider, apiKey, baseUrl, modelId } = req.body as Partial<ProviderConfig>
     if (!name || !provider) {
       res.status(400).json({ error: 'name and provider are required' })
       return
     }
-    const settings = await readModels()
+    const settings = await readProviders()
     const id = crypto.randomUUID()
-    const model: ModelConfig = { id, name, provider, apiKey, baseUrl, modelId }
-    settings.models.push(model)
-    if (!settings.defaultModelId) settings.defaultModelId = id
-    await writeModels(settings)
+    const entry: ProviderConfig = { id, name, provider, apiKey, baseUrl, modelId }
+    settings.providers.push(entry)
+    if (!settings.defaultProviderId) settings.defaultProviderId = id
+    await writeProviders(settings)
     res.status(201).json({ id })
   })
 
-  router.put('/api/setup/models/:id', async (req: Request, res: Response) => {
-    const settings = await readModels()
-    const idx = settings.models.findIndex((m: ModelConfig) => m.id === req.params.id)
+  router.put('/api/setup/providers/:id', async (req: Request, res: Response) => {
+    const settings = await readProviders()
+    const idx = settings.providers.findIndex((p: ProviderConfig) => p.id === req.params.id)
     if (idx === -1) {
-      res.status(404).json({ error: 'model not found' })
+      res.status(404).json({ error: 'Provider not found' })
       return
     }
-    const { name, provider, apiKey, baseUrl, modelId } = req.body as Partial<ModelConfig>
-    if (name) settings.models[idx].name = name
-    if (provider) settings.models[idx].provider = provider
-    if (apiKey !== undefined) settings.models[idx].apiKey = apiKey
-    if (baseUrl !== undefined) settings.models[idx].baseUrl = baseUrl
-    if (modelId !== undefined) settings.models[idx].modelId = modelId
-    await writeModels(settings)
+    const { name, provider, apiKey, baseUrl, modelId } = req.body as Partial<ProviderConfig>
+    if (name) settings.providers[idx].name = name
+    if (provider) settings.providers[idx].provider = provider
+    if (apiKey !== undefined) settings.providers[idx].apiKey = apiKey
+    if (baseUrl !== undefined) settings.providers[idx].baseUrl = baseUrl
+    if (modelId !== undefined) settings.providers[idx].modelId = modelId
+    await writeProviders(settings)
     res.json({ ok: true })
   })
 
-  router.delete('/api/setup/models/:id', async (req: Request, res: Response) => {
-    const settings = await readModels()
-    settings.models = settings.models.filter((m: ModelConfig) => m.id !== req.params.id)
-    if (settings.defaultModelId === req.params.id) {
-      settings.defaultModelId = settings.models[0]?.id
+  router.delete('/api/setup/providers/:id', async (req: Request, res: Response) => {
+    const settings = await readProviders()
+    settings.providers = settings.providers.filter((p: ProviderConfig) => p.id !== req.params.id)
+    if (settings.defaultProviderId === req.params.id) {
+      settings.defaultProviderId = settings.providers[0]?.id
     }
-    await writeModels(settings)
+    await writeProviders(settings)
     res.json({ ok: true })
   })
 
-  router.put('/api/setup/default-model', async (req: Request, res: Response) => {
-    const { modelId } = req.body as { modelId: string }
-    const settings = await readModels()
-    const exists = settings.models.some((m: ModelConfig) => m.id === modelId)
+  router.put('/api/setup/default-provider', async (req: Request, res: Response) => {
+    const { providerId } = req.body as { providerId: string }
+    const settings = await readProviders()
+    const exists = settings.providers.some((p: ProviderConfig) => p.id === providerId)
     if (!exists) {
-      res.status(404).json({ error: 'Model not found' })
+      res.status(404).json({ error: 'Provider not found' })
       return
     }
-    settings.defaultModelId = modelId
-    await writeModels(settings)
+    settings.defaultProviderId = providerId
+    await writeProviders(settings)
     res.json({ ok: true })
   })
 
   router.post('/api/setup/use-claude', async (req: Request, res: Response) => {
     const { subscriptionType } = req.body as { subscriptionType?: string }
-    const settings = await readModels()
-    const exists = settings.models.some(
-      (m: ModelConfig) => m.provider === 'anthropic' && !m.apiKey
+    const settings = await readProviders()
+    const exists = settings.providers.some(
+      (p: ProviderConfig) => p.provider === 'anthropic' && !p.apiKey
     )
     if (exists) {
       res.json({ ok: true, message: 'Already configured' })
@@ -314,50 +319,50 @@ export function createRouter(core: CoreEngine): Router {
     }
     const label = subscriptionType ? `Claude Code (${subscriptionType})` : 'Claude Code'
     const id = crypto.randomUUID()
-    const model: ModelConfig = { id, name: label, provider: 'anthropic' }
-    settings.models.push(model)
-    if (!settings.defaultModelId) settings.defaultModelId = id
-    await writeModels(settings)
+    const entry: ProviderConfig = { id, name: label, provider: 'anthropic' }
+    settings.providers.push(entry)
+    if (!settings.defaultProviderId) settings.defaultProviderId = id
+    await writeProviders(settings)
     res.status(201).json({ id })
   })
 
-  router.post('/api/setup/models/:id/test', async (req: Request, res: Response) => {
-    const settings = await readModels()
-    const model = settings.models.find((m: ModelConfig) => m.id === req.params.id)
-    if (!model) {
-      res.status(404).json({ ok: false, error: 'Model not found' })
+  router.post('/api/setup/providers/:id/test', async (req: Request, res: Response) => {
+    const settings = await readProviders()
+    const entry = settings.providers.find((p: ProviderConfig) => p.id === req.params.id)
+    if (!entry) {
+      res.status(404).json({ ok: false, error: 'Provider not found' })
       return
     }
-    if (!model.apiKey) {
+    if (!entry.apiKey) {
       res.json({ ok: true, skipped: true, message: 'Using CLI OAuth session' })
       return
     }
     try {
       let testUrl: string
       const headers: Record<string, string> = {}
-      switch (model.provider) {
+      switch (entry.provider) {
         case 'anthropic':
-          testUrl = `${model.baseUrl || 'https://api.anthropic.com'}/v1/models`
-          headers['x-api-key'] = model.apiKey
+          testUrl = `${entry.baseUrl || 'https://api.anthropic.com'}/v1/models`
+          headers['x-api-key'] = entry.apiKey
           headers['anthropic-version'] = '2023-06-01'
           break
         case 'openai':
-          testUrl = `${model.baseUrl || 'https://api.openai.com'}/v1/models`
-          headers['Authorization'] = `Bearer ${model.apiKey}`
+          testUrl = `${entry.baseUrl || 'https://api.openai.com'}/v1/models`
+          headers['Authorization'] = `Bearer ${entry.apiKey}`
           break
         case 'google':
-          testUrl = `${model.baseUrl || 'https://generativelanguage.googleapis.com'}/v1beta/models?key=${model.apiKey}`
+          testUrl = `${entry.baseUrl || 'https://generativelanguage.googleapis.com'}/v1beta/models?key=${entry.apiKey}`
           break
         case 'custom':
-          if (!model.baseUrl) {
+          if (!entry.baseUrl) {
             res.json({ ok: false, error: 'No base URL configured' })
             return
           }
-          testUrl = `${model.baseUrl.replace(/\/+$/, '')}/v1/models`
-          headers['Authorization'] = `Bearer ${model.apiKey}`
+          testUrl = `${entry.baseUrl.replace(/\/+$/, '')}/v1/models`
+          headers['Authorization'] = `Bearer ${entry.apiKey}`
           break
         default:
-          res.json({ ok: false, error: `Unknown provider: ${model.provider}` })
+          res.json({ ok: false, error: `Unknown provider: ${entry.provider}` })
           return
       }
       const response = await fetch(testUrl, { method: 'GET', headers, signal: AbortSignal.timeout(10_000) })

@@ -87,7 +87,7 @@ export interface SessionState {
 
 export interface ProjectChatState {
   sessionId: string | null
-  currentModel: string | null
+  currentProvider: string | null
   sessionState: SessionState
   isRunning: boolean
   isAborting: boolean
@@ -115,7 +115,7 @@ function createEmptySessionState(): SessionState {
 function createEmptyProjectState(): ProjectChatState {
   return {
     sessionId: null,
-    currentModel: null,
+    currentProvider: null,
     sessionState: createEmptySessionState(),
     isRunning: false,
     isAborting: false,
@@ -148,7 +148,7 @@ export interface UseWebSocketReturn {
   abort(projectId: string): void
   switchProject(projectId: string): void
   resumeSession(projectId: string, sessionId: string): void
-  setModel(projectId: string, modelConfigId: string): void
+  setProvider(projectId: string, providerConfigId: string): void
   setPermissionMode(projectId: string, sessionId: string, mode: 'bypassPermissions' | 'default'): void
   respondPermission(sessionId: string, requestId: string, allow: boolean): void
   respondQuestion(sessionId: string, toolId: string, answers: Record<string, string | string[]>): void
@@ -410,10 +410,10 @@ export function useWebSocket(): UseWebSocketReturn {
         break
       }
 
-      case 'model_changed': {
+      case 'provider_changed': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        ps.currentModel = (msg as any).model || null
+        ps.currentProvider = (msg as any).providerId || null
         if (sessionId) {
           ps.sessionId = sessionId
           ps.sessionState = createEmptySessionState()
@@ -668,8 +668,8 @@ export function useWebSocket(): UseWebSocketReturn {
       .catch(() => {})
   }, [send, getOrCreateProjectState, rerender])
 
-  const setModel = useCallback((projectId: string, modelConfigId: string) => {
-    send({ type: 'set_model', projectId, model: modelConfigId })
+  const setProvider = useCallback((projectId: string, providerConfigId: string) => {
+    send({ type: 'set_provider', projectId, providerId: providerConfigId })
   }, [send])
 
   const setPermissionMode = useCallback((projectId: string, sessionId: string, mode: 'bypassPermissions' | 'default') => {
@@ -708,7 +708,7 @@ export function useWebSocket(): UseWebSocketReturn {
     abort,
     switchProject,
     resumeSession,
-    setModel,
+    setProvider,
     setPermissionMode,
     respondPermission,
     respondQuestion,

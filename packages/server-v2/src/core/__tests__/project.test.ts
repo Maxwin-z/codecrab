@@ -50,9 +50,9 @@ describe('ProjectManager', () => {
       expect(manager.list()).toHaveLength(0)
     })
 
-    it('should load default model from models.json', async () => {
+    it('should load default provider from models.json', async () => {
       const projects = [{ id: 'p1', name: 'P1', path: '/tmp/p1' }]
-      const models = { defaultModelId: 'claude-opus-4' }
+      const models = { defaultProviderId: 'claude-opus-4' }
 
       mockReadFile.mockImplementation(async (filePath: any) => {
         if (typeof filePath === 'string' && filePath.endsWith('projects.json')) {
@@ -66,18 +66,18 @@ describe('ProjectManager', () => {
 
       await manager.load()
 
-      expect(manager.getDefaultModel('p1')).toBe('claude-opus-4')
-      expect(manager.get('p1')!.defaultModel).toBe('claude-opus-4')
+      expect(manager.getDefaultProvider('p1')).toBe('claude-opus-4')
+      expect(manager.get('p1')!.defaultProviderId).toBe('claude-opus-4')
     })
 
-    it('should load per-project model overrides', async () => {
+    it('should load per-project provider overrides', async () => {
       const projects = [
         { id: 'p1', name: 'P1', path: '/tmp/p1' },
         { id: 'p2', name: 'P2', path: '/tmp/p2' },
       ]
       const models = {
-        defaultModelId: 'claude-sonnet-4-6',
-        projectModels: {
+        defaultProviderId: 'claude-sonnet-4-6',
+        projectProviders: {
           p1: 'claude-opus-4',
         },
       }
@@ -94,11 +94,11 @@ describe('ProjectManager', () => {
 
       await manager.load()
 
-      expect(manager.getDefaultModel('p1')).toBe('claude-opus-4')
-      expect(manager.getDefaultModel('p2')).toBe('claude-sonnet-4-6')
+      expect(manager.getDefaultProvider('p1')).toBe('claude-opus-4')
+      expect(manager.getDefaultProvider('p2')).toBe('claude-sonnet-4-6')
     })
 
-    it('should use fallback default model when models.json is missing', async () => {
+    it('should use fallback default provider when models.json is missing', async () => {
       const projects = [{ id: 'p1', name: 'P1', path: '/tmp/p1' }]
 
       mockReadFile.mockImplementation(async (filePath: any) => {
@@ -110,7 +110,7 @@ describe('ProjectManager', () => {
 
       await manager.load()
 
-      expect(manager.getDefaultModel('p1')).toBe('claude-sonnet-4-6')
+      expect(manager.getDefaultProvider('p1')).toBe('claude-sonnet-4-6')
     })
   })
 
@@ -182,12 +182,12 @@ describe('ProjectManager', () => {
     })
   })
 
-  describe('getDefaultModel', () => {
-    it('should return project-specific model override', async () => {
+  describe('getDefaultProvider', () => {
+    it('should return project-specific provider override', async () => {
       const projects = [{ id: 'p1', name: 'P1', path: '/a' }]
       const models = {
-        defaultModelId: 'claude-sonnet-4-6',
-        projectModels: { p1: 'custom-model' },
+        defaultProviderId: 'claude-sonnet-4-6',
+        projectProviders: { p1: 'custom-model' },
       }
 
       mockReadFile.mockImplementation(async (filePath: any) => {
@@ -201,12 +201,12 @@ describe('ProjectManager', () => {
       })
 
       await manager.load()
-      expect(manager.getDefaultModel('p1')).toBe('custom-model')
+      expect(manager.getDefaultProvider('p1')).toBe('custom-model')
     })
 
-    it('should return global default when no project override', async () => {
+    it('should return global default provider when no project override', async () => {
       const projects = [{ id: 'p1', name: 'P1', path: '/a' }]
-      const models = { defaultModelId: 'claude-opus-4' }
+      const models = { defaultProviderId: 'claude-opus-4' }
 
       mockReadFile.mockImplementation(async (filePath: any) => {
         if (typeof filePath === 'string' && filePath.endsWith('projects.json')) {
@@ -219,11 +219,11 @@ describe('ProjectManager', () => {
       })
 
       await manager.load()
-      expect(manager.getDefaultModel('p1')).toBe('claude-opus-4')
+      expect(manager.getDefaultProvider('p1')).toBe('claude-opus-4')
     })
 
-    it('should return hardcoded default when no models.json', () => {
-      expect(manager.getDefaultModel('unknown')).toBe('claude-sonnet-4-6')
+    it('should return hardcoded default provider when no models.json', () => {
+      expect(manager.getDefaultProvider('unknown')).toBe('claude-sonnet-4-6')
     })
   })
 

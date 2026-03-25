@@ -33,11 +33,11 @@ interface ProjectInfo {
   name: string
   icon: string
   path: string
-  defaultModel: string
+  defaultProviderId: string
   defaultPermissionMode: string
 }
 
-interface ModelOption {
+interface ProviderOption {
   id: string
   name: string
   provider: string
@@ -53,8 +53,8 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
 
   const [project, setProject] = useState<ProjectInfo | null>(null)
   const [showSessions, setShowSessions] = useState(false)
-  const [models, setModels] = useState<ModelOption[]>([])
-  const [defaultModelId, setDefaultModelId] = useState<string | null>(null)
+  const [providers, setProviders] = useState<ProviderOption[]>([])
+  const [defaultProviderId, setDefaultProviderId] = useState<string | null>(null)
 
   // Load project info
   useEffect(() => {
@@ -70,19 +70,19 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       .catch(() => {})
   }, [projectId, onUnauthorized])
 
-  // Load models list
+  // Load providers list
   useEffect(() => {
-    authFetch('/api/setup/models', {}, onUnauthorized)
+    authFetch('/api/setup/providers', {}, onUnauthorized)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data?.models) {
-          setModels(data.models.map((m: any) => ({
-            id: m.id,
-            name: m.name,
-            provider: m.provider,
+        if (data?.providers) {
+          setProviders(data.providers.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            provider: p.provider,
           })))
-          if (data.defaultModelId) {
-            setDefaultModelId(data.defaultModelId)
+          if (data.defaultProviderId) {
+            setDefaultProviderId(data.defaultProviderId)
           }
         }
       })
@@ -133,8 +133,8 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
     setShowSessions(false)
   }
 
-  const handleModelChange = (modelConfigId: string) => {
-    ws.setModel(projectId, modelConfigId)
+  const handleProviderChange = (providerConfigId: string) => {
+    ws.setProvider(projectId, providerConfigId)
   }
 
   const togglePermissionMode = () => {
@@ -143,8 +143,8 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
     ws.setPermissionMode(projectId, ps.sessionId, newMode)
   }
 
-  // Determine current model for display
-  const activeModelId = ps.currentModel || project.defaultModel || defaultModelId
+  // Determine current provider for display
+  const activeProviderId = ps.currentProvider || project.defaultProviderId || defaultProviderId
 
   return (
     <div className="h-full flex">
@@ -177,19 +177,19 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           <span className="text-base mr-1">{project.icon || '📁'}</span>
           <span className="font-medium text-sm truncate">{project.name}</span>
 
-          {/* Model selector */}
-          {models.length > 1 && (
+          {/* Provider selector */}
+          {providers.length > 1 && (
             <Select
-              value={activeModelId || undefined}
-              onValueChange={handleModelChange}
+              value={activeProviderId || undefined}
+              onValueChange={handleProviderChange}
             >
               <SelectTrigger className="h-7 w-auto min-w-[100px] max-w-[180px] border-none shadow-none text-xs text-muted-foreground hover:text-foreground ml-1">
-                <SelectValue placeholder="Model" />
+                <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <span className="text-xs">{m.name}</span>
+                {providers.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <span className="text-xs">{p.name}</span>
                   </SelectItem>
                 ))}
               </SelectContent>

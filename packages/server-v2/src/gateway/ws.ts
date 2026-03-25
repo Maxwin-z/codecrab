@@ -93,8 +93,8 @@ function handleClientMessage(core: CoreEngine, broadcaster: Broadcaster, client:
     case 'respond_permission':
       handleRespondPermission(core, message)
       break
-    case 'set_model':
-      handleSetModel(core, broadcaster, client, message)
+    case 'set_provider':
+      handleSetProvider(core, broadcaster, client, message)
       break
     case 'set_permission_mode':
       handleSetPermissionMode(core, broadcaster, client, message)
@@ -212,24 +212,24 @@ function handleRespondPermission(core: CoreEngine, message: any): void {
   core.turns.respondPermission(sessionId, message.requestId, message.allow ? 'allow' : 'deny')
 }
 
-function handleSetModel(core: CoreEngine, broadcaster: Broadcaster, client: Client, message: any): void {
+function handleSetProvider(core: CoreEngine, broadcaster: Broadcaster, client: Client, message: any): void {
   const projectId = message.projectId
   if (!projectId) return
 
-  // Model change = create new session
+  // Provider change = create new session
   const project = core.projects.get(projectId)
   if (!project) return
 
-  const meta = core.sessions.create(projectId, project, { model: message.model })
+  const meta = core.sessions.create(projectId, project, { providerId: message.providerId })
   const sessionId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   core.sessions.register(sessionId, meta)
   client.subscribedProjects.set(projectId, { sessionId })
 
   broadcaster.send(client, {
-    type: 'model_changed',
+    type: 'provider_changed',
     projectId,
     sessionId,
-    model: message.model,
+    providerId: message.providerId,
   })
 
   broadcaster.send(client, {

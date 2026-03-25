@@ -7,7 +7,7 @@
 // For 3rd-party models, apiKey + baseUrl override the API endpoint while
 // still using ~/.claude for SDK runtime (skills, commands, etc.).
 
-export interface ModelConfig {
+export interface ProviderConfig {
   id: string
   name: string
   provider: 'anthropic' | 'openai' | 'google' | 'custom'
@@ -20,6 +20,14 @@ export interface ModelConfig {
   baseUrl?: string
 }
 
+export interface ProviderSettings {
+  providers: ProviderConfig[]
+  defaultProviderId?: string
+}
+
+/** @deprecated Use ProviderConfig instead */
+export type ModelConfig = ProviderConfig
+/** @deprecated Use ProviderSettings instead */
 export interface ModelSettings {
   models: ModelConfig[]
   defaultModelId?: string

@@ -27,21 +27,21 @@ export class CoreEngine extends EventEmitter {
     return this.turns.submit(params)
   }
 
-  /** Probe SDK for available tools/models — resolves model config for proper auth */
+  /** Probe SDK for available tools/models — resolves provider config for proper auth */
   async probeSdk(projectId: string): Promise<SdkInitInfo> {
     const projectPath = this.projects.getPath(projectId)
     if (!projectPath) throw new Error('Project path not found')
 
-    const defaultModel = this.projects.getDefaultModel(projectId)
-    const modelConfig = this.projects.resolveModelConfig(defaultModel)
+    const defaultProviderId = this.projects.getDefaultProvider(projectId)
+    const providerConfig = this.projects.resolveProviderConfig(defaultProviderId)
     let resolvedModel: string | undefined
-    if (modelConfig) {
-      resolvedModel = modelConfig.modelId
-        || (modelConfig.provider === 'custom' ? modelConfig.name : undefined)
+    if (providerConfig) {
+      resolvedModel = providerConfig.modelId
+        || (providerConfig.provider === 'custom' ? providerConfig.name : undefined)
     } else {
-      resolvedModel = defaultModel
+      resolvedModel = defaultProviderId
     }
-    const env = modelConfig ? this.projects.buildModelEnv(modelConfig) : undefined
+    const env = providerConfig ? this.projects.buildProviderEnv(providerConfig) : undefined
 
     return this.agent.probe(projectPath, resolvedModel, env)
   }

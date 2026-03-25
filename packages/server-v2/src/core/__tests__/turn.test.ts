@@ -43,7 +43,7 @@ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     name: 'Test Project',
     path: '/tmp/test-project',
     icon: '',
-    defaultModel: 'claude-sonnet-4-6',
+    defaultProviderId: 'claude-sonnet-4-6',
     defaultPermissionMode: 'default' as PermissionMode,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -59,9 +59,9 @@ function createMockCore(): CoreEngine {
     getPath: vi.fn().mockReturnValue('/tmp/test-project'),
     get: vi.fn().mockReturnValue(makeProject()),
     list: vi.fn().mockReturnValue([]),
-    getDefaultModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
-    resolveModelConfig: vi.fn().mockReturnValue(null),
-    buildModelEnv: vi.fn().mockReturnValue({}),
+    getDefaultProvider: vi.fn().mockReturnValue('claude-sonnet-4-6'),
+    resolveProviderConfig: vi.fn().mockReturnValue(null),
+    buildProviderEnv: vi.fn().mockReturnValue({}),
     load: vi.fn(),
   }
   // Use the typed emit/on from CoreEngine
@@ -489,8 +489,8 @@ describe('TurnManager', () => {
     it('should pass session model, permissionMode, and project path', async () => {
       agent.queryMock.mockImplementation(async function* () {})
 
-      const project = makeProject({ id: 'proj-1', defaultModel: 'claude-opus-4' })
-      const meta = sessions.create('proj-1', project, { model: 'claude-opus-4', permissionMode: 'bypassPermissions' })
+      const project = makeProject({ id: 'proj-1', defaultProviderId: 'claude-opus-4' })
+      const meta = sessions.create('proj-1', project, { providerId: 'claude-opus-4', permissionMode: 'bypassPermissions' })
       sessions.register('sess-1', meta)
 
       turnManager.submit({

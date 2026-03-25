@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import type { ProjectConfig, PermissionMode, ModelConfig } from '../types/index.js'
+import type { ProjectConfig, PermissionMode, ProviderConfig } from '../types/index.js'
 
 const CONFIG_DIR = join(homedir(), '.codecrab')
 const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json')
@@ -15,9 +15,9 @@ const CLAUDE_DIR = join(homedir(), '.claude')
 
 export class ProjectManager {
   private projects = new Map<string, ProjectConfig>()
-  private projectModels = new Map<string, string>() // projectId -> model config ID override
-  private defaultModelConfigId = 'claude-sonnet-4-6' // UUID or fallback model name
-  private models: ModelConfig[] = [] // Full model configs from models.json
+  private projectProviders = new Map<string, string>() // projectId -> provider config ID override
+  private defaultProviderConfigId = 'claude-sonnet-4-6' // UUID or fallback provider name
+  private providers: ProviderConfig[] = [] // Full provider configs from models.json
 
   async load(): Promise<void> {
     try {
@@ -33,39 +33,42 @@ export class ProjectManager {
     try {
       const data = await readFile(MODELS_FILE, 'utf-8')
       const settings = JSON.parse(data)
-      if (settings.defaultModelId) {
-        this.defaultModelConfigId = settings.defaultModelId
+      if (settings.defaultProviderId || settings.defaultModelId) {
+        this.defaultProviderConfigId = settings.defaultProviderId || settings.defaultModelId
       }
-      if (Array.isArray(settings.models)) {
-        this.models = settings.models
+      if (Array.isArray(settings.providers)) {
+        this.providers = settings.providers
+      } else if (Array.isArray(settings.models)) {
+        this.providers = settings.models // backward compat
       }
-      // Load per-project model overrides if they exist
-      if (settings.projectModels) {
-        for (const [pid, modelId] of Object.entries(settings.projectModels)) {
-          this.projectModels.set(pid, modelId as string)
+      // Load per-project provider overrides if they exist
+      if (settings.projectProviders || settings.projectModels) {
+        const overrides = settings.projectProviders || settings.projectModels
+        for (const [pid, providerId] of Object.entries(overrides)) {
+          this.projectProviders.set(pid, providerId as string)
         }
       }
     } catch {
       // No models file — use defaults
     }
 
-    // Re-apply model settings to already-loaded projects
+    // Re-apply provider settings to already-loaded projects
     // (projects.json is loaded before models.json, so defaults may be stale)
-    const defaultConfigId = this.defaultModelConfigId
+    const defaultConfigId = this.defaultProviderConfigId
     for (const [id, config] of this.projects) {
-      const override = this.projectModels.get(id)
-      config.defaultModel = override || defaultConfigId
+      const override = this.projectProviders.get(id)
+      config.defaultProviderId = override || defaultConfigId
     }
   }
 
   private toConfig(raw: any): ProjectConfig {
-    const modelOverride = this.projectModels.get(raw.id)
+    const providerOverride = this.projectProviders.get(raw.id)
     return {
       id: raw.id,
       name: raw.name,
       path: raw.path,
       icon: raw.icon || '',
-      defaultModel: modelOverride || this.defaultModelConfigId,
+      defaultProviderId: providerOverride || this.defaultProviderConfigId,
       defaultPermissionMode: 'default' as PermissionMode,
       createdAt: raw.createdAt || Date.now(),
       updatedAt: raw.updatedAt || Date.now(),
@@ -98,20 +101,20 @@ export class ProjectManager {
     return this.projects.get(projectId)?.path ?? null
   }
 
-  getDefaultModel(projectId: string): string {
-    return this.projectModels.get(projectId) || this.defaultModelConfigId
+  getDefaultProvider(projectId: string): string {
+    return this.projectProviders.get(projectId) || this.defaultProviderConfigId
   }
 
-  /** Resolve a model config ID (UUID) to the full ModelConfig.
+  /** Resolve a provider config ID (UUID) to the full ProviderConfig.
    *  Returns null if not found. */
-  resolveModelConfig(modelConfigId: string): ModelConfig | null {
-    return this.models.find((m) => m.id === modelConfigId) ?? null
+  resolveProviderConfig(providerConfigId: string): ProviderConfig | null {
+    return this.providers.find((p) => p.id === providerConfigId) ?? null
   }
 
-  /** Build SDK environment variables from a ModelConfig.
+  /** Build SDK environment variables from a ProviderConfig.
    *  Sets ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, clears nested-session vars. */
-  buildModelEnv(modelConfig: ModelConfig): Record<string, string | undefined> {
-    const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
+  buildProviderEnv(providerConfig: ProviderConfig): Record<string, string | undefined> {
+    const apiKey = providerConfig.apiKey || process.env.ANTHROPIC_API_KEY
     const env: Record<string, string | undefined> = { ...process.env }
 
     // For API key models, set CLAUDE_CONFIG_DIR so skills/commands load from ~/.claude.
@@ -124,8 +127,8 @@ export class ProjectManager {
       delete env.ANTHROPIC_API_KEY
     }
 
-    if (modelConfig.baseUrl) {
-      env.ANTHROPIC_BASE_URL = modelConfig.baseUrl
+    if (providerConfig.baseUrl) {
+      env.ANTHROPIC_BASE_URL = providerConfig.baseUrl
     } else {
       delete env.ANTHROPIC_BASE_URL
     }
@@ -156,7 +159,7 @@ export class ProjectManager {
       name: params.name,
       path: params.path,
       icon: params.icon || '📁',
-      defaultModel: this.defaultModelConfigId,
+      defaultProviderId: this.defaultProviderConfigId,
       defaultPermissionMode: 'default' as PermissionMode,
       createdAt: now,
       updatedAt: now,

@@ -40,7 +40,7 @@ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     name: 'Test Project',
     path: '/tmp/test-project',
     icon: '',
-    defaultModel: 'claude-sonnet-4-6',
+    defaultProviderId: 'claude-sonnet-4-6',
     defaultPermissionMode: 'default' as PermissionMode,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -53,7 +53,7 @@ function makeSessionMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
     sdkSessionId: 'sess-1',
     projectId: 'proj-1',
     status: 'idle',
-    model: 'claude-sonnet-4-6',
+    providerId: 'claude-sonnet-4-6',
     permissionMode: 'default',
     createdAt: Date.now(),
     usage: {
@@ -79,7 +79,7 @@ function createMockCore(): CoreEngine {
     list: vi.fn().mockReturnValue([makeProject()]),
     get: vi.fn().mockReturnValue(makeProject()),
     getPath: vi.fn().mockReturnValue('/tmp/test-project'),
-    getDefaultModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
+    getDefaultProvider: vi.fn().mockReturnValue('claude-sonnet-4-6'),
     load: vi.fn(),
   }
   core.sessions = {

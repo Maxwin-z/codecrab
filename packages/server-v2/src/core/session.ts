@@ -40,12 +40,12 @@ export class SessionManager {
     }
   }
 
-  /** Create a new session — model is locked at creation time */
+  /** Create a new session — provider is locked at creation time */
   create(
     projectId: string,
     project: ProjectConfig,
     overrides?: {
-      model?: string
+      providerId?: string
       permissionMode?: PermissionMode
       cronJobId?: string
       cronJobName?: string
@@ -55,7 +55,7 @@ export class SessionManager {
       sdkSessionId: '', // Will be filled when SDK initializes
       projectId,
       status: 'idle',
-      model: overrides?.model || project.defaultModel,
+      providerId: overrides?.providerId || project.defaultProviderId,
       permissionMode: overrides?.permissionMode || project.defaultPermissionMode,
       cronJobId: overrides?.cronJobId,
       cronJobName: overrides?.cronJobName,

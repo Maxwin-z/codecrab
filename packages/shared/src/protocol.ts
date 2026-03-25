@@ -50,6 +50,12 @@ export interface RespondPermissionMessage extends ProjectContext {
   allow: boolean
 }
 
+export interface SetProviderMessage extends ProjectContext {
+  type: 'set_provider'
+  providerId: string
+}
+
+/** @deprecated Use SetProviderMessage instead */
 export interface SetModelMessage extends ProjectContext {
   type: 'set_model'
   model: string
@@ -92,6 +98,7 @@ export type ClientMessage =
   | ResumeSessionMessage
   | RespondQuestionMessage
   | RespondPermissionMessage
+  | SetProviderMessage
   | SetModelMessage
   | SetPermissionModeMessage
   | SwitchProjectMessage
@@ -302,6 +309,12 @@ export interface AskUserQuestionMessage extends ServerProjectContext {
   questions: Question[]
 }
 
+export interface ProviderChangedMessage extends ServerProjectContext {
+  type: 'provider_changed'
+  providerId?: string
+}
+
+/** @deprecated Use ProviderChangedMessage instead */
 export interface ModelChangedMessage extends ServerProjectContext {
   type: 'model_changed'
   model?: string
@@ -421,6 +434,7 @@ export type ServerMessage =
   | SessionCreatedMessage
   | SessionStatusChangedMessage
   | AskUserQuestionMessage
+  | ProviderChangedMessage
   | ModelChangedMessage
   | PermissionModeChangedMessage
   | PermissionRequestMessage

@@ -19,7 +19,7 @@ const PROVIDERS = [
   { value: 'custom', label: 'Custom / Self-hosted', placeholder: 'API key' },
 ] as const
 
-interface MaskedModel {
+interface MaskedProvider {
   id: string
   name: string
   provider: string
@@ -34,9 +34,9 @@ export function SettingsPage({
 }) {
   const navigate = useNavigate()
 
-  // Model list
-  const [models, setModels] = useState<MaskedModel[]>([])
-  const [defaultModelId, setDefaultModelId] = useState<string>()
+  // Provider list
+  const [providers, setProviders] = useState<MaskedProvider[]>([])
+  const [defaultProviderId, setDefaultProviderId] = useState<string>()
 
   // Add-model form
   const [showForm, setShowForm] = useState(false)
@@ -157,20 +157,20 @@ export function SettingsPage({
 
   // --- Data fetching ---
 
-  const loadModels = useCallback(async () => {
+  const loadProviders = useCallback(async () => {
     try {
-      const res = await authFetch('/api/setup/models', {}, onUnauthorized)
+      const res = await authFetch('/api/setup/providers', {}, onUnauthorized)
       if (res.status === 401) {
         onUnauthorized?.()
         return
       }
       const data = await res.json()
-      setModels(data.models)
-      setDefaultModelId(data.defaultModelId)
+      setProviders(data.providers)
+      setDefaultProviderId(data.defaultProviderId)
     } catch {}
   }, [onUnauthorized])
 
-  useEffect(() => { loadModels() }, [loadModels])
+  useEffect(() => { loadProviders() }, [loadProviders])
 
   // Two-step Claude CLI detection
   useEffect(() => {
@@ -194,20 +194,20 @@ export function SettingsPage({
     return () => { cancelled = true }
   }, [])
 
-  // Auto-test API-key models on load
+  // Auto-test API-key providers on load
   useEffect(() => {
-    for (const m of models) {
-      if (m.apiKey && !testedRef.current.has(m.id)) {
-        testedRef.current.add(m.id)
-        testModel(m.id)
+    for (const p of providers) {
+      if (p.apiKey && !testedRef.current.has(p.id)) {
+        testedRef.current.add(p.id)
+        testProvider(p.id)
       }
     }
-  }, [models])
+  }, [providers])
 
-  async function testModel(id: string) {
+  async function testProvider(id: string) {
     setTestStatus((prev) => ({ ...prev, [id]: { status: 'testing' } }))
     try {
-      const res = await authFetch(`/api/setup/models/${id}/test`, { method: 'POST' }, onUnauthorized)
+      const res = await authFetch(`/api/setup/providers/${id}/test`, { method: 'POST' }, onUnauthorized)
       if (res.status === 401) {
         onUnauthorized?.()
         return
@@ -244,7 +244,7 @@ export function SettingsPage({
         throw new Error(data.error || 'Failed to import')
       }
       setImported(true)
-      await loadModels()
+      await loadProviders()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -252,12 +252,12 @@ export function SettingsPage({
     }
   }
 
-  async function handleAddModel(e: React.FormEvent) {
+  async function handleAddProvider(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setSaving(true)
     try {
-      const res = await authFetch('/api/setup/models', {
+      const res = await authFetch('/api/setup/providers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -276,7 +276,7 @@ export function SettingsPage({
         throw new Error(data.error || 'Failed to save')
       }
       resetForm()
-      await loadModels()
+      await loadProviders()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -286,29 +286,29 @@ export function SettingsPage({
 
   async function handleDelete(id: string) {
     try {
-      const res = await authFetch(`/api/setup/models/${id}`, { method: 'DELETE' }, onUnauthorized)
+      const res = await authFetch(`/api/setup/providers/${id}`, { method: 'DELETE' }, onUnauthorized)
       if (res.status === 401) {
         onUnauthorized?.()
         return
       }
       testedRef.current.delete(id)
       setTestStatus((prev) => { const next = { ...prev }; delete next[id]; return next })
-      await loadModels()
+      await loadProviders()
     } catch {}
   }
 
   async function handleSetDefault(id: string) {
     try {
-      const res = await authFetch('/api/setup/default-model', {
+      const res = await authFetch('/api/setup/default-provider', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelId: id }),
+        body: JSON.stringify({ providerId: id }),
       }, onUnauthorized)
       if (res.status === 401) {
         onUnauthorized?.()
         return
       }
-      setDefaultModelId(id)
+      setDefaultProviderId(id)
     } catch {}
   }
 
@@ -324,8 +324,8 @@ export function SettingsPage({
   // --- Derived state ---
 
   const cliUsable = detect?.cliAvailable && detect?.auth?.loggedIn
-  const hasClaudeModel = models.some((m) => m.provider === 'anthropic' && !m.apiKey)
-  const showDetectBanner = claudeFound && !imported && !hasClaudeModel && (probing || detect?.claudeCodeInstalled)
+  const hasClaudeProvider = providers.some((p) => p.provider === 'anthropic' && !p.apiKey)
+  const showDetectBanner = claudeFound && !imported && !hasClaudeProvider && (probing || detect?.claudeCodeInstalled)
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -474,11 +474,11 @@ export function SettingsPage({
 
         <hr className="border-border" />
 
-        {/* Models section */}
+        {/* Providers section */}
         <section className="flex flex-col gap-3">
           <div>
-            <h2 className="text-sm font-medium">Models</h2>
-            <p className="text-xs text-muted-foreground">Configure AI models. You can add multiple and switch between them.</p>
+            <h2 className="text-sm font-medium">Providers</h2>
+            <p className="text-xs text-muted-foreground">Configure AI providers. You can add multiple and switch between them.</p>
           </div>
 
           {/* Claude CLI detection banner */}
@@ -513,54 +513,54 @@ export function SettingsPage({
             </div>
           )}
 
-          {/* Model list */}
-          {models.length > 0 && (
+          {/* Provider list */}
+          {providers.length > 0 && (
             <div className="flex flex-col gap-2">
-              {models.map((m) => (
-                <div key={m.id} className="flex items-center gap-3 rounded-lg border px-3 py-2.5">
+              {providers.map((p) => (
+                <div key={p.id} className="flex items-center gap-3 rounded-lg border px-3 py-2.5">
                   <button
                     type="button"
-                    onClick={() => handleSetDefault(m.id)}
+                    onClick={() => handleSetDefault(p.id)}
                     className="shrink-0 cursor-pointer"
-                    title={m.id === defaultModelId ? 'Default model' : 'Set as default'}
+                    title={p.id === defaultProviderId ? 'Default provider' : 'Set as default'}
                   >
                     <Star className={cn(
                       'h-4 w-4 transition-colors',
-                      m.id === defaultModelId
+                      p.id === defaultProviderId
                         ? 'fill-amber-400 text-amber-400'
                         : 'text-muted-foreground/30 hover:text-amber-400/60'
                     )} />
                   </button>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{m.name}</div>
+                    <div className="text-sm font-medium truncate">{p.name}</div>
                     <div className="text-xs text-muted-foreground font-mono">
-                      {m.apiKey ? m.apiKey : 'CLI OAuth'}
+                      {p.apiKey ? p.apiKey : 'CLI OAuth'}
                     </div>
                   </div>
                   <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded capitalize shrink-0">
-                    {m.provider}
+                    {p.provider}
                   </span>
-                  {testStatus[m.id]?.status === 'testing' && (
+                  {testStatus[p.id]?.status === 'testing' && (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
                   )}
-                  {testStatus[m.id]?.status === 'ok' && (
+                  {testStatus[p.id]?.status === 'ok' && (
                     <CircleCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                   )}
-                  {testStatus[m.id]?.status === 'error' && (
+                  {testStatus[p.id]?.status === 'error' && (
                     <button
                       type="button"
-                      onClick={() => { testedRef.current.delete(m.id); testModel(m.id) }}
+                      onClick={() => { testedRef.current.delete(p.id); testProvider(p.id) }}
                       className="shrink-0 cursor-pointer"
-                      title={testStatus[m.id].error || 'Connection failed — click to retry'}
+                      title={testStatus[p.id].error || 'Connection failed — click to retry'}
                     >
                       <CircleX className="h-3.5 w-3.5 text-destructive" />
                     </button>
                   )}
                   <button
                     type="button"
-                    onClick={() => handleDelete(m.id)}
+                    onClick={() => handleDelete(p.id)}
                     className="shrink-0 text-muted-foreground/30 hover:text-destructive transition-colors cursor-pointer"
-                    title="Delete model"
+                    title="Delete provider"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -569,10 +569,10 @@ export function SettingsPage({
             </div>
           )}
 
-          {/* Add-model form */}
+          {/* Add-provider form */}
           {showForm ? (
-            <form onSubmit={handleAddModel} className="flex flex-col gap-3 rounded-lg border border-dashed p-4">
-              <div className="text-sm font-medium">Add Model</div>
+            <form onSubmit={handleAddProvider} className="flex flex-col gap-3 rounded-lg border border-dashed p-4">
+              <div className="text-sm font-medium">Add Provider</div>
 
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="provider" className="text-xs">Provider</Label>
@@ -634,7 +634,7 @@ export function SettingsPage({
           ) : (
             <Button variant="outline" className="self-start" onClick={() => setShowForm(true)}>
               <Plus className="h-4 w-4" />
-              Add Model
+              Add Provider
             </Button>
           )}
         </section>

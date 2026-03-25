@@ -1,7 +1,7 @@
-import type { PermissionMode, ImageAttachment, Question, DebugEvent, ModelConfig } from '@codecrab/shared'
+import type { PermissionMode, ImageAttachment, Question, DebugEvent, ProviderConfig } from '@codecrab/shared'
 
 // Re-export shared types used by other layers
-export type { PermissionMode, ImageAttachment, Question, DebugEvent, ModelConfig }
+export type { PermissionMode, ImageAttachment, Question, DebugEvent, ProviderConfig }
 
 // ============ Agent Layer Types ============
 
@@ -69,7 +69,7 @@ export interface ProjectConfig {
   name: string
   path: string
   icon: string
-  defaultModel: string
+  defaultProviderId: string
   defaultPermissionMode: PermissionMode
   createdAt: number
   updatedAt: number
@@ -80,7 +80,7 @@ export interface SessionMeta {
   sdkSessionId: string
   projectId: string
   status: 'idle' | 'processing' | 'error'
-  model: string
+  providerId: string
   permissionMode: PermissionMode
   pendingQuestion?: {
     toolId: string

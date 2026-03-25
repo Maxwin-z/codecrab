@@ -59,7 +59,7 @@ export class TurnManager {
 
     const projectName = this.core.projects.get(params.projectId)?.name || params.projectId
     const tag = `${C.yellow}[turn]${C.reset}`
-    tsLog(`${tag} ${C.bold}▶ start${C.reset}  project=${C.bold}${projectName}${C.reset}  session=${params.sessionId.slice(0, 12)}…  model=${C.bold}${session.model}${C.reset}  mode=${session.permissionMode}`)
+    tsLog(`${tag} ${C.bold}▶ start${C.reset}  project=${C.bold}${projectName}${C.reset}  session=${params.sessionId.slice(0, 12)}…  provider=${C.bold}${session.providerId}${C.reset}  mode=${session.permissionMode}`)
     const promptPreview = (params.prompt || '').length > 150
       ? params.prompt.slice(0, 150) + '…'
       : params.prompt || ''
@@ -101,26 +101,26 @@ export class TurnManager {
       return
     }
 
-    // Resolve model config ID (UUID) to actual model identifier and env
-    const modelConfig = this.core.projects.resolveModelConfig(session.model)
+    // Resolve provider config ID (UUID) to actual model identifier and env
+    const providerConfig = this.core.projects.resolveProviderConfig(session.providerId)
     let resolvedModel: string | undefined
-    if (modelConfig) {
+    if (providerConfig) {
       // Config found by UUID — extract the actual model identifier
       // For Anthropic OAuth (no apiKey, no modelId): leave undefined → SDK default
       // For custom providers without modelId: use config name
-      resolvedModel = modelConfig.modelId
-        || (modelConfig.provider === 'custom' ? modelConfig.name : undefined)
+      resolvedModel = providerConfig.modelId
+        || (providerConfig.provider === 'custom' ? providerConfig.name : undefined)
     } else {
-      // Not a config UUID — session.model is already a model ID (e.g. 'claude-opus-4')
-      resolvedModel = session.model
+      // Not a config UUID — session.providerId is already a model ID (e.g. 'claude-opus-4')
+      resolvedModel = session.providerId
     }
-    const modelEnv = modelConfig
-      ? this.core.projects.buildModelEnv(modelConfig)
+    const providerEnv = providerConfig
+      ? this.core.projects.buildProviderEnv(providerConfig)
       : undefined
 
-    tsLog(`${tag}   ${C.dim}model resolve: ${session.model} → ${resolvedModel ?? '(SDK default)'} (config ${modelConfig ? 'found' : 'NOT found'})${C.reset}`)
-    if (modelEnv) {
-      tsLog(`${tag}   ${C.dim}env: API_KEY=${modelEnv.ANTHROPIC_API_KEY ? modelEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...' : 'unset'}  BASE_URL=${modelEnv.ANTHROPIC_BASE_URL || 'default'}${C.reset}`)
+    tsLog(`${tag}   ${C.dim}provider resolve: ${session.providerId} → ${resolvedModel ?? '(SDK default)'} (config ${providerConfig ? 'found' : 'NOT found'})${C.reset}`)
+    if (providerEnv) {
+      tsLog(`${tag}   ${C.dim}env: API_KEY=${providerEnv.ANTHROPIC_API_KEY ? providerEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...' : 'unset'}  BASE_URL=${providerEnv.ANTHROPIC_BASE_URL || 'default'}${C.reset}`)
     }
 
     const abortController = new AbortController()
@@ -138,7 +138,7 @@ export class TurnManager {
         images: params.images,
         abortController,
         soulEnabled: params.soulEnabled,
-        env: modelEnv,
+        env: providerEnv,
       })
 
       const startTime = Date.now()
