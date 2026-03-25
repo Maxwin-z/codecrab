@@ -23,6 +23,10 @@ export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
     navigate(`/chat?project=${encodeURIComponent(project.id)}`)
   }
 
+  const handleDoubleClickProject = (project: Project) => {
+    navigate(`/chat?project=${encodeURIComponent(project.id)}&view=sessions`)
+  }
+
   return (
     <div className="flex-1 flex flex-col bg-background overflow-y-auto">
       {/* Header — only on mobile (desktop has sidebar) */}
@@ -55,7 +59,7 @@ export function HomePage({ onOpenSetup, onUnauthorized }: HomePageProps) {
               New
             </Button>
           </div>
-          <ProjectList onSelect={handleSelectProject} onUnauthorized={onUnauthorized} />
+          <ProjectList onSelect={handleSelectProject} onDoubleClick={handleDoubleClickProject} onUnauthorized={onUnauthorized} />
         </>
       )}
 

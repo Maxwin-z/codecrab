@@ -139,6 +139,7 @@ export function AppSidebar({ onOpenSetup, onUnauthorized }: AppSidebarProps) {
               <button
                 key={project.id}
                 onClick={() => navigate(`/chat?project=${encodeURIComponent(project.id)}`)}
+                onDoubleClick={() => navigate(`/chat?project=${encodeURIComponent(project.id)}&view=sessions`)}
                 className={cn(
                   'w-full flex items-center gap-3 px-2 py-2 rounded-lg text-sm text-left transition-colors',
                   isSelected

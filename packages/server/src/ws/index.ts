@@ -1657,45 +1657,75 @@ async function consumeBackgroundTasks(
   session: Session,
   currentTurn: import('@codecrab/shared').SessionTurn | undefined,
   logEvent: (type: import('@codecrab/shared').DebugEvent['type'], detail?: string, data?: Record<string, unknown>, parentToolUseId?: string | null, taskId?: string) => void,
+  pendingTaskIds?: string[],
 ): Promise<void> {
   const tag = `[bg-tasks:${projectId.slice(-6)}]`
-  console.log(`${tag} Background task consumer started`)
+  console.log(`${tag} Background task consumer started (pending: ${pendingTaskIds?.join(', ') || 'unknown'})`)
+
+  // Track which tasks are still pending so we can detect unexpected stream termination
+  const remainingTasks = new Set(pendingTaskIds || [])
+  let streamEndedNormally = false
 
   try {
     while (true) {
-      const { value: event, done } = await iterator.next()
-      if (done) break
+      let iterResult: IteratorResult<{ type: string; data?: unknown }>
+      try {
+        iterResult = await iterator.next()
+      } catch (iterErr: any) {
+        // Iterator/generator threw — the SDK stream is broken
+        console.error(`${tag} Iterator error (SDK stream broken):`, iterErr.message)
+        break
+      }
 
+      if (iterResult.done) {
+        streamEndedNormally = true
+        break
+      }
+
+      const event = iterResult.value
       if (event.type === 'background_task_update') {
         const td = event.data as any
         console.log(`${tag} Task ${td.taskId} ${td.status}: ${td.summary || td.description || ''}`)
 
-        // Forward to WebSocket clients
-        broadcastToProject(projectId, {
-          type: 'background_task_update',
-          taskId: td.taskId,
-          status: td.status,
-          description: td.description,
-          summary: td.summary,
-          usage: td.usage,
-          projectId,
-          sessionId: session.sessionId,
-        })
+        // Track completion
+        if (td.status === 'completed' || td.status === 'failed' || td.status === 'stopped') {
+          remainingTasks.delete(td.taskId)
+        }
 
-        // Log to session turn
-        logEvent(
-          td.status === 'progress' ? 'task_progress' : 'task_notification',
-          `${td.status}: ${td.summary || td.description || ''}`,
-          {
+        // Forward to WebSocket clients — isolated so a broadcast error doesn't kill the consumer
+        try {
+          broadcastToProject(projectId, {
+            type: 'background_task_update',
             taskId: td.taskId,
             status: td.status,
-            summary: td.summary,
             description: td.description,
-            ...(td.usage || {}),
-          },
-          null,
-          td.taskId,
-        )
+            summary: td.summary,
+            usage: td.usage,
+            projectId,
+            sessionId: session.sessionId,
+          })
+        } catch (broadcastErr: any) {
+          console.error(`${tag} Failed to broadcast task update:`, broadcastErr.message)
+        }
+
+        // Log to session turn
+        try {
+          logEvent(
+            td.status === 'progress' ? 'task_progress' : 'task_notification',
+            `${td.status}: ${td.summary || td.description || ''}`,
+            {
+              taskId: td.taskId,
+              status: td.status,
+              summary: td.summary,
+              description: td.description,
+              ...(td.usage || {}),
+            },
+            null,
+            td.taskId,
+          )
+        } catch (logErr: any) {
+          console.error(`${tag} Failed to log task event:`, logErr.message)
+        }
 
         // Send push notification when a task completes or fails
         if (td.status === 'completed' || td.status === 'failed') {
@@ -1707,10 +1737,41 @@ async function consumeBackgroundTasks(
       }
     }
   } catch (err: any) {
-    console.error(`${tag} Error consuming background tasks:`, err.message)
+    console.error(`${tag} Unexpected error in background task consumer:`, err.message)
   } finally {
-    // Clean up the iterator
-    try { await iterator.return?.() } catch { /* ignore */ }
+    // If the stream ended while tasks were still pending, notify about the loss
+    if (remainingTasks.size > 0) {
+      const lostIds = [...remainingTasks].join(', ')
+      console.error(`${tag} Stream ended with ${remainingTasks.size} task(s) still pending: ${lostIds}`)
+
+      // Notify clients that these tasks were lost
+      try {
+        for (const taskId of remainingTasks) {
+          broadcastToProject(projectId, {
+            type: 'background_task_update',
+            taskId,
+            status: 'failed',
+            description: 'Task lost: SDK stream ended unexpectedly',
+            summary: 'Background task was lost because the SDK process terminated',
+            projectId,
+            sessionId: session.sessionId,
+          })
+        }
+        sendQueryCompletionPush(
+          `${remainingTasks.size} 个后台任务异常终止`,
+          projectId,
+          session.sessionId,
+        )
+      } catch { /* best effort */ }
+    } else {
+      console.log(`${tag} All background tasks completed normally`)
+    }
+
+    // Clean up the iterator — only if stream ended normally (all tasks done).
+    // If the stream broke, don't call return() — the generator/SDK may already be dead.
+    if (streamEndedNormally) {
+      try { await iterator.return?.() } catch { /* ignore */ }
+    }
     console.log(`${tag} Background task consumer finished`)
 
     // Persist session with updated turn data
@@ -1779,6 +1840,8 @@ async function executeUserQuery(
   }
   let thinkingStarted = false
   let textStarted = false
+  let hasBackgroundTasks = false
+  let backgroundTaskIds: string[] = []
 
   logEvent('query_start', prompt.slice(0, 200))
 
@@ -1909,7 +1972,6 @@ async function executeUserQuery(
     }, images, enabledMcps, disabledSdkServers, disabledSkills)
 
     let finalText = ''
-    let hasBackgroundTasks = false
     let lastQueryUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }
 
     // Use manual iteration so we can detach the iterator for background task
@@ -1981,6 +2043,7 @@ async function executeUserQuery(
           // Background tasks are still running after result — detach them
           const taskData = event.data as any
           hasBackgroundTasks = true
+          backgroundTaskIds = taskData.taskIds || []
           tsLog('[ws]', `Background tasks active — project=${projectId}, tasks=${taskData.taskIds.join(', ')}`)
           iterDone = true // Exit main loop, but DON'T close the iterator
           break
@@ -2066,11 +2129,11 @@ async function executeUserQuery(
     // SDK subprocess alive until all tasks complete. The main query returns
     // immediately so the queue can process new queries.
     if (hasBackgroundTasks) {
-      consumeBackgroundTasks(iterator, projectId, session, currentTurn, logEvent)
+      consumeBackgroundTasks(iterator, projectId, session, currentTurn, logEvent, backgroundTaskIds)
         .catch((err) => {
           console.error(`[ws] Background task consumer error — project=${projectId}:`, err.message)
         })
-      tsLog('[ws]', `Query returning with background tasks still active — project=${projectId}`)
+      tsLog('[ws]', `Query returning with background tasks still active — project=${projectId}, tasks=${backgroundTaskIds.join(', ')}`)
     }
 
     return { success: true, output: finalText.slice(0, 500), queryId: queuedQuery.id }
@@ -2101,6 +2164,8 @@ async function executeUserQuery(
       projectId,
       sessionId: session.sessionId,
       queryId: queuedQuery.id,
+      hasBackgroundTasks: hasBackgroundTasks || undefined,
+      backgroundTaskIds: hasBackgroundTasks ? backgroundTaskIds : undefined,
     })
     // Broadcast session usage after query completes
     {

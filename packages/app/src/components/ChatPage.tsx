@@ -240,6 +240,7 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
   useEffect(() => {
     const projectId = searchParams.get('project')
     const sessionParam = searchParams.get('session')
+    const viewParam = searchParams.get('view')
     if (projectId) {
       setLoadingProject(true)
       authFetch(`/api/projects/${projectId}`, {}, onUnauthorized)
@@ -254,8 +255,17 @@ export function ChatPage({ onUnauthorized }: ChatPageProps) {
           if (data.error) throw new Error(data.error)
           setProject(data)
           ws.setProjectId(projectId, data.path)
-          // If URL contains a session param, resume that session on initial load
-          if (sessionParam && !initialSessionHandledRef.current) {
+          // Explicit view=sessions param — always jump to session list
+          if (viewParam === 'sessions') {
+            initialSessionHandledRef.current = true
+            setShowSessionList(true)
+            // Clean up view param from URL
+            const url = new URL(window.location.href)
+            url.searchParams.delete('view')
+            url.searchParams.delete('session')
+            window.history.replaceState(null, '', url.toString())
+          } else if (sessionParam && !initialSessionHandledRef.current) {
+            // If URL contains a session param, resume that session on initial load
             initialSessionHandledRef.current = true
             ws.resumeSession(sessionParam)
           } else if (!initialSessionHandledRef.current) {

@@ -181,6 +181,11 @@ export interface QueryStartMessage extends ServerProjectContext {
 export interface QueryEndMessage extends ServerProjectContext {
   type: 'query_end'
   queryId?: string
+  /** When true, background tasks are still running after the main query completed.
+   *  The client should continue listening for `background_task_update` messages. */
+  hasBackgroundTasks?: boolean
+  /** IDs of background tasks still in progress */
+  backgroundTaskIds?: string[]
 }
 
 export type QueryQueueItemStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'

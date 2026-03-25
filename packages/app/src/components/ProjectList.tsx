@@ -16,10 +16,11 @@ function formatDate(ts: number): string {
 
 interface ProjectListProps {
   onSelect: (project: Project) => void
+  onDoubleClick?: (project: Project) => void
   onUnauthorized?: () => void
 }
 
-export function ProjectList({ onSelect, onUnauthorized }: ProjectListProps) {
+export function ProjectList({ onSelect, onDoubleClick, onUnauthorized }: ProjectListProps) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -124,6 +125,7 @@ export function ProjectList({ onSelect, onUnauthorized }: ProjectListProps) {
             <div
               key={project.id}
               onClick={() => onSelect(project)}
+              onDoubleClick={() => onDoubleClick?.(project)}
               className={`group text-left p-4 rounded-lg border bg-card hover:bg-accent/50 hover:border-foreground/10 transition-colors cursor-pointer ${isProcessing ? 'border-amber-500/40' : isActive ? 'border-emerald-500/40' : ''}`}
             >
               <div className="flex items-start gap-3">
