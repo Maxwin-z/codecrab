@@ -159,6 +159,20 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     client.subscribedProjects.set(projectId, { sessionId })
   }
 
+  // Broadcast the user message to all clients subscribed to this project
+  broadcaster.broadcastToProject(projectId, {
+    type: 'user_message',
+    projectId,
+    sessionId,
+    message: {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: message.prompt || '',
+      images: message.images,
+      timestamp: Date.now(),
+    },
+  })
+
   core.submitTurn({
     projectId,
     sessionId,

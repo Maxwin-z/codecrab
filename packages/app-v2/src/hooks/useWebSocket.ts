@@ -540,6 +540,19 @@ export function useWebSocket(): UseWebSocketReturn {
         break
       }
 
+      case 'user_message': {
+        if (!projectId) break
+        const ps = getOrCreateProjectState(projectId)
+        // Only add if not already present (the sending client adds it optimistically)
+        const msgs = ps.sessionState.messages
+        const lastUserMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null
+        if (!lastUserMsg || lastUserMsg.role !== 'user' || lastUserMsg.content !== msg.message.content) {
+          msgs.push(msg.message)
+          rerender()
+        }
+        break
+      }
+
       case 'error': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
