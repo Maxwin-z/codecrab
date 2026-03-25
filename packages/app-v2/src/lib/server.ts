@@ -36,5 +36,6 @@ export function buildWsUrl(path: string): string {
 export function getServerDisplay(): { address: string; isCustom: boolean } {
   const url = getServerUrl()
   if (url) return { address: url, isCustom: true }
-  return { address: window.location.origin, isCustom: false }
+  // No custom URL — using Vite proxy, show the proxy target
+  return { address: `${window.location.hostname}:4200 (via proxy)`, isCustom: false }
 }
