@@ -1,6 +1,8 @@
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import { listSessions as sdkListSessions, getSessionMessages as sdkGetSessionMessages } from '@anthropic-ai/claude-agent-sdk'
+import type { SessionInfo, ChatMessage } from '@codecrab/shared'
 import type { SessionMeta, ProjectConfig, PermissionMode, SessionUsage } from '../types/index.js'
 import { createEmptyUsage } from '../types/index.js'
 
@@ -73,13 +75,151 @@ export class SessionManager {
     return this.metas.get(sessionId) ?? null
   }
 
-  /** List all session metas, optionally filtered by projectId */
+  /** List all session metas from in-memory cache, optionally filtered by projectId */
   list(projectId?: string): SessionMeta[] {
     const all = Array.from(this.metas.values())
     if (projectId) {
       return all.filter((m) => m.projectId === projectId)
     }
     return all
+  }
+
+  /**
+   * List sessions for a project using SDK as source of truth.
+   * Merges SDK session data with our stored SessionMeta.
+   */
+  async listForProject(projectId: string, projectPath: string): Promise<SessionInfo[]> {
+    // Query SDK for sessions in this project directory
+    const sdkSessions = await sdkListSessions({ dir: projectPath })
+
+    // Build a lookup of our metas by sdkSessionId
+    const metasBySessionId = new Map<string, SessionMeta>()
+    for (const meta of this.metas.values()) {
+      if (meta.projectId === projectId && meta.sdkSessionId) {
+        metasBySessionId.set(meta.sdkSessionId, meta)
+      }
+    }
+
+    const result: SessionInfo[] = sdkSessions.map((sdk) => {
+      const meta = metasBySessionId.get(sdk.sessionId)
+      return {
+        sessionId: sdk.sessionId,
+        summary: sdk.customTitle || sdk.summary || '',
+        lastModified: sdk.lastModified,
+        firstPrompt: sdk.firstPrompt,
+        cwd: sdk.cwd,
+        status: meta?.status ?? 'idle',
+        isActive: meta?.status === 'processing',
+        projectId,
+        cronJobName: meta?.cronJobName,
+      }
+    })
+
+    // Sort by last modified desc
+    result.sort((a, b) => b.lastModified - a.lastModified)
+    return result
+  }
+
+  /**
+   * Get session history as ChatMessage[] using SDK's getSessionMessages.
+   * Converts SDK transcript messages into the app's ChatMessage format.
+   */
+  async getHistory(sessionId: string, projectPath?: string): Promise<ChatMessage[]> {
+    const sdkMessages = await sdkGetSessionMessages(sessionId, {
+      dir: projectPath,
+    })
+
+    if (!sdkMessages || sdkMessages.length === 0) return []
+
+    const messages: ChatMessage[] = []
+    // Track tool_use blocks from assistant messages so we can attach results
+    const toolUseMap = new Map<string, { msgIndex: number; toolIndex: number }>()
+
+    for (const sdkMsg of sdkMessages) {
+      const content = sdkMsg.message as any
+      if (!content) continue
+
+      if (sdkMsg.type === 'assistant') {
+        const blocks = Array.isArray(content.content) ? content.content : []
+
+        let text = ''
+        let thinking = ''
+        const toolCalls: ChatMessage['toolCalls'] = []
+
+        for (const block of blocks) {
+          if (block.type === 'text' && block.text) {
+            text += (text ? '\n' : '') + block.text
+          } else if (block.type === 'thinking' && block.thinking) {
+            thinking += (thinking ? '\n' : '') + block.thinking
+          } else if (block.type === 'tool_use') {
+            toolCalls.push({
+              name: block.name,
+              id: block.id,
+              input: block.input,
+            })
+          }
+        }
+
+        // Strip meta tags from text
+        text = text
+          .replace(/\n?\[SUMMARY:\s*.+\]\s*$/m, '')
+          .replace(/\n?\[SUGGESTIONS:\s*.+\]\s*$/m, '')
+          .trim()
+
+        if (!text && !thinking && toolCalls.length === 0) continue
+
+        const msgIndex = messages.length
+        messages.push({
+          id: sdkMsg.uuid || `msg-${msgIndex}`,
+          role: 'assistant',
+          content: text,
+          thinking: thinking || undefined,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          timestamp: Date.now(), // SDK doesn't provide per-message timestamps
+        })
+
+        // Index tool calls for result matching
+        for (let i = 0; i < toolCalls.length; i++) {
+          toolUseMap.set(toolCalls[i].id, { msgIndex, toolIndex: i })
+        }
+      } else if (sdkMsg.type === 'user') {
+        const blocks = Array.isArray(content.content) ? content.content : []
+
+        let text = ''
+        for (const block of blocks) {
+          if (block.type === 'text' && block.text) {
+            text += (text ? '\n' : '') + block.text
+          } else if (block.type === 'tool_result') {
+            // Attach result to the corresponding tool call
+            const ref = toolUseMap.get(block.tool_use_id)
+            if (ref) {
+              const msg = messages[ref.msgIndex]
+              if (msg?.toolCalls?.[ref.toolIndex]) {
+                const resultContent = Array.isArray(block.content)
+                  ? block.content.map((c: any) => c.text || JSON.stringify(c)).join('\n')
+                  : typeof block.content === 'string'
+                    ? block.content
+                    : JSON.stringify(block.content)
+                msg.toolCalls[ref.toolIndex].result = resultContent
+                msg.toolCalls[ref.toolIndex].isError = block.is_error || false
+              }
+            }
+          }
+        }
+
+        // Only add user text messages (not pure tool_result messages)
+        if (text) {
+          messages.push({
+            id: sdkMsg.uuid || `msg-${messages.length}`,
+            role: 'user',
+            content: text,
+            timestamp: Date.now(),
+          })
+        }
+      }
+    }
+
+    return messages
   }
 
   /** Update session metadata */

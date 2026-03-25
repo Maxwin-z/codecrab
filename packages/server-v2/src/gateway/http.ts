@@ -198,10 +198,32 @@ export function createRouter(core: CoreEngine): Router {
   })
 
   // Sessions
-  router.get('/api/sessions', (req: Request, res: Response) => {
+  router.get('/api/sessions', async (req: Request, res: Response) => {
     const projectId = req.query.projectId as string | undefined
+    if (projectId) {
+      const projectPath = core.projects.getPath(projectId)
+      if (projectPath) {
+        const sessions = await core.sessions.listForProject(projectId, projectPath)
+        res.json(sessions)
+        return
+      }
+    }
+    // Fallback: return metas from in-memory cache
     const sessions = core.sessions.list(projectId)
     res.json(sessions)
+  })
+
+  router.get('/api/sessions/:id/history', async (req: Request, res: Response) => {
+    const sessionId = req.params.id as string
+    // Find project path for the session (check meta first, then try all projects)
+    const meta = core.sessions.getMeta(sessionId)
+    const projectPath = meta?.projectId ? core.projects.getPath(meta.projectId) : undefined
+    try {
+      const messages = await core.sessions.getHistory(sessionId, projectPath || undefined)
+      res.json({ sessionId, messages })
+    } catch {
+      res.json({ sessionId, messages: [] })
+    }
   })
 
   router.delete('/api/sessions/:id', async (req: Request, res: Response) => {

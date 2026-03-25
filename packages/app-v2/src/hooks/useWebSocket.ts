@@ -6,8 +6,10 @@ import type {
   DebugEvent,
   ProjectStatus,
   Question,
+  ChatMessage,
 } from '@codecrab/shared'
 import { getWebSocketUrl } from '@/lib/auth'
+import { authFetch } from '@/lib/auth'
 import { stripMetaTags } from '@/lib/utils'
 
 // ============ Types ============
@@ -639,6 +641,27 @@ export function useWebSocket(): UseWebSocketReturn {
     ps.sessionState = createEmptySessionState()
     rerender()
     send({ type: 'resume_session', projectId, sessionId })
+
+    // Fetch history via REST
+    authFetch(`/api/sessions/${sessionId}/history`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!data?.messages?.length) return
+        const ps = getOrCreateProjectState(projectId)
+        // Only apply if still on the same session
+        if (ps.sessionId !== sessionId) return
+        ps.sessionState.messages = (data.messages as ChatMessage[]).map((m: ChatMessage) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          thinking: m.thinking,
+          toolCalls: m.toolCalls,
+          images: m.images,
+          timestamp: m.timestamp,
+        }))
+        rerender()
+      })
+      .catch(() => {})
   }, [send, getOrCreateProjectState, rerender])
 
   const setModel = useCallback((projectId: string, model: string) => {

@@ -36,6 +36,13 @@ export function SessionSidebar({
     loadSessions()
   }, [loadSessions])
 
+  // Refresh list when current session changes (e.g., new session created)
+  useEffect(() => {
+    if (currentSessionId) {
+      loadSessions()
+    }
+  }, [currentSessionId])
+
   const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation()
     try {
