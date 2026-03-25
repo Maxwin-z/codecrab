@@ -292,6 +292,16 @@ export function logSdkMessage(tag: string, msg: any, state: StreamLogState): voi
           tsLog(`${tag}   ${C.dim}…(${resultText.split('\n').length - 6} more lines)${C.reset}`)
         }
       }
+      // Dump all fields when error for debugging
+      if (m.is_error) {
+        const keys = Object.keys(m).filter(k => !['type', 'usage', 'total_cost_usd', 'duration_ms', 'is_error'].includes(k))
+        for (const k of keys) {
+          const v = typeof m[k] === 'string' ? m[k] : JSON.stringify(m[k])
+          if (v && v !== '""' && v !== 'null' && v !== 'undefined') {
+            tsLog(`${tag}   ${C.red}${k}: ${String(v).slice(0, 300)}${C.reset}`)
+          }
+        }
+      }
       break
     }
   }

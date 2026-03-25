@@ -60,6 +60,8 @@ function createMockCore(): CoreEngine {
     get: vi.fn().mockReturnValue(makeProject()),
     list: vi.fn().mockReturnValue([]),
     getDefaultModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
+    resolveModelConfig: vi.fn().mockReturnValue(null),
+    buildModelEnv: vi.fn().mockReturnValue({}),
     load: vi.fn(),
   }
   // Use the typed emit/on from CoreEngine

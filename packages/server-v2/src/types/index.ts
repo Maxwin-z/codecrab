@@ -1,7 +1,7 @@
-import type { PermissionMode, ImageAttachment, Question, DebugEvent } from '@codecrab/shared'
+import type { PermissionMode, ImageAttachment, Question, DebugEvent, ModelConfig } from '@codecrab/shared'
 
 // Re-export shared types used by other layers
-export type { PermissionMode, ImageAttachment, Question, DebugEvent }
+export type { PermissionMode, ImageAttachment, Question, DebugEvent, ModelConfig }
 
 // ============ Agent Layer Types ============
 
@@ -43,6 +43,7 @@ export interface AgentQueryOptions {
   maxTurns?: number
   abortController?: AbortController
   soulEnabled?: boolean
+  env?: Record<string, string | undefined>
 }
 
 export interface SdkInitInfo {

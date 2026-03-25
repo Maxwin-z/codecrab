@@ -101,21 +101,36 @@ export class TurnManager {
       return
     }
 
+    // Resolve model config ID (UUID) to actual model identifier and env
+    const modelConfig = this.core.projects.resolveModelConfig(session.model)
+    const resolvedModel = modelConfig?.modelId
+      || (modelConfig?.provider === 'custom' ? modelConfig.name : undefined)
+      || session.model // fallback: use as-is (may already be a model ID)
+    const modelEnv = modelConfig
+      ? this.core.projects.buildModelEnv(modelConfig)
+      : undefined
+
+    tsLog(`${tag}   ${C.dim}model resolve: ${session.model} → ${resolvedModel} (config ${modelConfig ? 'found' : 'NOT found'})${C.reset}`)
+    if (modelEnv) {
+      tsLog(`${tag}   ${C.dim}env: API_KEY=${modelEnv.ANTHROPIC_API_KEY ? modelEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...' : 'unset'}  BASE_URL=${modelEnv.ANTHROPIC_BASE_URL || 'default'}${C.reset}`)
+    }
+
     const abortController = new AbortController()
     this.abortControllers.set(queuedQuery.id, abortController)
 
     try {
       const stream = this.agent.query(params.prompt, {
-        model: session.model,
+        model: resolvedModel,
         permissionMode: session.permissionMode,
         cwd: projectPath,
-        resume: session.sdkSessionId || undefined,
+        resume: session.sdkSessionId && !session.sdkSessionId.startsWith('pending-') ? session.sdkSessionId : undefined,
         enabledMcps: params.enabledMcps,
         disabledSdkServers: params.disabledSdkServers,
         disabledSkills: params.disabledSkills,
         images: params.images,
         abortController,
         soulEnabled: params.soulEnabled,
+        env: modelEnv,
       })
 
       const startTime = Date.now()

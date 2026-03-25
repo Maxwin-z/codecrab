@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import type { ProjectConfig, PermissionMode } from '../types/index.js'
+import type { ProjectConfig, PermissionMode, ModelConfig } from '../types/index.js'
 
 const CONFIG_DIR = join(homedir(), '.codecrab')
 const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json')
@@ -11,10 +11,13 @@ async function ensureConfigDir() {
   await mkdir(CONFIG_DIR, { recursive: true })
 }
 
+const CLAUDE_DIR = join(homedir(), '.claude')
+
 export class ProjectManager {
   private projects = new Map<string, ProjectConfig>()
-  private projectModels = new Map<string, string>() // projectId -> model override
-  private defaultModel = 'claude-sonnet-4-6'
+  private projectModels = new Map<string, string>() // projectId -> model config ID override
+  private defaultModelConfigId = 'claude-sonnet-4-6' // UUID or fallback model name
+  private models: ModelConfig[] = [] // Full model configs from models.json
 
   async load(): Promise<void> {
     try {
@@ -31,7 +34,10 @@ export class ProjectManager {
       const data = await readFile(MODELS_FILE, 'utf-8')
       const settings = JSON.parse(data)
       if (settings.defaultModelId) {
-        this.defaultModel = settings.defaultModelId
+        this.defaultModelConfigId = settings.defaultModelId
+      }
+      if (Array.isArray(settings.models)) {
+        this.models = settings.models
       }
       // Load per-project model overrides if they exist
       if (settings.projectModels) {
@@ -45,9 +51,10 @@ export class ProjectManager {
 
     // Re-apply model settings to already-loaded projects
     // (projects.json is loaded before models.json, so defaults may be stale)
+    const defaultConfigId = this.defaultModelConfigId
     for (const [id, config] of this.projects) {
       const override = this.projectModels.get(id)
-      config.defaultModel = override || this.defaultModel
+      config.defaultModel = override || defaultConfigId
     }
   }
 
@@ -58,7 +65,7 @@ export class ProjectManager {
       name: raw.name,
       path: raw.path,
       icon: raw.icon || '',
-      defaultModel: modelOverride || this.defaultModel,
+      defaultModel: modelOverride || this.defaultModelConfigId,
       defaultPermissionMode: 'default' as PermissionMode,
       createdAt: raw.createdAt || Date.now(),
       updatedAt: raw.updatedAt || Date.now(),
@@ -92,7 +99,42 @@ export class ProjectManager {
   }
 
   getDefaultModel(projectId: string): string {
-    return this.projectModels.get(projectId) || this.defaultModel
+    return this.projectModels.get(projectId) || this.defaultModelConfigId
+  }
+
+  /** Resolve a model config ID (UUID) to the full ModelConfig.
+   *  Returns null if not found. */
+  resolveModelConfig(modelConfigId: string): ModelConfig | null {
+    return this.models.find((m) => m.id === modelConfigId) ?? null
+  }
+
+  /** Build SDK environment variables from a ModelConfig.
+   *  Sets ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, clears nested-session vars. */
+  buildModelEnv(modelConfig: ModelConfig): Record<string, string | undefined> {
+    const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY
+    const env: Record<string, string | undefined> = { ...process.env }
+
+    // For API key models, set CLAUDE_CONFIG_DIR so skills/commands load from ~/.claude.
+    // For OAuth models, DON'T set it — causes Keychain key mismatch.
+    if (apiKey) {
+      env.CLAUDE_CONFIG_DIR = CLAUDE_DIR
+      env.ANTHROPIC_API_KEY = apiKey
+    } else {
+      delete env.CLAUDE_CONFIG_DIR
+      delete env.ANTHROPIC_API_KEY
+    }
+
+    if (modelConfig.baseUrl) {
+      env.ANTHROPIC_BASE_URL = modelConfig.baseUrl
+    } else {
+      delete env.ANTHROPIC_BASE_URL
+    }
+
+    // Prevent nested-session detection when server runs inside a Claude Code terminal
+    delete env.CLAUDECODE
+    delete env.CLAUDE_CODE_ENTRYPOINT
+
+    return env
   }
 
   /** Create a new project. Returns the created project or throws on validation error. */
@@ -114,7 +156,7 @@ export class ProjectManager {
       name: params.name,
       path: params.path,
       icon: params.icon || '📁',
-      defaultModel: this.defaultModel,
+      defaultModel: this.defaultModelConfigId,
       defaultPermissionMode: 'default' as PermissionMode,
       createdAt: now,
       updatedAt: now,

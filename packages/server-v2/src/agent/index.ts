@@ -131,6 +131,8 @@ export class ClaudeAgent implements AgentInterface {
 
     // Run the SDK query in the background, pushing events into the channel.
     this.runQuery(prompt, options, channel).catch((error) => {
+      console.error(`[Agent] runQuery error: ${error?.message || String(error)}`)
+      console.error(error?.stack || '')
       const isAbort =
         error?.name === 'AbortError' ||
         options.abortController?.signal.aborted ||
@@ -256,6 +258,7 @@ export class ClaudeAgent implements AgentInterface {
   ): Promise<void> {
     const isYolo = options.permissionMode === 'bypassPermissions'
     const extensionServers = buildExtensionServers(options.enabledMcps)
+    const logTag = `${C.blue}[SDK]${C.reset}`
 
     // Build disallowed tools list for disabled SDK servers and skills
     const disallowed: string[] = []
@@ -281,6 +284,12 @@ export class ClaudeAgent implements AgentInterface {
       includePartialMessages: true,
       abortController: options.abortController,
       agentProgressSummaries: true,
+      ...(options.env ? { env: options.env } : {}),
+
+      // Capture stderr from the SDK subprocess for debugging
+      stderr: (data: string) => {
+        console.error(`${logTag} stderr: ${data.trimEnd()}`)
+      },
 
       // In Safe mode, pre-approve only read-only tools
       ...(isYolo ? {} : { allowedTools: [...SAFE_MODE_ALLOWED_TOOLS] }),
@@ -391,7 +400,6 @@ export class ClaudeAgent implements AgentInterface {
     let resolvedSessionId = sessionKey
 
     // SDK stream logging state
-    const logTag = `${C.blue}[SDK]${C.reset}`
     const logState = createStreamLogState()
 
     try {
