@@ -90,7 +90,6 @@ export interface ProjectChatState {
   sessionState: SessionState
   isRunning: boolean
   isAborting: boolean
-  currentModel: string
   permissionMode: 'bypassPermissions' | 'default'
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
@@ -118,7 +117,6 @@ function createEmptyProjectState(): ProjectChatState {
     sessionState: createEmptySessionState(),
     isRunning: false,
     isAborting: false,
-    currentModel: '',
     permissionMode: 'default',
     pendingPermission: null,
     pendingQuestion: null,
@@ -148,7 +146,6 @@ export interface UseWebSocketReturn {
   abort(projectId: string): void
   switchProject(projectId: string): void
   resumeSession(projectId: string, sessionId: string): void
-  setModel(projectId: string, model: string): void
   setPermissionMode(projectId: string, sessionId: string, mode: 'bypassPermissions' | 'default'): void
   respondPermission(sessionId: string, requestId: string, allow: boolean): void
   respondQuestion(sessionId: string, toolId: string, answers: Record<string, string | string[]>): void
@@ -398,14 +395,6 @@ export function useWebSocket(): UseWebSocketReturn {
         } else {
           ps.isRunning = false
         }
-        rerender()
-        break
-      }
-
-      case 'model_changed': {
-        if (!projectId) break
-        const ps = getOrCreateProjectState(projectId)
-        if (msg.model) ps.currentModel = msg.model
         rerender()
         break
       }
@@ -664,10 +653,6 @@ export function useWebSocket(): UseWebSocketReturn {
       .catch(() => {})
   }, [send, getOrCreateProjectState, rerender])
 
-  const setModel = useCallback((projectId: string, model: string) => {
-    send({ type: 'set_model', projectId, model })
-  }, [send])
-
   const setPermissionMode = useCallback((projectId: string, sessionId: string, mode: 'bypassPermissions' | 'default') => {
     send({ type: 'set_permission_mode', projectId, sessionId, mode })
   }, [send])
@@ -704,7 +689,6 @@ export function useWebSocket(): UseWebSocketReturn {
     abort,
     switchProject,
     resumeSession,
-    setModel,
     setPermissionMode,
     respondPermission,
     respondQuestion,

@@ -7,7 +7,6 @@ import { formatDuration, formatCost } from '@/lib/utils'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { SessionSidebar } from './SessionSidebar'
-import { ModelSelector } from './ModelSelector'
 import { PermissionRequestUI } from './PermissionRequestUI'
 import { UserQuestionForm } from './UserQuestionForm'
 import { QueryQueueBar } from './QueryQueueBar'
@@ -82,18 +81,23 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   }
 
   const handleNewSession = () => {
-    // Set model creates a new session
-    ws.setModel(projectId, ps.currentModel || project.defaultModel)
+    const state = ws.getProjectState(projectId)
+    state.sessionId = null
+    state.sessionState = {
+      messages: [],
+      sdkEvents: [],
+      streamingText: '',
+      streamingThinking: '',
+      isStreaming: false,
+      suggestions: [],
+      summary: '',
+    }
   }
 
   const handleSelectSession = (sessionId: string) => {
     ws.resumeSession(projectId, sessionId)
     setSearchParams({ project: projectId, session: sessionId })
     setShowSessions(false)
-  }
-
-  const handleModelChange = (model: string) => {
-    ws.setModel(projectId, model)
   }
 
   const togglePermissionMode = () => {
@@ -234,14 +238,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           onExecuteNow={ws.executeNow}
         />
 
-        {/* Input bar with model selector */}
         <div>
-          <div className="px-4 pb-1 flex items-center gap-2">
-            <ModelSelector
-              currentModel={ps.currentModel || project.defaultModel}
-              onSelectModel={handleModelChange}
-            />
-          </div>
           <InputBar
             isRunning={ps.isRunning}
             isAborting={ps.isAborting}
