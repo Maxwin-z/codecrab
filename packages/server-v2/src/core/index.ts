@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import type { CoreEventMap, AgentInterface, TurnSubmitParams } from '../types/index.js'
+import type { CoreEventMap, AgentInterface, TurnSubmitParams, SdkInitInfo } from '../types/index.js'
 import { ProjectManager } from './project.js'
 import { SessionManager } from './session.js'
 import { TurnManager } from './turn.js'
@@ -25,6 +25,25 @@ export class CoreEngine extends EventEmitter {
   /** Submit a Turn — Gateway and CronScheduler both call this */
   async submitTurn(params: TurnSubmitParams): Promise<string> {
     return this.turns.submit(params)
+  }
+
+  /** Probe SDK for available tools/models — resolves model config for proper auth */
+  async probeSdk(projectId: string): Promise<SdkInitInfo> {
+    const projectPath = this.projects.getPath(projectId)
+    if (!projectPath) throw new Error('Project path not found')
+
+    const defaultModel = this.projects.getDefaultModel(projectId)
+    const modelConfig = this.projects.resolveModelConfig(defaultModel)
+    let resolvedModel: string | undefined
+    if (modelConfig) {
+      resolvedModel = modelConfig.modelId
+        || (modelConfig.provider === 'custom' ? modelConfig.name : undefined)
+    } else {
+      resolvedModel = defaultModel
+    }
+    const env = modelConfig ? this.projects.buildModelEnv(modelConfig) : undefined
+
+    return this.agent.probe(projectPath, resolvedModel, env)
   }
 
   // Typed emit/on wrappers

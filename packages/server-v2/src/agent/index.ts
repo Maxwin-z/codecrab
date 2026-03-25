@@ -177,18 +177,21 @@ export class ClaudeAgent implements AgentInterface {
 
   // ── probe ───────────────────────────────────────────────────────────────
 
-  async probe(cwd: string, model?: string): Promise<SdkInitInfo> {
+  async probe(cwd: string, model?: string, env?: Record<string, string | undefined>): Promise<SdkInitInfo> {
     const abortController = new AbortController()
+
+    const sdkOpts: Record<string, unknown> = {
+      cwd,
+      maxTurns: 1,
+      abortController,
+      settingSources: ['project', 'user'] as const,
+    }
+    if (model) sdkOpts.model = model
+    if (env) sdkOpts.env = env
 
     const q = sdkQuery({
       prompt: '.',
-      options: {
-        model: model || 'claude-sonnet-4-6',
-        cwd,
-        maxTurns: 1,
-        abortController,
-        settingSources: ['project', 'user'] as const,
-      } as any,
+      options: sdkOpts as any,
     })
 
     try {
@@ -272,7 +275,7 @@ export class ClaudeAgent implements AgentInterface {
     let reqCounter = 0
 
     const sdkOptions: Record<string, unknown> = {
-      model: options.model,
+      ...(options.model ? { model: options.model } : {}),
       cwd: options.cwd,
       resume: options.resume || undefined,
       maxTurns: options.maxTurns ?? DEFAULT_MAX_TURNS,

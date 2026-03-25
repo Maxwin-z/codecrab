@@ -103,14 +103,22 @@ export class TurnManager {
 
     // Resolve model config ID (UUID) to actual model identifier and env
     const modelConfig = this.core.projects.resolveModelConfig(session.model)
-    const resolvedModel = modelConfig?.modelId
-      || (modelConfig?.provider === 'custom' ? modelConfig.name : undefined)
-      || session.model // fallback: use as-is (may already be a model ID)
+    let resolvedModel: string | undefined
+    if (modelConfig) {
+      // Config found by UUID — extract the actual model identifier
+      // For Anthropic OAuth (no apiKey, no modelId): leave undefined → SDK default
+      // For custom providers without modelId: use config name
+      resolvedModel = modelConfig.modelId
+        || (modelConfig.provider === 'custom' ? modelConfig.name : undefined)
+    } else {
+      // Not a config UUID — session.model is already a model ID (e.g. 'claude-opus-4')
+      resolvedModel = session.model
+    }
     const modelEnv = modelConfig
       ? this.core.projects.buildModelEnv(modelConfig)
       : undefined
 
-    tsLog(`${tag}   ${C.dim}model resolve: ${session.model} → ${resolvedModel} (config ${modelConfig ? 'found' : 'NOT found'})${C.reset}`)
+    tsLog(`${tag}   ${C.dim}model resolve: ${session.model} → ${resolvedModel ?? '(SDK default)'} (config ${modelConfig ? 'found' : 'NOT found'})${C.reset}`)
     if (modelEnv) {
       tsLog(`${tag}   ${C.dim}env: API_KEY=${modelEnv.ANTHROPIC_API_KEY ? modelEnv.ANTHROPIC_API_KEY.slice(0, 10) + '...' : 'unset'}  BASE_URL=${modelEnv.ANTHROPIC_BASE_URL || 'default'}${C.reset}`)
     }

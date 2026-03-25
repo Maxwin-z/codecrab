@@ -283,20 +283,20 @@ async function handleProbeSdk(core: CoreEngine, broadcaster: Broadcaster, client
   const projectId = message.projectId
   if (!projectId) return
 
-  const projectPath = core.projects.getPath(projectId)
-  if (!projectPath) return
-
   try {
-    // Agent is accessible through core's internal reference
-    // We'll need to expose a probe method on CoreEngine
-    // For now, send an error -- this will be wired up when the entry point connects things
+    const info = await core.probeSdk(projectId)
     broadcaster.send(client, {
-      type: 'error',
-      message: 'Probe not yet implemented in v2',
+      type: 'sdk_probe_result',
+      projectId,
+      tools: info.tools,
+      sdkMcpServers: info.mcpServers,
+      sdkSkills: info.skills,
+      models: info.models,
     })
   } catch (err: any) {
     broadcaster.send(client, {
       type: 'error',
+      projectId,
       message: `Probe failed: ${err.message}`,
     })
   }

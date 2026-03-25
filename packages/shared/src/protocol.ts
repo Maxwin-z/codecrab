@@ -392,6 +392,15 @@ export interface BackgroundTaskUpdateMessage extends ServerProjectContext {
   usage?: { totalTokens?: number; toolUses?: number; durationMs?: number }
 }
 
+export interface SdkProbeResultMessage {
+  type: 'sdk_probe_result'
+  projectId: string
+  tools: string[]
+  sdkMcpServers: Array<{ name: string; status: string }>
+  sdkSkills: Array<{ name: string; description: string }>
+  models: Array<{ id: string; name: string }>
+}
+
 export type ServerMessage =
   | SystemMessage
   | StreamDeltaMessage
@@ -430,6 +439,7 @@ export type ServerMessage =
   | ProjectActivityMessage
   | BackgroundTaskUpdateMessage
   | SessionUsageMessage
+  | SdkProbeResultMessage
 
 // ============ Image Attachments ============
 

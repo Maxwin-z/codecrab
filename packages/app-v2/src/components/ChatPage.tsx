@@ -12,6 +12,13 @@ import { UserQuestionForm } from './UserQuestionForm'
 import { QueryQueueBar } from './QueryQueueBar'
 import { Button } from '@/components/ui/button'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   PanelLeftClose,
   PanelLeft,
   Clock,
@@ -19,7 +26,6 @@ import {
   Cpu,
   Zap,
   Shield,
-  ShieldOff,
 } from 'lucide-react'
 
 interface ProjectInfo {
@@ -29,6 +35,12 @@ interface ProjectInfo {
   path: string
   defaultModel: string
   defaultPermissionMode: string
+}
+
+interface ModelOption {
+  id: string
+  name: string
+  provider: string
 }
 
 export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
@@ -41,6 +53,8 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
 
   const [project, setProject] = useState<ProjectInfo | null>(null)
   const [showSessions, setShowSessions] = useState(false)
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [defaultModelId, setDefaultModelId] = useState<string | null>(null)
 
   // Load project info
   useEffect(() => {
@@ -55,6 +69,25 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       })
       .catch(() => {})
   }, [projectId, onUnauthorized])
+
+  // Load models list
+  useEffect(() => {
+    authFetch('/api/setup/models', {}, onUnauthorized)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.models) {
+          setModels(data.models.map((m: any) => ({
+            id: m.id,
+            name: m.name,
+            provider: m.provider,
+          })))
+          if (data.defaultModelId) {
+            setDefaultModelId(data.defaultModelId)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [onUnauthorized])
 
   // Handle session param
   useEffect(() => {
@@ -100,11 +133,18 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
     setShowSessions(false)
   }
 
+  const handleModelChange = (modelConfigId: string) => {
+    ws.setModel(projectId, modelConfigId)
+  }
+
   const togglePermissionMode = () => {
     if (!ps.sessionId) return
     const newMode = ps.permissionMode === 'bypassPermissions' ? 'default' : 'bypassPermissions'
     ws.setPermissionMode(projectId, ps.sessionId, newMode)
   }
+
+  // Determine current model for display
+  const activeModelId = ps.currentModel || project.defaultModel || defaultModelId
 
   return (
     <div className="h-full flex">
@@ -136,6 +176,25 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
 
           <span className="text-base mr-1">{project.icon || '📁'}</span>
           <span className="font-medium text-sm truncate">{project.name}</span>
+
+          {/* Model selector */}
+          {models.length > 1 && (
+            <Select
+              value={activeModelId || undefined}
+              onValueChange={handleModelChange}
+            >
+              <SelectTrigger className="h-7 w-auto min-w-[100px] max-w-[180px] border-none shadow-none text-xs text-muted-foreground hover:text-foreground ml-1">
+                <SelectValue placeholder="Model" />
+              </SelectTrigger>
+              <SelectContent>
+                {models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    <span className="text-xs">{m.name}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           {/* Activity heartbeat */}
           {heartbeat && ps.isRunning && (

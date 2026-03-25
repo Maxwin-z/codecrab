@@ -32,7 +32,7 @@ export interface UsageInfo {
 }
 
 export interface AgentQueryOptions {
-  model: string
+  model?: string
   permissionMode: PermissionMode
   cwd: string
   resume?: string
@@ -57,7 +57,7 @@ export interface SdkInitInfo {
 export interface AgentInterface {
   query(prompt: string, options: AgentQueryOptions): AsyncIterable<AgentStreamEvent>
   abort(sessionId: string): void
-  probe(cwd: string, model?: string): Promise<SdkInitInfo>
+  probe(cwd: string, model?: string, env?: Record<string, string | undefined>): Promise<SdkInitInfo>
   resolvePermission(requestId: string, behavior: 'allow' | 'deny'): void
   resolveQuestion(sessionId: string, answers: Record<string, string | string[]>): void
 }
