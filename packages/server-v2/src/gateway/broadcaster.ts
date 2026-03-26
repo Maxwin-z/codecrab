@@ -1,6 +1,7 @@
 import type { CoreEngine } from '../core/index.js'
 import type { Client } from '../types/index.js'
 import type { ServerMessage } from '@codecrab/shared'
+import { tsLog, C } from '../logger.js'
 
 export class Broadcaster {
   private clients = new Map<string, Client>()  // connectionId -> Client
@@ -12,11 +13,13 @@ export class Broadcaster {
   /** Register a client connection */
   addClient(client: Client): void {
     this.clients.set(client.connectionId, client)
+    tsLog(`${C.green}[broadcast]${C.reset} +client  conn=${client.connectionId}  clientId=${client.clientId}  total=${this.clients.size}`)
   }
 
   /** Remove a client connection */
   removeClient(connectionId: string): void {
     this.clients.delete(connectionId)
+    tsLog(`${C.dim}[broadcast]${C.reset} -client  conn=${connectionId}  total=${this.clients.size}`)
   }
 
   /** Get a client by connectionId */
@@ -44,7 +47,10 @@ export class Broadcaster {
 
   /** Broadcast to all clients subscribed to a project */
   broadcastToProject(projectId: string, message: ServerMessage): void {
-    for (const client of this.getClientsForProject(projectId)) {
+    const clients = this.getClientsForProject(projectId)
+    const msgType = (message as any).type
+    tsLog(`${C.dim}[broadcast]${C.reset} ${msgType} → ${C.bold}${clients.length}${C.reset} client(s) for project=${projectId.slice(0, 8)}  total_connections=${this.clients.size}`)
+    for (const client of clients) {
       this.send(client, message)
     }
   }

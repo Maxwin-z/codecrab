@@ -260,14 +260,14 @@ function handleSetProvider(core: CoreEngine, broadcaster: Broadcaster, client: C
   core.sessions.register(sessionId, meta)
   client.subscribedProjects.set(projectId, { sessionId })
 
-  broadcaster.send(client, {
+  broadcaster.broadcastToProject(projectId, {
     type: 'provider_changed',
     projectId,
     sessionId,
     providerId: message.providerId,
   })
 
-  broadcaster.send(client, {
+  broadcaster.broadcastToProject(projectId, {
     type: 'session_created',
     projectId,
     sessionId,
@@ -280,7 +280,7 @@ function handleSetPermissionMode(core: CoreEngine, broadcaster: Broadcaster, cli
 
   core.sessions.update(sessionId, { permissionMode: message.mode })
 
-  broadcaster.send(client, {
+  broadcaster.broadcastToProject(message.projectId, {
     type: 'permission_mode_changed',
     projectId: message.projectId,
     sessionId,
@@ -296,6 +296,7 @@ function handleSwitchProject(core: CoreEngine, broadcaster: Broadcaster, client:
   if (!client.subscribedProjects.has(projectId)) {
     client.subscribedProjects.set(projectId, {})
   }
+  tsLog(`${C.green}[ws]${C.reset} switch_project  client=${client.clientId}  conn=${client.connectionId}  project=${projectId.slice(0, 8)}  subscribedClients=${broadcaster.getClientsForProject(projectId).length}`)
 
   // Try to auto-resume latest session
   const latest = core.sessions.findLatest(projectId)

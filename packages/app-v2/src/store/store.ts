@@ -103,6 +103,8 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   resolveSessionId: (tempId, realId) => {
+    // No-op if IDs are identical (e.g. resumed session emits session_init with same ID)
+    if (tempId === realId) return
     set(produce((s: StoreState) => {
       s.sessionIdMap[tempId] = realId
       // Find and migrate session data from tempId to realId

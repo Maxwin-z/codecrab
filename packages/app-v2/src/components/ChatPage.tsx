@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useStore } from '@/store/store'
-import { selectViewingSession, selectViewingSessionId, selectProjectState, selectPromptPending, selectIsAborting, selectQueryQueue } from '@/store/selectors'
+import { selectConnected, selectViewingSession, selectViewingSessionId, selectProjectState, selectPromptPending, selectIsAborting, selectQueryQueue } from '@/store/selectors'
 import { authFetch } from '@/lib/auth'
 import { cn, formatDuration, formatCost } from '@/lib/utils'
 import { MessageList } from './MessageList'
@@ -64,6 +64,15 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const promptPending = useStore(selectPromptPending(projectId))
   const isAborting = useStore(selectIsAborting(projectId))
   const queryQueue = useStore(selectQueryQueue(projectId))
+  const connected = useStore(selectConnected)
+
+  // Ensure project subscription on WS connect/reconnect
+  // (switchProject may be silently dropped if called before WS is open)
+  useEffect(() => {
+    if (connected && projectId) {
+      ws.switchProject(projectId)
+    }
+  }, [connected, projectId])
 
   // Load project info
   useEffect(() => {
@@ -117,6 +126,37 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       }
     }
   }, [projectId, viewingSessionId])
+
+  // Fetch history when viewing a session with no messages
+  // (covers tabs that receive session_resumed from server broadcasts)
+  useEffect(() => {
+    if (!projectId || !viewingSessionId) return
+    if (viewingSessionId.startsWith('temp-') || viewingSessionId.startsWith('pending-')) return
+    const session = useStore.getState().projects[projectId]?.sessions[viewingSessionId]
+    if (session?.messages && session.messages.length > 0) return
+
+    authFetch(`/api/sessions/${viewingSessionId}/history`, {}, onUnauthorized)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!data?.messages?.length) return
+        const currentState = useStore.getState()
+        if (currentState.projects[projectId]?.viewingSessionId !== viewingSessionId) return
+        currentState.updateSession(projectId, viewingSessionId, s => {
+          if (s.messages.length === 0) {
+            s.messages = data.messages.map((m: any) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              thinking: m.thinking,
+              toolCalls: m.toolCalls,
+              images: m.images,
+              timestamp: m.timestamp,
+            }))
+          }
+        })
+      })
+      .catch(() => {})
+  }, [projectId, viewingSessionId, onUnauthorized])
 
   if (!projectId || !project) {
     return (

@@ -290,21 +290,26 @@ export class TurnManager {
         break
 
       case 'session_init': {
-        // Register the session with the SDK session ID
         const prevSessionId = ctx.sessionId
-        this.sessions.register(event.sdkSessionId, this.sessions.getMeta(prevSessionId)!)
-        // Notify clients so they can map temp/pending ID → real SDK ID
-        this.core.emit('session:id_resolved', {
-          projectId: ctx.projectId,
-          tempSessionId: prevSessionId,
-          sessionId: event.sdkSessionId,
-        })
-        // Update ctx so all subsequent events use the real SDK session ID
-        ctx.sessionId = event.sdkSessionId
-        this.core.emit('session:created', {
-          projectId: ctx.projectId,
-          sessionId: event.sdkSessionId,
-        })
+        const newSessionId = event.sdkSessionId
+
+        // Only migrate if the session ID actually changed (new session, not resume)
+        if (prevSessionId !== newSessionId) {
+          // Register the session with the SDK session ID
+          this.sessions.register(newSessionId, this.sessions.getMeta(prevSessionId)!)
+          // Notify clients so they can map temp/pending ID → real SDK ID
+          this.core.emit('session:id_resolved', {
+            projectId: ctx.projectId,
+            tempSessionId: prevSessionId,
+            sessionId: newSessionId,
+          })
+          // Update ctx so all subsequent events use the real SDK session ID
+          ctx.sessionId = newSessionId
+          this.core.emit('session:created', {
+            projectId: ctx.projectId,
+            sessionId: newSessionId,
+          })
+        }
         break
       }
 

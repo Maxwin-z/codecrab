@@ -55,6 +55,7 @@ export function useWebSocket(): UseWebSocketReturn {
     } catch {
       return
     }
+    console.log(`[ws:recv] type=${(msg as any).type}  sessionId=${(msg as any).sessionId ?? '-'}`)
     dispatchMessage(msg, useStore.getState())
   }, [])
 
@@ -136,6 +137,8 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [send])
 
   const switchProject = useCallback((projectId: string) => {
+    const isOpen = wsRef.current?.readyState === WebSocket.OPEN
+    console.log(`[ws:send] switch_project  project=${projectId}  ws_open=${isOpen}`)
     send({ type: 'switch_project', projectId })
   }, [send])
 
