@@ -12,6 +12,7 @@ export interface PromptMessage extends ProjectContext {
   type: 'prompt'
   prompt: string
   images?: ImageAttachment[]
+  providerId?: string           // Provider config ID to use for this session
   enabledMcps?: string[]        // Custom MCP IDs to enable for this query (default: all)
   disabledSdkServers?: string[] // SDK MCP server names to disable for this query
   disabledSkills?: string[]     // Skill names to disable for this query
@@ -90,6 +91,10 @@ export interface RequestQueueSnapshotMessage extends ProjectContext {
   type: 'request_queue_snapshot'
 }
 
+export interface NewSessionMessage extends ProjectContext {
+  type: 'new_session'
+}
+
 export type ClientMessage =
   | PromptMessage
   | CommandMessage
@@ -106,6 +111,7 @@ export type ClientMessage =
   | DequeueMessage
   | ExecuteNowMessage
   | RequestQueueSnapshotMessage
+  | NewSessionMessage
 
 // ============ Server → Client Messages ============
 
@@ -260,6 +266,7 @@ export interface ErrorMessage extends ServerProjectContext {
 
 export interface SessionResumedMessage extends ServerProjectContext {
   type: 'session_resumed'
+  providerId?: string
 }
 
 export interface SessionCreatedMessage extends ServerProjectContext {

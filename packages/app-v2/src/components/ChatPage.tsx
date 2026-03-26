@@ -109,8 +109,16 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const usage = ps.sessionUsage
   const heartbeat = ps.activityHeartbeat
 
+  // Build provider name lookup for session sidebar
+  const providerNames = Object.fromEntries(providers.map(p => [p.id, p.name]))
+
+  // Determine current provider for display
+  const activeProviderId = ps.currentProvider || project.defaultProviderId || defaultProviderId
+  const hasMessages = ss.messages.length > 0
+  const providerLocked = hasMessages || ps.isRunning
+
   const handleSend = (prompt: string, images?: any[]) => {
-    ws.sendPrompt(projectId, prompt, { images })
+    ws.sendPrompt(projectId, prompt, { images, providerId: activeProviderId || undefined })
   }
 
   const handleNewSession = () => {
@@ -133,14 +141,6 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
     const newMode = ps.permissionMode === 'bypassPermissions' ? 'default' : 'bypassPermissions'
     ws.setPermissionMode(projectId, ps.sessionId, newMode)
   }
-
-  // Build provider name lookup for session sidebar
-  const providerNames = Object.fromEntries(providers.map(p => [p.id, p.name]))
-
-  // Determine current provider for display
-  const activeProviderId = ps.currentProvider || project.defaultProviderId || defaultProviderId
-  const hasMessages = ss.messages.length > 0
-  const providerLocked = hasMessages || ps.isRunning
 
   return (
     <div className="h-full flex">
@@ -271,7 +271,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
               <button
                 key={i}
                 className="text-xs px-2.5 py-1 rounded-full border border-border hover:bg-accent/50 transition-colors text-muted-foreground cursor-pointer"
-                onClick={() => ws.sendPrompt(projectId, s)}
+                onClick={() => ws.sendPrompt(projectId, s, { providerId: activeProviderId || undefined })}
               >
                 {s}
               </button>

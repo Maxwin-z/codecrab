@@ -142,6 +142,7 @@ export interface UseWebSocketReturn {
   sendPrompt(projectId: string, prompt: string, options?: {
     sessionId?: string
     images?: ImageAttachment[]
+    providerId?: string
     enabledMcps?: string[]
     soulEnabled?: boolean
   }): void
@@ -386,6 +387,7 @@ export function useWebSocket(): UseWebSocketReturn {
         if (!projectId || !sessionId) break
         const ps = getOrCreateProjectState(projectId)
         ps.sessionId = sessionId
+        ps.currentProvider = msg.providerId || null
         // Don't clear messages — we'll fetch history via REST
         rerender()
         break
@@ -414,7 +416,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'provider_changed': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        ps.currentProvider = (msg as any).providerId || null
+        ps.currentProvider = msg.providerId || null
         if (sessionId) {
           ps.sessionId = sessionId
           ps.sessionState = createEmptySessionState()
@@ -615,6 +617,7 @@ export function useWebSocket(): UseWebSocketReturn {
     options?: {
       sessionId?: string
       images?: ImageAttachment[]
+      providerId?: string
       enabledMcps?: string[]
       soulEnabled?: boolean
     },
@@ -637,6 +640,7 @@ export function useWebSocket(): UseWebSocketReturn {
       sessionId: options?.sessionId ?? ps.sessionId ?? undefined,
       prompt,
       images: options?.images,
+      providerId: options?.providerId,
       enabledMcps: options?.enabledMcps,
       soulEnabled: options?.soulEnabled,
     })
@@ -664,7 +668,8 @@ export function useWebSocket(): UseWebSocketReturn {
     ps.pendingQuestion = null
     ps.queryQueue = []
     rerender()
-  }, [getOrCreateProjectState, rerender])
+    send({ type: 'new_session', projectId })
+  }, [getOrCreateProjectState, rerender, send])
 
   const resumeSession = useCallback((projectId: string, sessionId: string) => {
     const ps = getOrCreateProjectState(projectId)

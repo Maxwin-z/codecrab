@@ -348,6 +348,7 @@ export interface SessionCreatedEvent {
 export interface SessionResumedEvent {
   projectId: string
   sessionId: string
+  providerId?: string
 }
 
 export interface SessionUpdatedEvent {

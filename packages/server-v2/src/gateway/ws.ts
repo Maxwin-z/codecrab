@@ -114,6 +114,9 @@ function handleClientMessage(core: CoreEngine, broadcaster: Broadcaster, client:
     case 'request_queue_snapshot':
       handleQueueSnapshot(core, broadcaster, client, message)
       break
+    case 'new_session':
+      handleNewSession(client, message)
+      break
     case 'set_cwd':
       // CWD is determined by project path, acknowledge only
       break
@@ -152,7 +155,9 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
       broadcaster.send(client, { type: 'error', message: 'Project not found' })
       return
     }
-    const meta = core.sessions.create(projectId, project)
+    const meta = core.sessions.create(projectId, project, {
+      providerId: message.providerId || undefined,
+    })
     // Use a temporary ID until SDK provides the real one
     sessionId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     core.sessions.register(sessionId, meta)
@@ -193,6 +198,16 @@ function handleAbort(core: CoreEngine, message: any): void {
   }
 }
 
+function handleNewSession(client: Client, message: any): void {
+  const projectId = message.projectId
+  if (!projectId) return
+  // Clear the session binding so the next prompt creates a fresh session
+  const sub = client.subscribedProjects.get(projectId)
+  if (sub) {
+    sub.sessionId = undefined
+  }
+}
+
 function handleResumeSession(core: CoreEngine, broadcaster: Broadcaster, client: Client, message: any): void {
   const projectId = message.projectId
   const sessionId = message.sessionId
@@ -211,7 +226,7 @@ function handleResumeSession(core: CoreEngine, broadcaster: Broadcaster, client:
     }
   }
 
-  core.emit('session:resumed', { projectId, sessionId })
+  core.emit('session:resumed', { projectId, sessionId, providerId: meta?.providerId })
 }
 
 function handleRespondQuestion(core: CoreEngine, message: any): void {
@@ -280,7 +295,7 @@ function handleSwitchProject(core: CoreEngine, broadcaster: Broadcaster, client:
   const latest = core.sessions.findLatest(projectId)
   if (latest?.sdkSessionId) {
     client.subscribedProjects.set(projectId, { sessionId: latest.sdkSessionId })
-    core.emit('session:resumed', { projectId, sessionId: latest.sdkSessionId })
+    core.emit('session:resumed', { projectId, sessionId: latest.sdkSessionId, providerId: latest.providerId })
   }
 
   // Send project statuses

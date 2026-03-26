@@ -248,6 +248,7 @@ export class Broadcaster {
         type: 'session_resumed',
         projectId: e.projectId,
         sessionId: e.sessionId,
+        providerId: e.providerId,
       })
     })
 
