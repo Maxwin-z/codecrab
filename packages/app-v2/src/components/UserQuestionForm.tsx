@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MessageCircleQuestion, Send } from 'lucide-react'
-import type { PendingQuestion } from '@/hooks/useWebSocket'
+import type { PendingQuestion } from '@/store/types'
 
 export function UserQuestionForm({
   pending,

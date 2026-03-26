@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useStore } from '@/store/store'
+import { selectViewingSession, selectViewingSessionId, selectProjectState, selectPromptPending, selectIsAborting, selectQueryQueue } from '@/store/selectors'
 import { authFetch } from '@/lib/auth'
 import { cn, formatDuration, formatCost } from '@/lib/utils'
 import { MessageList } from './MessageList'
@@ -56,6 +58,13 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const [providers, setProviders] = useState<ProviderOption[]>([])
   const [defaultProviderId, setDefaultProviderId] = useState<string | null>(null)
 
+  // Store selectors
+  const viewingSessionId = useStore(selectViewingSessionId(projectId))
+  const session = useStore(selectViewingSession(projectId))
+  const promptPending = useStore(selectPromptPending(projectId))
+  const isAborting = useStore(selectIsAborting(projectId))
+  const queryQueue = useStore(selectQueryQueue(projectId))
+
   // Load project info
   useEffect(() => {
     if (!projectId) return
@@ -92,25 +101,22 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   // Handle session param — only resume if we're not already on that session
   useEffect(() => {
     if (projectId && sessionParam) {
-      const ps = ws.getProjectState(projectId)
-      if (ps.sessionId !== sessionParam) {
+      if (viewingSessionId !== sessionParam) {
         ws.resumeSession(projectId, sessionParam)
       }
     }
   }, [projectId, sessionParam])
 
   // Sync URL with resolved session ID (temp → real SDK ID)
-  const currentSessionId = projectId ? ws.getProjectState(projectId).sessionId : null
   useEffect(() => {
-    if (!projectId || !currentSessionId) return
-    // Only update URL when we have a real session ID (not temp/pending)
-    if (!currentSessionId.startsWith('temp-') && !currentSessionId.startsWith('pending-')) {
+    if (!projectId || !viewingSessionId) return
+    if (!viewingSessionId.startsWith('temp-') && !viewingSessionId.startsWith('pending-')) {
       const urlSession = searchParams.get('session')
-      if (urlSession !== currentSessionId) {
-        setSearchParams({ project: projectId, session: currentSessionId }, { replace: true })
+      if (urlSession !== viewingSessionId) {
+        setSearchParams({ project: projectId, session: viewingSessionId }, { replace: true })
       }
     }
-  }, [projectId, currentSessionId])
+  }, [projectId, viewingSessionId])
 
   if (!projectId || !project) {
     return (
@@ -120,18 +126,26 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
     )
   }
 
-  const ps = ws.getProjectState(projectId)
-  const ss = ps.sessionState
-  const usage = ps.sessionUsage
-  const heartbeat = ps.activityHeartbeat
+  // Derive display values from session data
+  const messages = session?.messages ?? []
+  const isStreaming = session?.isStreaming ?? false
+  const streamingText = session?.streamingText ?? ''
+  const streamingThinking = session?.streamingThinking ?? ''
+  const suggestions = session?.suggestions ?? []
+  const usage = session?.usage ?? null
+  const heartbeat = session?.activityHeartbeat ?? null
+  const isRunning = session?.status === 'processing'
+  const permissionMode = session?.permissionMode ?? 'default'
+  const pendingPermission = session?.pendingPermission ?? null
+  const pendingQuestion = session?.pendingQuestion ?? null
 
   // Build provider name lookup for session sidebar
   const providerNames = Object.fromEntries(providers.map(p => [p.id, p.name]))
 
   // Determine current provider for display
-  const activeProviderId = ps.currentProvider || project.defaultProviderId || defaultProviderId
-  const hasMessages = ss.messages.length > 0
-  const providerLocked = hasMessages || ps.isRunning || ps.promptPending
+  const activeProviderId = session?.providerId || project.defaultProviderId || defaultProviderId
+  const hasMessages = messages.length > 0
+  const providerLocked = hasMessages || isRunning || promptPending
 
   const handleSend = (prompt: string, images?: any[]) => {
     ws.sendPrompt(projectId, prompt, { images, providerId: activeProviderId || undefined })
@@ -153,9 +167,9 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   }
 
   const togglePermissionMode = () => {
-    if (!ps.sessionId) return
-    const newMode = ps.permissionMode === 'bypassPermissions' ? 'default' : 'bypassPermissions'
-    ws.setPermissionMode(projectId, ps.sessionId, newMode)
+    if (!viewingSessionId) return
+    const newMode = permissionMode === 'bypassPermissions' ? 'default' : 'bypassPermissions'
+    ws.setPermissionMode(projectId, viewingSessionId, newMode)
   }
 
   return (
@@ -164,7 +178,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       {isDesktop && showSessions && (
         <SessionSidebar
           projectId={projectId}
-          currentSessionId={ps.sessionId}
+          currentSessionId={viewingSessionId}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onUnauthorized={onUnauthorized}
@@ -219,7 +233,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           )}
 
           {/* Activity heartbeat */}
-          {heartbeat && ps.isRunning && (
+          {heartbeat && isRunning && (
             <div className="flex items-center gap-1.5 ml-2">
               <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
               <span className="text-xs text-muted-foreground">
@@ -262,9 +276,9 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
             size="icon"
             className="h-8 w-8"
             onClick={togglePermissionMode}
-            title={ps.permissionMode === 'bypassPermissions' ? 'Bypass mode (click to switch)' : 'Default mode (click to switch)'}
+            title={permissionMode === 'bypassPermissions' ? 'Bypass mode (click to switch)' : 'Default mode (click to switch)'}
           >
-            {ps.permissionMode === 'bypassPermissions' ? (
+            {permissionMode === 'bypassPermissions' ? (
               <Zap className="h-4 w-4 text-amber-500" />
             ) : (
               <Shield className="h-4 w-4 text-muted-foreground" />
@@ -274,17 +288,17 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
 
         {/* Messages */}
         <MessageList
-          messages={ss.messages}
-          isStreaming={ss.isStreaming}
-          streamingText={ss.streamingText}
-          streamingThinking={ss.streamingThinking}
-          promptPending={ps.promptPending}
+          messages={messages}
+          isStreaming={isStreaming}
+          streamingText={streamingText}
+          streamingThinking={streamingThinking}
+          promptPending={promptPending}
         />
 
         {/* Suggestions */}
-        {ss.suggestions.length > 0 && !ps.isRunning && (
+        {suggestions.length > 0 && !isRunning && (
           <div className="px-4 pb-1 flex gap-2 flex-wrap">
-            {ss.suggestions.map((s, i) => (
+            {suggestions.map((s, i) => (
               <button
                 key={i}
                 className="text-xs px-2.5 py-1 rounded-full border border-border hover:bg-accent/50 transition-colors text-muted-foreground cursor-pointer"
@@ -297,33 +311,33 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
         )}
 
         {/* Permission request */}
-        {ps.pendingPermission && ps.sessionId && (
+        {pendingPermission && viewingSessionId && (
           <PermissionRequestUI
-            permission={ps.pendingPermission}
-            onAllow={() => ws.respondPermission(ps.sessionId!, ps.pendingPermission!.requestId, true)}
-            onDeny={() => ws.respondPermission(ps.sessionId!, ps.pendingPermission!.requestId, false)}
+            permission={pendingPermission}
+            onAllow={() => ws.respondPermission(viewingSessionId!, pendingPermission!.requestId, true)}
+            onDeny={() => ws.respondPermission(viewingSessionId!, pendingPermission!.requestId, false)}
           />
         )}
 
         {/* User question */}
-        {ps.pendingQuestion && ps.sessionId && (
+        {pendingQuestion && viewingSessionId && (
           <UserQuestionForm
-            pending={ps.pendingQuestion}
-            onSubmit={(answers) => ws.respondQuestion(ps.sessionId!, ps.pendingQuestion!.toolId, answers)}
+            pending={pendingQuestion}
+            onSubmit={(answers) => ws.respondQuestion(viewingSessionId!, pendingQuestion!.toolId, answers)}
           />
         )}
 
         {/* Query queue */}
         <QueryQueueBar
-          items={ps.queryQueue}
+          items={queryQueue}
           onDequeue={ws.dequeue}
           onExecuteNow={ws.executeNow}
         />
 
         <div>
           <InputBar
-            isRunning={ps.isRunning}
-            isAborting={ps.isAborting}
+            isRunning={isRunning}
+            isAborting={isAborting}
             onSend={handleSend}
             onAbort={() => ws.abort(projectId)}
           />

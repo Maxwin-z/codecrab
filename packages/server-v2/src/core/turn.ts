@@ -441,12 +441,19 @@ export class TurnManager {
       if (running) {
         this.queue.resumeTimeout(running.id)
       }
+      // Broadcast resolution to all clients
+      this.core.emit('interaction:permission_resolved', {
+        projectId: meta.projectId,
+        sessionId,
+        requestId,
+      })
     }
     this.agent.resolvePermission(requestId, behavior)
   }
 
   /** Respond to a question */
   respondQuestion(sessionId: string, answers: Record<string, string | string[]>): void {
+    const pending = this.sessions.getMeta(sessionId)?.pendingQuestion
     this.sessions.clearPendingQuestion(sessionId)
     const meta = this.sessions.getMeta(sessionId)
     if (meta) {
@@ -454,6 +461,12 @@ export class TurnManager {
       if (running) {
         this.queue.resumeTimeout(running.id)
       }
+      // Broadcast resolution to all clients
+      this.core.emit('interaction:question_resolved', {
+        projectId: meta.projectId,
+        sessionId,
+        toolId: pending?.toolId || '',
+      })
     }
     this.agent.resolveQuestion(sessionId, answers)
   }

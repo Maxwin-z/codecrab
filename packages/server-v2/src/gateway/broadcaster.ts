@@ -244,6 +244,24 @@ export class Broadcaster {
       })
     })
 
+    this.core.on('interaction:permission_resolved', (e) => {
+      this.broadcastToProject(e.projectId, {
+        type: 'permission_resolved',
+        projectId: e.projectId,
+        sessionId: e.sessionId,
+        requestId: e.requestId,
+      })
+    })
+
+    this.core.on('interaction:question_resolved', (e) => {
+      this.broadcastToProject(e.projectId, {
+        type: 'question_resolved',
+        projectId: e.projectId,
+        sessionId: e.sessionId,
+        toolId: e.toolId,
+      })
+    })
+
     // Session lifecycle
     this.core.on('session:id_resolved', (e) => {
       this.broadcastToProject(e.projectId, {

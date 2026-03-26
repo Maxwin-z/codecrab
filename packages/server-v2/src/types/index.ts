@@ -188,6 +188,8 @@ export interface CoreEventMap {
   // Interaction requests
   'interaction:ask_question': InteractionAskQuestionEvent
   'interaction:permission_request': InteractionPermissionRequestEvent
+  'interaction:permission_resolved': InteractionPermissionResolvedEvent
+  'interaction:question_resolved': InteractionQuestionResolvedEvent
 
   // Session lifecycle
   'session:created': SessionCreatedEvent
@@ -337,6 +339,18 @@ export interface InteractionPermissionRequestEvent {
   toolName: string
   input: unknown
   reason?: string
+}
+
+export interface InteractionPermissionResolvedEvent {
+  projectId: string
+  sessionId: string
+  requestId: string
+}
+
+export interface InteractionQuestionResolvedEvent {
+  projectId: string
+  sessionId: string
+  toolId: string
 }
 
 export interface SessionCreatedEvent {

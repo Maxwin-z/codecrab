@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
+import { useStore } from '@/store/store'
+import { selectProjectStatuses } from '@/store/selectors'
 import { authFetch } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { Search, Settings, FolderOpen, Plus } from 'lucide-react'
@@ -21,7 +23,8 @@ export function AppSidebar({
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const { projectStatuses, switchProject } = useWs()
+  const { switchProject } = useWs()
+  const projectStatuses = useStore(selectProjectStatuses)
   const [projects, setProjects] = useState<Project[]>([])
   const [filter, setFilter] = useState('')
   const currentProjectId = searchParams.get('project')

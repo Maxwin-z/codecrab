@@ -347,6 +347,16 @@ export interface PermissionRequestMessage extends ServerProjectContext {
   reason: string
 }
 
+export interface PermissionResolvedMessage extends ServerProjectContext {
+  type: 'permission_resolved'
+  requestId: string
+}
+
+export interface QuestionResolvedMessage extends ServerProjectContext {
+  type: 'question_resolved'
+  toolId: string
+}
+
 export interface MessageHistoryMessage extends ServerProjectContext {
   type: 'message_history'
   messages: ChatMessageSummary[]
@@ -475,6 +485,8 @@ export type ServerMessage =
   | BackgroundTaskUpdateMessage
   | SessionUsageMessage
   | SdkProbeResultMessage
+  | PermissionResolvedMessage
+  | QuestionResolvedMessage
 
 // ============ Image Attachments ============
 

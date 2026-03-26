@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { authFetch } from '@/lib/auth'
 import { useWs } from '@/hooks/WebSocketContext'
+import { useStore } from '@/store/store'
+import { selectProjectStatuses } from '@/store/selectors'
 import { FolderOpen, ArrowRight, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -15,7 +17,8 @@ interface Project {
 
 export function HomePage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const navigate = useNavigate()
-  const { projectStatuses, switchProject } = useWs()
+  const { switchProject } = useWs()
+  const projectStatuses = useStore(selectProjectStatuses)
   const [projects, setProjects] = useState<Project[]>([])
 
   useEffect(() => {

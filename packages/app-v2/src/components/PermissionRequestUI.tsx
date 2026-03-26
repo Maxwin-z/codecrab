@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Shield, Check, X } from 'lucide-react'
-import type { PendingPermission } from '@/hooks/useWebSocket'
+import type { PendingPermission } from '@/store/types'
 
 export function PermissionRequestUI({
   permission,

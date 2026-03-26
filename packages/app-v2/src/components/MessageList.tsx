@@ -11,7 +11,7 @@ import {
   AlertCircle,
   Bot,
 } from 'lucide-react'
-import type { ChatMsg } from '@/hooks/useWebSocket'
+import type { ChatMsg } from '@/store/types'
 
 function ToolCallBlock({ tc }: { tc: NonNullable<ChatMsg['toolCalls']>[0] }) {
   const [expanded, setExpanded] = useState(false)

@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { ListOrdered, Play, X } from 'lucide-react'
-import type { QueueItem } from '@/hooks/useWebSocket'
+import type { QueueItem } from '@/store/types'
 
 export function QueryQueueBar({
   items,

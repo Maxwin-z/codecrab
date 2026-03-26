@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { authFetch } from '@/lib/auth'
+import { useStore } from '@/store/store'
+import { useShallow } from 'zustand/react/shallow'
+import { selectSessionStatuses } from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import { Clock, MessageSquare, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -22,6 +25,7 @@ export function SessionSidebar({
 }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const sessionStatuses = useStore(useShallow(selectSessionStatuses(projectId)))
 
   const loadSessions = useCallback(async () => {
     try {
@@ -62,6 +66,11 @@ export function SessionSidebar({
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
   }
 
+  // Merge REST session status with real-time store status
+  const getSessionStatus = (sessionId: string, restStatus?: string) => {
+    return sessionStatuses[sessionId] || restStatus || 'idle'
+  }
+
   return (
     <div className="w-64 border-r border-border bg-card flex flex-col h-full shrink-0">
       <div className="p-3 border-b border-border flex items-center justify-between">
@@ -83,45 +92,48 @@ export function SessionSidebar({
           </div>
         )}
 
-        {sessions.map(s => (
-          <button
-            key={s.sessionId}
-            className={cn(
-              'w-full text-left px-3 py-2 border-b border-border/50 transition-colors group cursor-pointer',
-              s.sessionId === currentSessionId
-                ? 'bg-accent'
-                : 'hover:bg-accent/50',
-            )}
-            onClick={() => onSelectSession(s.sessionId)}
-          >
-            <div className="flex items-start justify-between gap-1">
-              <p className="text-sm font-medium truncate flex-1">
-                {s.summary || s.firstPrompt || 'Untitled session'}
-              </p>
-              <button
-                className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-destructive transition-all cursor-pointer"
-                onClick={(e) => handleDelete(e, s.sessionId)}
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
-            <div className="flex items-center gap-1 mt-0.5">
-              <Clock className="h-3 w-3 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">{formatTime(s.lastModified)}</span>
-              {s.status === 'processing' && (
-                <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-pulse ml-1" />
+        {sessions.map(s => {
+          const status = getSessionStatus(s.sessionId, s.status)
+          return (
+            <button
+              key={s.sessionId}
+              className={cn(
+                'w-full text-left px-3 py-2 border-b border-border/50 transition-colors group cursor-pointer',
+                s.sessionId === currentSessionId
+                  ? 'bg-accent'
+                  : 'hover:bg-accent/50',
               )}
-              {s.cronJobName && (
-                <span className="text-xs text-muted-foreground ml-1">cron: {s.cronJobName}</span>
-              )}
-              {s.providerId && providerNames?.[s.providerId] && (
-                <span className="text-xs text-muted-foreground ml-auto truncate max-w-[80px]" title={providerNames[s.providerId]}>
-                  {providerNames[s.providerId]}
-                </span>
-              )}
-            </div>
-          </button>
-        ))}
+              onClick={() => onSelectSession(s.sessionId)}
+            >
+              <div className="flex items-start justify-between gap-1">
+                <p className="text-sm font-medium truncate flex-1">
+                  {s.summary || s.firstPrompt || 'Untitled session'}
+                </p>
+                <button
+                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-destructive transition-all cursor-pointer"
+                  onClick={(e) => handleDelete(e, s.sessionId)}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <Clock className="h-3 w-3 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">{formatTime(s.lastModified)}</span>
+                {status === 'processing' && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-pulse ml-1" />
+                )}
+                {s.cronJobName && (
+                  <span className="text-xs text-muted-foreground ml-1">cron: {s.cronJobName}</span>
+                )}
+                {s.providerId && providerNames?.[s.providerId] && (
+                  <span className="text-xs text-muted-foreground ml-auto truncate max-w-[80px]" title={providerNames[s.providerId]}>
+                    {providerNames[s.providerId]}
+                  </span>
+                )}
+              </div>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
