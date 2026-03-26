@@ -550,6 +550,7 @@ export interface SessionInfo {
   isActive?: boolean
   projectId?: string
   cronJobName?: string
+  providerId?: string
 }
 
 export interface McpInfo {

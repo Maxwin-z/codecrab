@@ -27,7 +27,15 @@ export class SessionManager {
         if (!file.endsWith('.json')) continue
         try {
           const data = await readFile(join(this.metaDir, file), 'utf-8')
-          const meta: SessionMeta = JSON.parse(data)
+          const raw = JSON.parse(data)
+          // Migrate legacy 'model' field from pre-rename era
+          if (raw.model && !raw.providerId) {
+            raw.providerId = raw.model
+            delete raw.model
+            // Re-persist migrated data
+            await writeFile(join(this.metaDir, file), JSON.stringify(raw, null, 2)).catch(() => {})
+          }
+          const meta: SessionMeta = raw
           if (meta.sdkSessionId) {
             this.metas.set(meta.sdkSessionId, meta)
           }
@@ -112,6 +120,7 @@ export class SessionManager {
         isActive: meta?.status === 'processing',
         projectId,
         cronJobName: meta?.cronJobName,
+        providerId: meta?.providerId,
       }
     })
 
