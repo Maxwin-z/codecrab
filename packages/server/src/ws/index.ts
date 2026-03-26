@@ -677,7 +677,21 @@ async function executeCronQuery(
         })
       }
 
-      // Broadcast final assistant_text to both sessions
+      // Broadcast final thinking + assistant_text to both sessions
+      if (assistantMsg.thinking) {
+        broadcastToProject(projectId, {
+          type: 'thinking',
+          thinking: assistantMsg.thinking,
+          projectId,
+          sessionId: execSessionId,
+        })
+        broadcastToProject(projectId, {
+          type: 'thinking',
+          thinking: assistantMsg.thinking,
+          projectId,
+          sessionId: parentSession.sessionId,
+        })
+      }
       broadcastToProject(projectId, {
         type: 'assistant_text',
         text: assistantMsg.content,
@@ -2097,6 +2111,15 @@ async function executeUserQuery(
       }
 
       persistSession(session)
+
+      if (assistantMsg.thinking) {
+        broadcastToProject(projectId, {
+          type: 'thinking',
+          thinking: assistantMsg.thinking,
+          projectId,
+          sessionId: session.sessionId,
+        })
+      }
 
       broadcastToProject(projectId, {
         type: 'assistant_text',

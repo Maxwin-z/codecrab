@@ -164,6 +164,13 @@ function StreamingIndicator({
   streamingThinking: string
 }) {
   const hasContent = streamingText || streamingThinking
+  const thinkingRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (thinkingRef.current) {
+      thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight
+    }
+  }, [streamingThinking])
 
   return (
     <div className="flex gap-2 my-3 justify-start">
@@ -172,9 +179,14 @@ function StreamingIndicator({
       </div>
       <div className="max-w-[80%] rounded-lg px-3 py-2 bg-muted/50">
         {streamingThinking && (
-          <div className="text-xs text-amber-500/70 mb-1">
-            <Brain className="h-3 w-3 inline mr-1" />
-            <span className="italic">{streamingThinking.slice(-200)}</span>
+          <div className="my-1">
+            <div className="flex items-center gap-1.5 text-xs text-amber-500/80">
+              <Brain className="h-3 w-3" />
+              <span>Thinking…</span>
+            </div>
+            <div ref={thinkingRef} className="mt-1 ml-5 text-xs text-muted-foreground bg-amber-500/5 border border-amber-500/10 rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap">
+              {streamingThinking}
+            </div>
           </div>
         )}
 
