@@ -91,6 +91,7 @@ export interface ProjectChatState {
   sessionState: SessionState
   isRunning: boolean
   isAborting: boolean
+  promptPending: boolean
   permissionMode: 'bypassPermissions' | 'default'
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
@@ -119,6 +120,7 @@ function createEmptyProjectState(): ProjectChatState {
     sessionState: createEmptySessionState(),
     isRunning: false,
     isAborting: false,
+    promptPending: false,
     permissionMode: 'default',
     pendingPermission: null,
     pendingQuestion: null,
@@ -218,6 +220,7 @@ export function useWebSocket(): UseWebSocketReturn {
         const ps = getOrCreateProjectState(projectId)
         ps.isRunning = true
         ps.isAborting = false
+        ps.promptPending = false
         ps.sessionState.isStreaming = true
         ps.sessionState.streamingText = ''
         ps.sessionState.streamingThinking = ''
@@ -543,16 +546,16 @@ export function useWebSocket(): UseWebSocketReturn {
         break
       }
 
+      case 'prompt_received': {
+        // Sync ack from server — prompt was received and queued
+        break
+      }
+
       case 'user_message': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        // Only add if not already present (the sending client adds it optimistically)
-        const msgs = ps.sessionState.messages
-        const lastUserMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null
-        if (!lastUserMsg || lastUserMsg.role !== 'user' || lastUserMsg.content !== msg.message.content) {
-          msgs.push(msg.message)
-          rerender()
-        }
+        ps.sessionState.messages.push(msg.message)
+        rerender()
         break
       }
 
@@ -623,14 +626,8 @@ export function useWebSocket(): UseWebSocketReturn {
     },
   ) => {
     const ps = getOrCreateProjectState(projectId)
-    // Add user message immediately
-    ps.sessionState.messages.push({
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: prompt,
-      images: options?.images,
-      timestamp: Date.now(),
-    })
+    // Don't add user message here — it will appear when execution starts via user_message broadcast
+    ps.promptPending = true
     ps.sessionState.suggestions = []
     rerender()
 

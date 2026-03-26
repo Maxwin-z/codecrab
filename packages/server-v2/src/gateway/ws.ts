@@ -164,18 +164,11 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     client.subscribedProjects.set(projectId, { sessionId })
   }
 
-  // Broadcast the user message to all clients subscribed to this project
-  broadcaster.broadcastToProject(projectId, {
-    type: 'user_message',
+  // Send sync ack to the sending client only (message will appear in chat when execution starts)
+  broadcaster.send(client, {
+    type: 'prompt_received',
     projectId,
     sessionId,
-    message: {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: message.prompt || '',
-      images: message.images,
-      timestamp: Date.now(),
-    },
   })
 
   core.submitTurn({

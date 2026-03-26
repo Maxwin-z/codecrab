@@ -81,6 +81,7 @@ export class TurnManager {
       queryId: queuedQuery.id,
       prompt: params.prompt,
       type: params.type,
+      images: params.images,
     })
 
     // Emit project processing

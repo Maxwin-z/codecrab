@@ -115,7 +115,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   // Determine current provider for display
   const activeProviderId = ps.currentProvider || project.defaultProviderId || defaultProviderId
   const hasMessages = ss.messages.length > 0
-  const providerLocked = hasMessages || ps.isRunning
+  const providerLocked = hasMessages || ps.isRunning || ps.promptPending
 
   const handleSend = (prompt: string, images?: any[]) => {
     ws.sendPrompt(projectId, prompt, { images, providerId: activeProviderId || undefined })
@@ -262,6 +262,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           isStreaming={ss.isStreaming}
           streamingText={ss.streamingText}
           streamingThinking={ss.streamingThinking}
+          promptPending={ps.promptPending}
         />
 
         {/* Suggestions */}

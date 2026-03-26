@@ -60,6 +60,19 @@ export class Broadcaster {
   private subscribe(): void {
     // Turn lifecycle events
     this.core.on('turn:start', (e) => {
+      // Broadcast user message to all clients when execution actually starts
+      this.broadcastToProject(e.projectId, {
+        type: 'user_message',
+        projectId: e.projectId,
+        sessionId: e.sessionId,
+        message: {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: e.prompt,
+          images: e.images,
+          timestamp: Date.now(),
+        },
+      })
       this.broadcastToProject(e.projectId, {
         type: 'query_start',
         projectId: e.projectId,

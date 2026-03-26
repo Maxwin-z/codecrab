@@ -201,11 +201,13 @@ export function MessageList({
   isStreaming,
   streamingText,
   streamingThinking,
+  promptPending,
 }: {
   messages: ChatMsg[]
   isStreaming: boolean
   streamingText: string
   streamingThinking: string
+  promptPending?: boolean
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -214,7 +216,7 @@ export function MessageList({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length, streamingText, streamingThinking, isStreaming])
 
-  if (messages.length === 0 && !isStreaming) {
+  if (messages.length === 0 && !isStreaming && !promptPending) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
@@ -230,6 +232,16 @@ export function MessageList({
       {messages.map(msg => (
         <MessageBubble key={msg.id} msg={msg} />
       ))}
+
+      {promptPending && !isStreaming && (
+        <div className="flex justify-center my-3">
+          <div className="streaming-dots flex gap-1 py-1">
+            <span className="dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+            <span className="dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+            <span className="dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+          </div>
+        </div>
+      )}
 
       {isStreaming && (
         <StreamingIndicator

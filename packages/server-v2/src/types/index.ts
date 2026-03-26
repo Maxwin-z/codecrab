@@ -210,6 +210,7 @@ export interface TurnStartEvent {
   queryId: string
   prompt: string
   type: TurnType
+  images?: ImageAttachment[]
 }
 
 export interface TurnDeltaEvent {

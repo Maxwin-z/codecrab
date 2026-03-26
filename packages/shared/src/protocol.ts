@@ -372,6 +372,11 @@ export interface ChatMessageSummary {
   durationMs?: number
 }
 
+export interface PromptReceivedMessage extends ServerProjectContext {
+  type: 'prompt_received'
+  queryId?: string
+}
+
 export interface UserMessage extends ServerProjectContext {
   type: 'user_message'
   message: ChatMessage
@@ -447,6 +452,7 @@ export type ServerMessage =
   | PermissionRequestMessage
   | MessageHistoryMessage
   | MessageHistoryChunkMessage
+  | PromptReceivedMessage
   | UserMessage
   | AvailableModelsMessage
   | ProjectStatusesMessage
