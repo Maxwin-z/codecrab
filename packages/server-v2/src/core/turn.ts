@@ -288,6 +288,8 @@ export class TurnManager {
       case 'session_init':
         // Register the session with the SDK session ID
         this.sessions.register(event.sdkSessionId, this.sessions.getMeta(ctx.sessionId)!)
+        // Update ctx so all subsequent events use the real SDK session ID
+        ctx.sessionId = event.sdkSessionId
         this.core.emit('session:created', {
           projectId: ctx.projectId,
           sessionId: event.sdkSessionId,

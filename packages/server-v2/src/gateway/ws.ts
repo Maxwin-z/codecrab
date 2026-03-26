@@ -142,6 +142,11 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
   tsLog(`${C.cyan}[ws]${C.reset} ${C.bold}◆ prompt${C.reset}  project=${C.bold}${projectName}${C.reset}  client=${client.clientId}`)
   tsLog(`${C.cyan}[ws]${C.reset}   ${C.green}${promptPreview}${C.reset}`)
 
+  // Ensure client is subscribed to this project (may have been missed if switch_project was dropped)
+  if (!client.subscribedProjects.has(projectId)) {
+    client.subscribedProjects.set(projectId, {})
+  }
+
   // Get or create session
   let sessionId = message.sessionId
   const sub = client.subscribedProjects.get(projectId)
@@ -161,6 +166,9 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     // Use a temporary ID until SDK provides the real one
     sessionId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     core.sessions.register(sessionId, meta)
+    client.subscribedProjects.set(projectId, { sessionId })
+  } else {
+    // Update subscription with the resolved sessionId
     client.subscribedProjects.set(projectId, { sessionId })
   }
 

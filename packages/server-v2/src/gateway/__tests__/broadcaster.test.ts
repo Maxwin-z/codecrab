@@ -227,7 +227,7 @@ describe('Broadcaster', () => {
       broadcaster.addClient(client)
     })
 
-    it('turn:start -> query_start', () => {
+    it('turn:start -> user_message + query_start', () => {
       core.emit('turn:start' as any, {
         projectId: 'proj-1',
         sessionId: 'sess-1',
@@ -238,9 +238,12 @@ describe('Broadcaster', () => {
       })
 
       const messages = getSentMessages(client)
-      expect(messages).toHaveLength(1)
-      expect(messages[0].type).toBe('query_start')
-      expect((messages[0] as any).queryId).toBe('query-1')
+      expect(messages).toHaveLength(2)
+      expect(messages[0].type).toBe('user_message')
+      expect((messages[0] as any).message.role).toBe('user')
+      expect((messages[0] as any).message.content).toBe('hello')
+      expect(messages[1].type).toBe('query_start')
+      expect((messages[1] as any).queryId).toBe('query-1')
     })
 
     it('turn:delta -> stream_delta', () => {

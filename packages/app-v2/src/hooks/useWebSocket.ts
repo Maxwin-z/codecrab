@@ -279,9 +279,18 @@ export function useWebSocket(): UseWebSocketReturn {
         const ps = getOrCreateProjectState(projectId)
         if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
         ps.sessionState.streamingThinking = ''
-        // Attach thinking to last assistant message or current streaming
-        const lastMsg = ps.sessionState.messages[ps.sessionState.messages.length - 1]
-        if (lastMsg?.role === 'assistant') {
+        // Attach thinking to last assistant message, or create one if needed
+        let lastMsg = ps.sessionState.messages[ps.sessionState.messages.length - 1]
+        if (!lastMsg || lastMsg.role !== 'assistant') {
+          lastMsg = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            role: 'assistant',
+            content: '',
+            thinking: msg.thinking,
+            timestamp: Date.now(),
+          }
+          ps.sessionState.messages.push(lastMsg)
+        } else {
           lastMsg.thinking = msg.thinking
         }
         rerender()
@@ -381,7 +390,8 @@ export function useWebSocket(): UseWebSocketReturn {
         if (!projectId || !sessionId) break
         const ps = getOrCreateProjectState(projectId)
         ps.sessionId = sessionId
-        ps.sessionState = createEmptySessionState()
+        // Don't wipe session state — session_init fires on every query,
+        // and messages/user_message may have already been pushed
         rerender()
         break
       }
