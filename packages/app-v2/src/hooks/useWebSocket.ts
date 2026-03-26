@@ -147,6 +147,7 @@ export interface UseWebSocketReturn {
   }): void
   abort(projectId: string): void
   switchProject(projectId: string): void
+  newSession(projectId: string): void
   resumeSession(projectId: string, sessionId: string): void
   setProvider(projectId: string, providerConfigId: string): void
   setPermissionMode(projectId: string, sessionId: string, mode: 'bypassPermissions' | 'default'): void
@@ -652,6 +653,19 @@ export function useWebSocket(): UseWebSocketReturn {
     send({ type: 'switch_project', projectId })
   }, [send])
 
+  const newSession = useCallback((projectId: string) => {
+    const ps = getOrCreateProjectState(projectId)
+    ps.sessionId = null
+    ps.currentProvider = null
+    ps.sessionState = createEmptySessionState()
+    ps.sessionUsage = null
+    ps.activityHeartbeat = null
+    ps.pendingPermission = null
+    ps.pendingQuestion = null
+    ps.queryQueue = []
+    rerender()
+  }, [getOrCreateProjectState, rerender])
+
   const resumeSession = useCallback((projectId: string, sessionId: string) => {
     const ps = getOrCreateProjectState(projectId)
     ps.sessionId = sessionId
@@ -720,6 +734,7 @@ export function useWebSocket(): UseWebSocketReturn {
     sendPrompt,
     abort,
     switchProject,
+    newSession,
     resumeSession,
     setProvider,
     setPermissionMode,

@@ -11,12 +11,14 @@ export function SessionSidebar({
   onSelectSession,
   onNewSession,
   onUnauthorized,
+  providerNames,
 }: {
   projectId: string
   currentSessionId: string | null
   onSelectSession: (sessionId: string) => void
   onNewSession: () => void
   onUnauthorized?: () => void
+  providerNames?: Record<string, string>
 }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -111,6 +113,11 @@ export function SessionSidebar({
               )}
               {s.cronJobName && (
                 <span className="text-xs text-muted-foreground ml-1">cron: {s.cronJobName}</span>
+              )}
+              {s.providerId && providerNames?.[s.providerId] && (
+                <span className="text-xs text-muted-foreground ml-auto truncate max-w-[80px]" title={providerNames[s.providerId]}>
+                  {providerNames[s.providerId]}
+                </span>
               )}
             </div>
           </button>

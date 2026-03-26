@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { authFetch } from '@/lib/auth'
-import { formatDuration, formatCost } from '@/lib/utils'
+import { cn, formatDuration, formatCost } from '@/lib/utils'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { SessionSidebar } from './SessionSidebar'
@@ -114,17 +114,8 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   }
 
   const handleNewSession = () => {
-    const state = ws.getProjectState(projectId)
-    state.sessionId = null
-    state.sessionState = {
-      messages: [],
-      sdkEvents: [],
-      streamingText: '',
-      streamingThinking: '',
-      isStreaming: false,
-      suggestions: [],
-      summary: '',
-    }
+    ws.newSession(projectId)
+    setSearchParams({ project: projectId })
   }
 
   const handleSelectSession = (sessionId: string) => {
@@ -143,8 +134,13 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
     ws.setPermissionMode(projectId, ps.sessionId, newMode)
   }
 
+  // Build provider name lookup for session sidebar
+  const providerNames = Object.fromEntries(providers.map(p => [p.id, p.name]))
+
   // Determine current provider for display
   const activeProviderId = ps.currentProvider || project.defaultProviderId || defaultProviderId
+  const hasMessages = ss.messages.length > 0
+  const providerLocked = hasMessages || ps.isRunning
 
   return (
     <div className="h-full flex">
@@ -156,6 +152,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onUnauthorized={onUnauthorized}
+          providerNames={providerNames}
         />
       )}
 
@@ -182,8 +179,17 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
             <Select
               value={activeProviderId || undefined}
               onValueChange={handleProviderChange}
+              disabled={providerLocked}
             >
-              <SelectTrigger className="h-7 w-auto min-w-[100px] max-w-[180px] border-none shadow-none text-xs text-muted-foreground hover:text-foreground ml-1">
+              <SelectTrigger
+                className={cn(
+                  'h-7 w-auto min-w-[100px] max-w-[180px] border-none shadow-none text-xs ml-1',
+                  providerLocked
+                    ? 'text-muted-foreground/60 cursor-not-allowed'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                title={providerLocked ? 'Provider is locked for this session' : undefined}
+              >
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
