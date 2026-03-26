@@ -245,6 +245,15 @@ export class Broadcaster {
     })
 
     // Session lifecycle
+    this.core.on('session:id_resolved', (e) => {
+      this.broadcastToProject(e.projectId, {
+        type: 'session_id_resolved',
+        projectId: e.projectId,
+        sessionId: e.sessionId,
+        tempSessionId: e.tempSessionId,
+      })
+    })
+
     this.core.on('session:created', (e) => {
       this.broadcastToProject(e.projectId, {
         type: 'session_created',

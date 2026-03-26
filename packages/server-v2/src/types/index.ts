@@ -191,6 +191,7 @@ export interface CoreEventMap {
 
   // Session lifecycle
   'session:created': SessionCreatedEvent
+  'session:id_resolved': SessionIdResolvedEvent
   'session:resumed': SessionResumedEvent
   'session:updated': SessionUpdatedEvent
   'session:status_changed': SessionStatusChangedEvent
@@ -344,6 +345,12 @@ export interface SessionCreatedEvent {
   parentSessionId?: string
   cronJobId?: string
   cronJobName?: string
+}
+
+export interface SessionIdResolvedEvent {
+  projectId: string
+  tempSessionId: string
+  sessionId: string
 }
 
 export interface SessionResumedEvent {

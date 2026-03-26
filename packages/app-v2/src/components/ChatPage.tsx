@@ -89,12 +89,28 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       .catch(() => {})
   }, [onUnauthorized])
 
-  // Handle session param
+  // Handle session param — only resume if we're not already on that session
   useEffect(() => {
     if (projectId && sessionParam) {
-      ws.resumeSession(projectId, sessionParam)
+      const ps = ws.getProjectState(projectId)
+      if (ps.sessionId !== sessionParam) {
+        ws.resumeSession(projectId, sessionParam)
+      }
     }
   }, [projectId, sessionParam])
+
+  // Sync URL with resolved session ID (temp → real SDK ID)
+  const currentSessionId = projectId ? ws.getProjectState(projectId).sessionId : null
+  useEffect(() => {
+    if (!projectId || !currentSessionId) return
+    // Only update URL when we have a real session ID (not temp/pending)
+    if (!currentSessionId.startsWith('temp-') && !currentSessionId.startsWith('pending-')) {
+      const urlSession = searchParams.get('session')
+      if (urlSession !== currentSessionId) {
+        setSearchParams({ project: projectId, session: currentSessionId }, { replace: true })
+      }
+    }
+  }, [projectId, currentSessionId])
 
   if (!projectId || !project) {
     return (

@@ -35,23 +35,43 @@ No lint commands are configured yet.
 **Packages and dependency flow:**
 ```
 cli → server, shared
-server → shared, express
-app → shared, react
+server → shared, express          (legacy — frozen, do NOT modify)
+server-v2 → shared, express       (active — all server changes go here)
+app → shared, react               (legacy — frozen, do NOT modify)
+app-v2 → shared, react            (active — all frontend changes go here)
 iOS → server (via API/WS)
 relay → shared
 web → (standalone)
 shared → (no internal deps)
 ```
 
-**Server (`packages/server`)** — Express 5 + WebSocket on port 4200, uses `@anthropic-ai/claude-agent-sdk` for Claude interactions. Key subsystems:
-- `src/engine/` — EngineAdapter interface with ClaudeAdapter implementation. Streaming events: text_delta, thinking_delta, tool_use, tool_result.
-- `src/ws/` — WebSocket connection & message routing (bidirectional protocol defined in shared/protocol.ts).
-- `src/api/` — REST routes for projects, models, sessions, files.
-- `src/auth/` — Token-based auth (middleware + WS upgrade hook).
-- `src/mcp/` — MCP extensions: cron (scheduled tasks with pause/resume/trigger), push (web push notifications), chrome (DevTools Protocol automation).
-- `src/skills/` — Skills registry for managing SDK-provided skills.
+> **IMPORTANT:** `packages/server` and `packages/app` are legacy (frozen). All new server-side changes MUST go into `packages/server-v2`, all new frontend changes MUST go into `packages/app-v2`. Do NOT modify the legacy packages.
 
-**App (`packages/app`)** — React 19 chat UI. Vite proxies `/api` and `/ws` to the server. Components: ChatPage, InputBar, MessageList, ModelSelector, SessionSidebar, SetupWizard, FileBrowser, ProjectList. State via hooks (useWebSocket, WebSocketContext).
+**Server v2 (`packages/server-v2`)** — Four-layer architecture on port 4200:
+- **Agent** (`src/agent/`) — Pure SDK wrapper (`ClaudeAgent`). Translates SDK messages into `AgentStreamEvent` via AsyncChannel. Handles permission/question blocking with promise-based resolvers.
+- **Core** (`src/core/`) — State & orchestration (`CoreEngine` extends EventEmitter). Three managers:
+  - `ProjectManager` — Project CRUD, provider config resolution, env building
+  - `SessionManager` — Session lifecycle: create (temporary `pending-xxx` ID) → register (real SDK ID) → persist. Metadata: provider, permissionMode, usage stats
+  - `TurnManager` — Query execution via `QueryQueue` (per-project, priority-based). Streams `AgentStreamEvent` → emits core events
+- **Gateway** (`src/gateway/`) — HTTP/WS protocol layer:
+  - `ws.ts` — WebSocket message dispatch (prompt, abort, new_session, resume_session, switch_project, set_provider, etc.)
+  - `broadcaster.ts` — Subscribes to all core events, translates to `ServerMessage`, broadcasts to project subscribers
+  - `heartbeat.ts` — Activity tracking & throttled heartbeat broadcasts
+  - `http.ts` — REST API routes (projects, sessions, providers, files)
+  - `auth.ts` — Token verification
+- **Consumers** — Soul module (`src/soul/`) and Cron scheduler (`src/cron/`) subscribe to core events
+
+**Server (legacy) (`packages/server`)** — Express 5 + WebSocket, monolithic `ws/index.ts`. Frozen — do not modify.
+
+**App v2 (`packages/app-v2`)** — React 19 chat UI (port 5740). Vite proxies `/api` and `/ws` to server on port 4200. Key files:
+- `src/hooks/useWebSocket.ts` — WebSocket connection, message handling, project state management (`ProjectChatState`)
+- `src/hooks/WebSocketContext.tsx` — React context provider
+- `src/components/ChatPage.tsx` — Main chat page with session management, provider selector, input/output
+- `src/components/MessageList.tsx` — Message rendering with streaming support
+- `src/components/SessionSidebar.tsx` — Session list and selection
+- `src/components/InputBar.tsx` — User input with image attachments
+
+**App (legacy) (`packages/app`)** — React 19 chat UI (port 5730). Frozen — do not modify.
 
 **iOS (`packages/iOS`)** — Native iOS/macOS app (Swift, SwiftUI, Xcode project). Provides the same chat UI functionality as the web app, connecting to the server via REST API and WebSocket.
 

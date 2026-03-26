@@ -147,15 +147,16 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     client.subscribedProjects.set(projectId, {})
   }
 
-  // Get or create session
-  let sessionId = message.sessionId
-  const sub = client.subscribedProjects.get(projectId)
-  if (!sessionId && sub?.sessionId) {
-    sessionId = sub.sessionId
-  }
+  // Session resolution: only two paths supported.
+  //  1. tempSessionId present → new session (client-generated temp ID)
+  //  2. sessionId present     → existing session
+  // Empty/missing sessionId without tempSessionId is rejected.
+  let sessionId = message.sessionId || undefined  // normalize empty string to undefined
 
-  if (!sessionId) {
-    // Create new session
+  tsLog(`${C.cyan}[ws]${C.reset}   ${C.dim}session resolve: sessionId=${sessionId ?? 'none'}  tempSessionId=${message.tempSessionId ?? 'none'}${C.reset}`)
+
+  if (!sessionId && message.tempSessionId) {
+    // New session — create meta and register with temp ID
     if (!project) {
       broadcaster.send(client, { type: 'error', message: 'Project not found' })
       return
@@ -163,13 +164,17 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     const meta = core.sessions.create(projectId, project, {
       providerId: message.providerId || undefined,
     })
-    // Use a temporary ID until SDK provides the real one
-    sessionId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    sessionId = message.tempSessionId
     core.sessions.register(sessionId, meta)
     client.subscribedProjects.set(projectId, { sessionId })
-  } else {
-    // Update subscription with the resolved sessionId
+    tsLog(`${C.cyan}[ws]${C.reset}   ${C.dim}new session: ${sessionId}${C.reset}`)
+  } else if (sessionId) {
+    // Existing session — update subscription
     client.subscribedProjects.set(projectId, { sessionId })
+  } else {
+    // Neither sessionId nor tempSessionId — reject
+    broadcaster.send(client, { type: 'error', message: 'Missing sessionId or tempSessionId' })
+    return
   }
 
   // Send sync ack to the sending client only (message will appear in chat when execution starts)

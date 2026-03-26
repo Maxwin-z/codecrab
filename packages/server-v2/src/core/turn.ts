@@ -132,7 +132,7 @@ export class TurnManager {
         model: resolvedModel,
         permissionMode: session.permissionMode,
         cwd: projectPath,
-        resume: session.sdkSessionId && !session.sdkSessionId.startsWith('pending-') ? session.sdkSessionId : undefined,
+        resume: session.sdkSessionId && !session.sdkSessionId.startsWith('pending-') && !session.sdkSessionId.startsWith('temp-') ? session.sdkSessionId : undefined,
         enabledMcps: params.enabledMcps,
         disabledSdkServers: params.disabledSdkServers,
         disabledSkills: params.disabledSkills,
@@ -144,15 +144,19 @@ export class TurnManager {
 
       const startTime = Date.now()
 
+      // Create ctx ONCE so session_init can mutate ctx.sessionId and
+      // all subsequent events use the resolved SDK session ID.
+      const ctx = {
+        projectId: params.projectId,
+        sessionId: params.sessionId,
+        turnId,
+        queryId: queuedQuery.id,
+        type: params.type,
+        startTime,
+      }
+
       for await (const event of stream) {
-        this.handleStreamEvent(event, {
-          projectId: params.projectId,
-          sessionId: params.sessionId,
-          turnId,
-          queryId: queuedQuery.id,
-          type: params.type,
-          startTime,
-        })
+        this.handleStreamEvent(event, ctx)
       }
     } catch (error: any) {
       tsLog(`${tag} ${C.red}${C.bold}✗ error${C.reset}  project=${C.bold}${projectName}${C.reset}  ${error.message || 'Unknown error'}`)
@@ -285,9 +289,16 @@ export class TurnManager {
         })
         break
 
-      case 'session_init':
+      case 'session_init': {
         // Register the session with the SDK session ID
-        this.sessions.register(event.sdkSessionId, this.sessions.getMeta(ctx.sessionId)!)
+        const prevSessionId = ctx.sessionId
+        this.sessions.register(event.sdkSessionId, this.sessions.getMeta(prevSessionId)!)
+        // Notify clients so they can map temp/pending ID → real SDK ID
+        this.core.emit('session:id_resolved', {
+          projectId: ctx.projectId,
+          tempSessionId: prevSessionId,
+          sessionId: event.sdkSessionId,
+        })
         // Update ctx so all subsequent events use the real SDK session ID
         ctx.sessionId = event.sdkSessionId
         this.core.emit('session:created', {
@@ -295,6 +306,7 @@ export class TurnManager {
           sessionId: event.sdkSessionId,
         })
         break
+      }
 
       case 'result': {
         const durationSec = (event.durationMs / 1000).toFixed(1)

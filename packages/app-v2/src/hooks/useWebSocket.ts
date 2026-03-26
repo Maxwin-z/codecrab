@@ -214,10 +214,17 @@ export function useWebSocket(): UseWebSocketReturn {
     const projectId = ('projectId' in msg ? msg.projectId : undefined) as string | undefined
     const sessionId = ('sessionId' in msg ? msg.sessionId : undefined) as string | undefined
 
+    // Strict session filter: drop events for a different session.
+    // Session ID resolution (temp → real) is handled explicitly via session_id_resolved.
+    const isWrongSession = (ps: ProjectChatState): boolean => {
+      return !!(sessionId && ps.sessionId && sessionId !== ps.sessionId)
+    }
+
     switch (msg.type) {
       case 'query_start': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
+        if (isWrongSession(ps)) break
         ps.isRunning = true
         ps.isAborting = false
         ps.promptPending = false
@@ -226,9 +233,6 @@ export function useWebSocket(): UseWebSocketReturn {
         ps.sessionState.streamingThinking = ''
         ps.pendingPermission = null
         ps.pendingQuestion = null
-        if (sessionId && !ps.sessionId) {
-          ps.sessionId = sessionId
-        }
         rerender()
         break
       }
@@ -236,7 +240,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'stream_delta': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
+        if (isWrongSession(ps)) break
         if (msg.deltaType === 'text') {
           ps.sessionState.streamingText += msg.text
         } else if (msg.deltaType === 'thinking') {
@@ -249,7 +253,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'assistant_text': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
+        if (isWrongSession(ps)) break
         // Full assistant text — finalize streaming into a message
         const cleanText = stripMetaTags(msg.text)
         if (cleanText) {
@@ -277,7 +281,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'thinking': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
+        if (isWrongSession(ps)) break
         ps.sessionState.streamingThinking = ''
         // Attach thinking to last assistant message, or create one if needed
         let lastMsg = ps.sessionState.messages[ps.sessionState.messages.length - 1]
@@ -300,7 +304,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'tool_use': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
+        if (isWrongSession(ps)) break
         // Append tool call to last assistant message or create one
         let lastMsg = ps.sessionState.messages[ps.sessionState.messages.length - 1]
         if (!lastMsg || lastMsg.role !== 'assistant') {
@@ -326,7 +330,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'tool_result': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
+        if (isWrongSession(ps)) break
         // Find tool call and attach result
         for (let i = ps.sessionState.messages.length - 1; i >= 0; i--) {
           const m = ps.sessionState.messages[i]
@@ -386,12 +390,30 @@ export function useWebSocket(): UseWebSocketReturn {
         break
       }
 
+      case 'session_id_resolved': {
+        // Server resolved our temp session ID to the real SDK session ID.
+        // Only update if our current sessionId matches the temp ID — other clients
+        // that don't own this temp ID simply ignore the message.
+        if (!projectId) break
+        const ps = getOrCreateProjectState(projectId)
+        const tempId = ('tempSessionId' in msg ? (msg as any).tempSessionId : undefined) as string | undefined
+        console.log(`[ws] session_id_resolved: tempId=${tempId} → realId=${sessionId}  (current ps.sessionId=${ps.sessionId})`)
+        if (tempId && ps.sessionId === tempId && sessionId) {
+          ps.sessionId = sessionId
+          console.log(`[ws] session ID updated: ${tempId} → ${sessionId}`)
+        }
+        rerender()
+        break
+      }
+
       case 'session_created': {
         if (!projectId || !sessionId) break
         const ps = getOrCreateProjectState(projectId)
-        ps.sessionId = sessionId
-        // Don't wipe session state — session_init fires on every query,
-        // and messages/user_message may have already been pushed
+        // session_id_resolved already updated our ID; this is a confirmation.
+        // Also handles resumed sessions where session_created fires without a temp ID.
+        if (!ps.sessionId || ps.sessionId.startsWith('temp-')) {
+          ps.sessionId = sessionId
+        }
         rerender()
         break
       }
@@ -399,9 +421,13 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'session_resumed': {
         if (!projectId || !sessionId) break
         const ps = getOrCreateProjectState(projectId)
-        ps.sessionId = sessionId
-        ps.currentProvider = msg.providerId || null
-        // Don't clear messages — we'll fetch history via REST
+        // Don't overwrite sessionId if we have a pending prompt — the user started
+        // a new session and the server is about to assign a fresh session ID.
+        // The auto-resume from switch_project would clobber it otherwise.
+        if (!ps.promptPending && !ps.isRunning) {
+          ps.sessionId = sessionId
+          ps.currentProvider = msg.providerId || null
+        }
         rerender()
         break
       }
@@ -535,7 +561,7 @@ export function useWebSocket(): UseWebSocketReturn {
       case 'sdk_event': {
         if (!projectId) break
         const ps = getOrCreateProjectState(projectId)
-        if (sessionId && ps.sessionId && sessionId !== ps.sessionId) break
+        if (isWrongSession(ps)) break
         ps.sessionState.sdkEvents.push(msg.event)
         rerender()
         break
@@ -557,7 +583,8 @@ export function useWebSocket(): UseWebSocketReturn {
       }
 
       case 'prompt_received': {
-        // Sync ack from server — prompt was received and queued
+        // Sync ack — prompt was received and queued.
+        // For new sessions, the client already set ps.sessionId = tempId in sendPrompt().
         break
       }
 
@@ -639,12 +666,28 @@ export function useWebSocket(): UseWebSocketReturn {
     // Don't add user message here — it will appear when execution starts via user_message broadcast
     ps.promptPending = true
     ps.sessionState.suggestions = []
+
+    const existingSessionId = options?.sessionId ?? ps.sessionId ?? undefined
+
+    // For new sessions (no existing ID), generate a client-side temp ID.
+    // The server will use this as the session key until SDK provides the real one,
+    // then send session_id_resolved to map temp → real.
+    let tempSessionId: string | undefined
+    if (!existingSessionId) {
+      tempSessionId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      ps.sessionId = tempSessionId
+      console.log(`[ws] new session: tempId=${tempSessionId}`)
+    } else {
+      console.log(`[ws] existing session: sessionId=${existingSessionId}`)
+    }
+
     rerender()
 
     send({
       type: 'prompt',
       projectId,
-      sessionId: options?.sessionId ?? ps.sessionId ?? undefined,
+      sessionId: existingSessionId,
+      tempSessionId,
       prompt,
       images: options?.images,
       providerId: options?.providerId,
@@ -675,6 +718,7 @@ export function useWebSocket(): UseWebSocketReturn {
     ps.pendingQuestion = null
     ps.queryQueue = []
     rerender()
+    // Tell server to clear session binding — actual session created lazily on first prompt
     send({ type: 'new_session', projectId })
   }, [getOrCreateProjectState, rerender, send])
 

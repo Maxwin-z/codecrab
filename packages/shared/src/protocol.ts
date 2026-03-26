@@ -13,6 +13,7 @@ export interface PromptMessage extends ProjectContext {
   prompt: string
   images?: ImageAttachment[]
   providerId?: string           // Provider config ID to use for this session
+  tempSessionId?: string        // Client-generated temp ID for new session correlation
   enabledMcps?: string[]        // Custom MCP IDs to enable for this query (default: all)
   disabledSdkServers?: string[] // SDK MCP server names to disable for this query
   disabledSkills?: string[]     // Skill names to disable for this query
@@ -276,6 +277,12 @@ export interface SessionCreatedMessage extends ServerProjectContext {
   cronJobName?: string
 }
 
+export interface SessionIdResolvedMessage extends ServerProjectContext {
+  type: 'session_id_resolved'
+  tempSessionId: string  // Client's original temp ID
+  // sessionId (from ServerProjectContext) = real SDK session ID
+}
+
 export interface CronTaskCompletedMessage extends ServerProjectContext {
   type: 'cron_task_completed'
   cronJobId: string
@@ -444,6 +451,7 @@ export type ServerMessage =
   | ErrorMessage
   | SessionResumedMessage
   | SessionCreatedMessage
+  | SessionIdResolvedMessage
   | SessionStatusChangedMessage
   | AskUserQuestionMessage
   | ProviderChangedMessage
