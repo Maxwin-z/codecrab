@@ -1,10 +1,15 @@
 import express from 'express'
 import { createServer, type Server } from 'node:http'
 import type { CoreEngine } from '../core/index.js'
+import type { CronScheduler } from '../cron/scheduler.js'
 import { Broadcaster } from './broadcaster.js'
 import { HeartbeatManager } from './heartbeat.js'
 import { setupWebSocket } from './ws.js'
 import { createRouter } from './http.js'
+
+export interface GatewayOptions {
+  cronScheduler?: CronScheduler
+}
 
 export interface GatewayComponents {
   app: express.Application
@@ -13,7 +18,7 @@ export interface GatewayComponents {
   heartbeat: HeartbeatManager
 }
 
-export function setupGateway(core: CoreEngine): GatewayComponents {
+export function setupGateway(core: CoreEngine, opts?: GatewayOptions): GatewayComponents {
   const app = express()
 
   // Middleware
@@ -32,7 +37,7 @@ export function setupGateway(core: CoreEngine): GatewayComponents {
   })
 
   // Routes
-  const router = createRouter(core)
+  const router = createRouter(core, { cronScheduler: opts?.cronScheduler })
   app.use(router)
 
   // HTTP server

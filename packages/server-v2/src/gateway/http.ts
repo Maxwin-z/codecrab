@@ -6,6 +6,9 @@ import path from 'node:path'
 import os from 'node:os'
 import crypto from 'node:crypto'
 import type { CoreEngine } from '../core/index.js'
+import type { CronScheduler } from '../cron/scheduler.js'
+import { registerDevice, unregisterDevice, getDevices } from '../push/store.js'
+import { isApnsConfigured } from '../push/apns.js'
 import { ProjectValidationError, ProjectConflictError, ProjectNotFoundError } from '../core/project.js'
 import { authMiddleware, getToken, validateToken, generateToken, readConfig, writeConfig } from './auth.js'
 import type { ProviderConfig, ProviderSettings, DetectResult } from '@codecrab/shared'
@@ -43,7 +46,7 @@ async function writeProviders(settings: ProviderSettings) {
   await fs.writeFile(MODELS_FILE, JSON.stringify(settings, null, 2))
 }
 
-export function createRouter(core: CoreEngine): Router {
+export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronScheduler }): Router {
   const router = Router()
 
   // ====== Public routes (no auth) ======
@@ -389,26 +392,50 @@ export function createRouter(core: CoreEngine): Router {
   // ====== Cron API ======
 
   router.use('/api/cron', authMiddleware)
+  const cronScheduler = opts?.cronScheduler
 
-  router.get('/api/cron/jobs', (_req: Request, res: Response) => {
-    // TODO: wire up CronScheduler to gateway
-    res.json([])
+  router.get('/api/cron/jobs', async (req: Request, res: Response) => {
+    if (!cronScheduler) { res.json([]); return }
+    const projectId = req.query.projectId as string | undefined
+    const jobs = await cronScheduler.list(projectId)
+    res.json(jobs)
   })
 
-  router.get('/api/cron/summary', (_req: Request, res: Response) => {
-    res.json({ totalJobs: 0, activeJobs: 0, pausedJobs: 0 })
+  router.get('/api/cron/summary', async (_req: Request, res: Response) => {
+    if (!cronScheduler) { res.json({ totalJobs: 0, activeJobs: 0, pausedJobs: 0 }); return }
+    const jobs = await cronScheduler.list()
+    const activeJobs = jobs.filter(j => j.enabled).length
+    const pausedJobs = jobs.filter(j => !j.enabled).length
+    res.json({ totalJobs: jobs.length, activeJobs, pausedJobs })
   })
 
-  // ====== Push notifications (stub) ======
+  // ====== Push notifications ======
 
   router.use('/api/push', authMiddleware)
 
-  router.post('/api/push/register', (_req: Request, res: Response) => {
-    res.json({ ok: true })
+  router.post('/api/push/register', (req: Request, res: Response) => {
+    const { token, label } = req.body as { token?: string; label?: string }
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid device token' })
+      return
+    }
+    const device = registerDevice(token, label)
+    res.json({ ok: true, device })
   })
 
-  router.post('/api/push/unregister', (_req: Request, res: Response) => {
-    res.json({ ok: true })
+  router.post('/api/push/unregister', (req: Request, res: Response) => {
+    const { token } = req.body as { token?: string }
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid device token' })
+      return
+    }
+    const removed = unregisterDevice(token)
+    res.json({ ok: true, removed })
+  })
+
+  router.get('/api/push/devices', (_req: Request, res: Response) => {
+    const devices = getDevices()
+    res.json({ devices, apnsConfigured: isApnsConfigured() })
   })
 
   // ====== Files API (directory browsing for project creation) ======

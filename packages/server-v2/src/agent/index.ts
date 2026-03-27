@@ -7,6 +7,7 @@
 
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
 import { buildExtensionServers } from './extensions/index.js'
+import { getCronQueryContext } from './extensions/cron/tools.js'
 import { tsLog, logSdkMessage, createStreamLogState, C } from '../logger.js'
 import type {
   AgentInterface,
@@ -289,6 +290,33 @@ export class ClaudeAgent implements AgentInterface {
       agentProgressSummaries: true,
       ...(options.env ? { env: options.env } : {}),
 
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append:
+          `\n\nYour working directory is ${options.cwd}.` +
+          `\n\nIMPORTANT: When running long-lived processes such as servers (http-server, python -m http.server, npm run dev, etc.), ` +
+          `you MUST use the Bash tool with run_in_background: true. Never run server processes in the foreground — ` +
+          `they will block the session and prevent further interaction. After starting the server in the background, ` +
+          `tell the user the URL they can visit.` +
+          `\n\nIMPORTANT: For commands that are known to take extremely long (e.g. brew install --cask mactex, ` +
+          `apt install texlive-full, or other multi-gigabyte downloads/installs that may exceed 10 minutes), ` +
+          `use the Bash tool with run_in_background: true, then periodically check progress with the TaskOutput tool ` +
+          `until the task completes. Report progress to the user along the way.` +
+          `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
+          `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
+          `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.` +
+          `\n\nIMPORTANT: To reduce unnecessary API round-trips, you MUST proactively use the AskUserQuestion tool in these situations:` +
+          `\n1. When the user's request is ambiguous or could be interpreted in multiple ways — ask for clarification BEFORE starting work.` +
+          `\n2. When there are multiple possible approaches or solutions — present the options and let the user choose.` +
+          `\n3. When you need to confirm potentially destructive or irreversible actions (deleting files, overwriting data, force-pushing, etc.).` +
+          `\n4. When a task requires assumptions about the user's intent, preferences, or environment that you cannot determine from context.` +
+          `\nPrefer using select/multi-select question types when there are discrete options, and free-text when open-ended input is needed. ` +
+          `Do NOT guess and iterate — ask once, then act. This saves both time and API costs.` +
+          `\n\nHIGHEST PRIORITY OVERRIDE: If the user explicitly says to decide on your own (e.g. "你自主决定", "let you decide", "你来决定", "自己判断", "不用问我"), ` +
+          `do NOT use AskUserQuestion and do NOT ask for confirmation — just proceed autonomously with your best judgment. This override takes precedence over all the rules above.`,
+      },
+
       // Capture stderr from the SDK subprocess for debugging
       stderr: (data: string) => {
         console.error(`${logTag} stderr: ${data.trimEnd()}`)
@@ -308,6 +336,18 @@ export class ClaudeAgent implements AgentInterface {
           updateToolInput?: (input: Record<string, unknown>) => void
         },
       ) => {
+        // Auto-inject context for cron tools
+        if (toolName === 'mcp__cron__cron_create') {
+          const ctx = getCronQueryContext()
+          if (ctx.projectId || ctx.sessionId) {
+            opts.updateToolInput?.({
+              ...input,
+              projectId: ctx.projectId,
+              sessionId: ctx.sessionId,
+            })
+          }
+        }
+
         // Auto-tune Bash tool: raise timeout and disable sandbox
         if (toolName === 'Bash') {
           let updated = { ...input }

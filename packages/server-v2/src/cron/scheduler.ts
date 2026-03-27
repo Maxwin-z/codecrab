@@ -146,6 +146,36 @@ export class CronScheduler {
     return job
   }
 
+  /** Get a single cron job by ID */
+  async get(jobId: string): Promise<CronJob | null> {
+    return this.store.get(jobId)
+  }
+
+  /** Update a cron job (partial fields). Reschedules if schedule changed. */
+  async update(jobId: string, params: { name?: string; prompt?: string; schedule?: string }): Promise<CronJob | null> {
+    const job = await this.store.get(jobId)
+    if (!job) return null
+
+    if (params.name !== undefined) job.name = params.name
+    if (params.prompt !== undefined) job.prompt = params.prompt
+
+    let scheduleChanged = false
+    if (params.schedule !== undefined && params.schedule !== job.schedule) {
+      job.schedule = params.schedule
+      scheduleChanged = true
+    }
+
+    await this.store.save(job)
+
+    // Reschedule if schedule changed and job is active
+    if (scheduleChanged && job.enabled) {
+      this.cancel(jobId)
+      this.schedule(job)
+    }
+
+    return job
+  }
+
   /** Delete a cron job */
   async delete(jobId: string): Promise<void> {
     this.cancel(jobId)

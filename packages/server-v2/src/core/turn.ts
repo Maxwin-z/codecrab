@@ -2,6 +2,7 @@ import type { CoreEngine } from './index.js'
 import type { SessionManager } from './session.js'
 import { QueryQueue } from './queue.js'
 import { tsLog, C } from '../logger.js'
+import { setCronQueryContext } from '../agent/extensions/cron/tools.js'
 import type { AgentInterface, TurnSubmitParams, QueuedQuery, AgentStreamEvent, TurnType } from '../types/index.js'
 
 export class TurnManager {
@@ -126,6 +127,9 @@ export class TurnManager {
 
     const abortController = new AbortController()
     this.abortControllers.set(queuedQuery.id, abortController)
+
+    // Set cron query context so cron_create can access projectId/sessionId
+    setCronQueryContext({ projectId: params.projectId, sessionId: params.sessionId })
 
     try {
       const stream = this.agent.query(params.prompt, {

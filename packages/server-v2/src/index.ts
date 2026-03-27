@@ -5,6 +5,8 @@ import { CoreEngine } from './core/index.js'
 import { setupGateway } from './gateway/index.js'
 import { initSoul } from './soul/agent.js'
 import { initCronScheduler } from './cron/scheduler.js'
+import { setCronScheduler } from './agent/extensions/cron/tools.js'
+import { initPushConsumer, closeApns } from './push/index.js'
 import { ensureToken } from './gateway/auth.js'
 
 const require = createRequire(import.meta.url)
@@ -38,9 +40,11 @@ async function main(): Promise<void> {
   // 3. Register consumers
   initSoul(core)
   const cronScheduler = initCronScheduler(core)
+  setCronScheduler(cronScheduler)
+  initPushConsumer(core)
 
-  // 4. Create Gateway (pass in Core)
-  const { server, broadcaster, heartbeat } = setupGateway(core)
+  // 4. Create Gateway (pass in Core + Cron)
+  const { server, broadcaster, heartbeat } = setupGateway(core, { cronScheduler })
 
   // 5. Ensure auth token
   const token = await ensureToken()
@@ -65,6 +69,7 @@ async function main(): Promise<void> {
     console.log('\n[CodeCrab v2] Shutting down...')
     heartbeat.destroy()
     cronScheduler.destroy()
+    closeApns()
     core.turns.destroy()
     server.close(() => {
       console.log('[CodeCrab v2] Server stopped')
