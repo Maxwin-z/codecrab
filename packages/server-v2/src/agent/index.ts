@@ -107,6 +107,11 @@ const SAFE_MODE_ALLOWED_TOOLS: readonly string[] = [
 const DEFAULT_MAX_TURNS = 200
 const DEFAULT_EFFORT: 'low' | 'medium' | 'high' | 'max' = 'high'
 
+const SUMMARY_INSTRUCTION =
+  `\n\n[IMPORTANT: After completing your response, you MUST append a brief summary on its own line in EXACTLY this format — including BOTH the opening "[" and closing "]" brackets:\n` +
+  `[SUMMARY: your summary here]\n` +
+  `The closing "]" bracket is MANDATORY — do NOT omit it. This summary will be used as a push notification sent to the user, so write it as a natural, conversational reply to the user's request — as if you're briefly telling them what you did. Use first person, keep it casual and concise (one sentence). For example, if the user asked "check the directory structure", write: [SUMMARY: 已查看目录结构，共有14个目录和26个文件]. Match the language the user used. Never omit this line.]`
+
 // ── ClaudeAgent ─────────────────────────────────────────────────────────────
 
 export class ClaudeAgent implements AgentInterface {
@@ -314,7 +319,8 @@ export class ClaudeAgent implements AgentInterface {
           `\nPrefer using select/multi-select question types when there are discrete options, and free-text when open-ended input is needed. ` +
           `Do NOT guess and iterate — ask once, then act. This saves both time and API costs.` +
           `\n\nHIGHEST PRIORITY OVERRIDE: If the user explicitly says to decide on your own (e.g. "你自主决定", "let you decide", "你来决定", "自己判断", "不用问我"), ` +
-          `do NOT use AskUserQuestion and do NOT ask for confirmation — just proceed autonomously with your best judgment. This override takes precedence over all the rules above.`,
+          `do NOT use AskUserQuestion and do NOT ask for confirmation — just proceed autonomously with your best judgment. This override takes precedence over all the rules above.` +
+          SUMMARY_INSTRUCTION,
       },
 
       // Capture stderr from the SDK subprocess for debugging
