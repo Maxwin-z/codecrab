@@ -143,6 +143,10 @@ export class SessionManager {
     const messages: ChatMessage[] = []
     // Track tool_use blocks from assistant messages so we can attach results
     const toolUseMap = new Map<string, { msgIndex: number; toolIndex: number }>()
+    // Use incremental timestamps so clients can order and group messages correctly.
+    // SDK doesn't provide per-message timestamps, so we synthesize them.
+    const baseTimestamp = Date.now()
+    let msgCounter = 0
 
     for (const sdkMsg of sdkMessages) {
       const content = sdkMsg.message as any
@@ -184,7 +188,7 @@ export class SessionManager {
           content: text,
           thinking: thinking || undefined,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          timestamp: Date.now(), // SDK doesn't provide per-message timestamps
+          timestamp: baseTimestamp + (msgCounter++),
         })
 
         // Index tool calls for result matching
@@ -222,7 +226,7 @@ export class SessionManager {
             id: sdkMsg.uuid || `msg-${messages.length}`,
             role: 'user',
             content: text,
-            timestamp: Date.now(),
+            timestamp: baseTimestamp + (msgCounter++),
           })
         }
       }

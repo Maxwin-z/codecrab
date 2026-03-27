@@ -686,12 +686,17 @@ class WebSocketService: ObservableObject {
             guard let pid = projectId, isCurrentProject else { break }
             guard let messagesJson = json["messages"] as? [[String: Any]] else { break }
             let loadedMessages = parseMessageHistory(messagesJson)
+            let synthesizedEvents = chatMessagesToSdkEvents(loadedMessages)
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
             if targetSid == sessionId {
                 self.messages = loadedMessages
+                self.sdkEvents = synthesizedEvents
             } else {
-                modifySessionState(projectId: pid, sessionId: targetSid) { $0.messages = loadedMessages }
+                modifySessionState(projectId: pid, sessionId: targetSid) {
+                    $0.messages = loadedMessages
+                    $0.sdkEvents = synthesizedEvents
+                }
             }
         case "user_message":
             guard let pid = projectId, isCurrentProject else { break }
@@ -1141,11 +1146,14 @@ class WebSocketService: ObservableObject {
 
                 if let messagesJson = json["messages"] as? [[String: Any]], !messagesJson.isEmpty {
                     let newMessages = parseMessageHistory(messagesJson)
+                    let synthesizedEvents = self.chatMessagesToSdkEvents(newMessages)
                     if sid == self.sessionId {
                         self.messages = newMessages
+                        self.sdkEvents = synthesizedEvents
                     } else if let pid = self.activeProjectId {
                         modifySessionState(projectId: pid, sessionId: sid) {
                             $0.messages = newMessages
+                            $0.sdkEvents = synthesizedEvents
                         }
                     }
                 }
@@ -1153,6 +1161,80 @@ class WebSocketService: ObservableObject {
                 print("[ws] Failed to fetch session history: \(error)")
             }
         }
+    }
+
+    /// Convert ChatMessage history into SdkEvent array for rendering.
+    /// The MessageListView renders agent responses via SdkEvents, so we synthesize
+    /// them from assistant/system ChatMessages when loading session history.
+    private func chatMessagesToSdkEvents(_ messages: [ChatMessage]) -> [SdkEvent] {
+        var events: [SdkEvent] = []
+        var offset = 0.001  // sub-ms offset to preserve ordering within a message
+
+        for msg in messages {
+            guard msg.role == "assistant" || msg.role == "system" else { continue }
+            let baseTs = msg.timestamp
+
+            // Thinking block
+            if let thinking = msg.thinking, !thinking.isEmpty {
+                events.append(SdkEvent(
+                    ts: baseTs,
+                    type: "thinking",
+                    detail: nil,
+                    data: ["content": .string(thinking)]
+                ))
+            }
+
+            // Text content
+            if !msg.content.isEmpty {
+                events.append(SdkEvent(
+                    ts: baseTs + offset,
+                    type: "text",
+                    detail: nil,
+                    data: ["content": .string(msg.content)]
+                ))
+                offset += 0.001
+            }
+
+            // Tool calls
+            if let toolCalls = msg.toolCalls {
+                for tc in toolCalls {
+                    // Serialize tool input to JSON string (MessageModeToolUseView expects a string)
+                    var inputStr = ""
+                    if let data = try? JSONEncoder().encode(tc.input),
+                       let str = String(data: data, encoding: .utf8) {
+                        inputStr = str
+                    }
+
+                    events.append(SdkEvent(
+                        ts: baseTs + offset,
+                        type: "tool_use",
+                        detail: tc.name,
+                        data: [
+                            "toolName": .string(tc.name),
+                            "toolId": .string(tc.id),
+                            "input": .string(inputStr),
+                        ]
+                    ))
+                    offset += 0.001
+
+                    // Tool result (if available)
+                    if let result = tc.result {
+                        events.append(SdkEvent(
+                            ts: baseTs + offset,
+                            type: "tool_result",
+                            detail: nil,
+                            data: [
+                                "content": .string(result),
+                                "isError": .bool(tc.isError ?? false),
+                            ]
+                        ))
+                        offset += 0.001
+                    }
+                }
+            }
+        }
+
+        return events
     }
 
     /// Parse a single SDK event dictionary into an SdkEvent
