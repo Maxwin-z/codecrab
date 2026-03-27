@@ -1644,6 +1644,9 @@ class WebSocketService: ObservableObject {
         // Save current session before starting new one
         saveCurrentSessionToState()
         ensureProjectState(pid)
+        // Cancel any pending session switch (e.g. auto-resume from switch_project)
+        // so the session_resumed response doesn't hijack the new empty session
+        projectStates[pid]!.awaitingSessionSwitch = false
         // Clear local state for new session
         self.sessionId = ""
         projectStates[pid]!.sessionId = ""
