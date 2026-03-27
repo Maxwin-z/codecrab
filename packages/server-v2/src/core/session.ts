@@ -196,9 +196,11 @@ export class SessionManager {
           toolUseMap.set(toolCalls[i].id, { msgIndex, toolIndex: i })
         }
       } else if (sdkMsg.type === 'user') {
-        const blocks = Array.isArray(content.content) ? content.content : []
+        // content.content can be a plain string or an array of content blocks
+        const rawContent = content.content
+        const blocks = Array.isArray(rawContent) ? rawContent : []
 
-        let text = ''
+        let text = typeof rawContent === 'string' ? rawContent : ''
         for (const block of blocks) {
           if (block.type === 'text' && block.text) {
             text += (text ? '\n' : '') + block.text
