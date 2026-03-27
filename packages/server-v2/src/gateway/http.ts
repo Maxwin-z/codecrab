@@ -7,6 +7,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import type { CoreEngine } from '../core/index.js'
 import type { CronScheduler } from '../cron/scheduler.js'
+import type { CronJob } from '../types/index.js'
 import { registerDevice, unregisterDevice, getDevices } from '../push/store.js'
 import { isApnsConfigured } from '../push/apns.js'
 import { ProjectValidationError, ProjectConflictError, ProjectNotFoundError } from '../core/project.js'
@@ -394,19 +395,105 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
   router.use('/api/cron', authMiddleware)
   const cronScheduler = opts?.cronScheduler
 
+  // Transform v2 CronJob to legacy-compatible response format (iOS expects this shape)
+  function toClientCronJob(job: CronJob) {
+    const status = job.enabled
+      ? (job.lastRunStatus === 'failure' ? 'failed' : 'pending')
+      : 'disabled'
+    return {
+      id: job.id,
+      name: job.name,
+      description: null,
+      schedule: { kind: 'cron', expr: job.schedule },
+      prompt: job.prompt,
+      context: { projectId: job.projectId, sessionId: job.sessionId },
+      status,
+      createdAt: new Date(job.createdAt).toISOString(),
+      updatedAt: new Date(job.updatedAt).toISOString(),
+      lastRunAt: job.lastRunAt ? new Date(job.lastRunAt).toISOString() : null,
+      nextRunAt: null,
+      runCount: 0,
+      maxRuns: null,
+      deleteAfterRun: false,
+    }
+  }
+
   router.get('/api/cron/jobs', async (req: Request, res: Response) => {
     if (!cronScheduler) { res.json([]); return }
     const projectId = req.query.projectId as string | undefined
-    const jobs = await cronScheduler.list(projectId)
-    res.json(jobs)
+    const status = req.query.status as string | undefined
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined
+
+    let jobs = await cronScheduler.list(projectId)
+
+    // Filter by status (legacy-compatible values)
+    if (status === 'enabled' || status === 'pending') {
+      jobs = jobs.filter(j => j.enabled)
+    } else if (status === 'disabled') {
+      jobs = jobs.filter(j => !j.enabled)
+    } else if (status === 'failed') {
+      jobs = jobs.filter(j => j.lastRunStatus === 'failure')
+    }
+
+    // Sort by createdAt descending (newest first)
+    jobs.sort((a, b) => b.createdAt - a.createdAt)
+
+    if (limit && limit > 0) {
+      jobs = jobs.slice(0, limit)
+    }
+
+    res.json(jobs.map(toClientCronJob))
+  })
+
+  router.get('/api/cron/jobs/:id', async (req: Request, res: Response) => {
+    if (!cronScheduler) { res.status(404).json({ error: 'Cron scheduler not initialized' }); return }
+    const job = await cronScheduler.get(req.params.id as string)
+    if (!job) { res.status(404).json({ error: 'Job not found' }); return }
+    res.json(toClientCronJob(job))
+  })
+
+  router.get('/api/cron/jobs/:id/history', async (req: Request, res: Response) => {
+    if (!cronScheduler) { res.json([]); return }
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50
+    const history = await cronScheduler.getHistory(req.params.id as string, limit)
+    res.json(history)
   })
 
   router.get('/api/cron/summary', async (_req: Request, res: Response) => {
-    if (!cronScheduler) { res.json({ totalJobs: 0, activeJobs: 0, pausedJobs: 0 }); return }
+    if (!cronScheduler) {
+      res.json({
+        totalActive: 0, totalAll: 0,
+        statusCounts: { pending: 0, running: 0, disabled: 0, failed: 0, completed: 0, deprecated: 0 },
+        nextJob: null,
+      })
+      return
+    }
     const jobs = await cronScheduler.list()
-    const activeJobs = jobs.filter(j => j.enabled).length
-    const pausedJobs = jobs.filter(j => !j.enabled).length
-    res.json({ totalJobs: jobs.length, activeJobs, pausedJobs })
+    const enabledJobs = jobs.filter(j => j.enabled)
+    const disabledJobs = jobs.filter(j => !j.enabled)
+    const failedJobs = enabledJobs.filter(j => j.lastRunStatus === 'failure')
+    const pendingJobs = enabledJobs.filter(j => j.lastRunStatus !== 'failure')
+
+    res.json({
+      totalActive: enabledJobs.length,
+      totalAll: jobs.length,
+      statusCounts: {
+        pending: pendingJobs.length,
+        running: 0,
+        disabled: disabledJobs.length,
+        failed: failedJobs.length,
+        completed: 0,
+        deprecated: 0,
+      },
+      nextJob: null,
+    })
+  })
+
+  router.get('/api/cron/health', async (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      schedulerInitialized: !!cronScheduler,
+    })
   })
 
   // ====== Push notifications ======
