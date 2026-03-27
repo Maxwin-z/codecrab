@@ -63,8 +63,43 @@ struct MessageListView: View {
                     }
                 }
 
-                // Running indicator (when no SDK events are flowing yet)
-                if isRunning && sdkEvents.isEmpty {
+                // Live streaming content (before finalized as SdkEvents)
+                if isRunning {
+                    if !streamingThinking.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("🧠")
+                                .font(.caption)
+                            Text("Thinking")
+                                .font(.callout)
+                                .fontDesign(.monospaced)
+                            Text(streamingThinking.components(separatedBy: .newlines).joined(separator: " "))
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        .foregroundColor(.orange.opacity(0.8))
+                    }
+                    if !streamingText.isEmpty {
+                        let displayText = streamingText
+                            .replacingOccurrences(of: "\\n?\\[SUMMARY:[^\\n]*\\]?", with: "", options: .regularExpression)
+                            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[^\\n]*\\]?", with: "", options: .regularExpression)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !displayText.isEmpty {
+                            InlineSelectableText(
+                                text: displayText,
+                                font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
+                                textColor: .label
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+
+                // Running indicator (when no SDK events are flowing yet and no streaming text)
+                if isRunning && sdkEvents.isEmpty && streamingText.isEmpty && streamingThinking.isEmpty {
                     HStack(spacing: 8) {
                         Circle()
                             .fill(Color.orange)

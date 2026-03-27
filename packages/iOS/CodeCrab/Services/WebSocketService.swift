@@ -427,7 +427,18 @@ class WebSocketService: ObservableObject {
                 let targetSid = msgSessionId ?? sessionId
                 if !targetSid.isEmpty {
                     if targetSid == sessionId {
-                        // Viewing session: flush streaming to @Published messages
+                        // Viewing session: flush remaining streaming to @Published messages + SdkEvents
+                        if !self.streamingThinking.isEmpty {
+                            let thinkEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000, type: "thinking", detail: nil, data: ["content": .string(self.streamingThinking)])
+                            self.sdkEvents.append(thinkEvent)
+                        }
+                        if !self.streamingText.isEmpty {
+                            let cleanText = self.cleanStreamingText(self.streamingText)
+                            if !cleanText.isEmpty {
+                                let textEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000 + 0.001, type: "text", detail: nil, data: ["content": .string(cleanText)])
+                                self.sdkEvents.append(textEvent)
+                            }
+                        }
                         if !self.streamingText.isEmpty || !self.streamingThinking.isEmpty {
                             let cleanText = self.cleanStreamingText(self.streamingText)
                             let msg = ChatMessage(id: UUID().uuidString, role: "assistant", content: cleanText, thinking: self.streamingThinking.isEmpty ? nil : self.streamingThinking, timestamp: Date().timeIntervalSince1970 * 1000)
@@ -438,6 +449,17 @@ class WebSocketService: ObservableObject {
                     } else {
                         // Non-viewing session: flush in session state
                         modifySessionState(projectId: pid, sessionId: targetSid) { sState in
+                            if !sState.streamingThinking.isEmpty {
+                                let thinkEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000, type: "thinking", detail: nil, data: ["content": .string(sState.streamingThinking)])
+                                sState.sdkEvents.append(thinkEvent)
+                            }
+                            if !sState.streamingText.isEmpty {
+                                let cleanText = self.cleanStreamingText(sState.streamingText)
+                                if !cleanText.isEmpty {
+                                    let textEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000 + 0.001, type: "text", detail: nil, data: ["content": .string(cleanText)])
+                                    sState.sdkEvents.append(textEvent)
+                                }
+                            }
                             if !sState.streamingText.isEmpty || !sState.streamingThinking.isEmpty {
                                 let cleanText = self.cleanStreamingText(sState.streamingText)
                                 let msg = ChatMessage(id: UUID().uuidString, role: "assistant", content: cleanText, thinking: sState.streamingThinking.isEmpty ? nil : sState.streamingThinking, timestamp: Date().timeIntervalSince1970 * 1000)
@@ -495,13 +517,16 @@ class WebSocketService: ObservableObject {
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
             let assistantMsg = ChatMessage(id: UUID().uuidString, role: "assistant", content: cleanText, timestamp: Date().timeIntervalSince1970 * 1000)
+            let textEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000, type: "text", detail: nil, data: ["content": .string(cleanText)])
             if targetSid == sessionId {
                 self.messages.append(assistantMsg)
                 self.streamingText = ""
+                self.sdkEvents.append(textEvent)
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) {
                     $0.messages.append(assistantMsg)
                     $0.streamingText = ""
+                    $0.sdkEvents.append(textEvent)
                 }
             }
         case "thinking":
@@ -510,15 +535,20 @@ class WebSocketService: ObservableObject {
                   let textMsg = (json["thinking"] as? String) ?? (json["text"] as? String) else { break }
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
+            let thinkEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000, type: "thinking", detail: nil, data: ["content": .string(textMsg)])
             if targetSid == sessionId {
                 if let lastIdx = self.messages.lastIndex(where: { $0.role == "assistant" }) {
                     self.messages[lastIdx].thinking = (self.messages[lastIdx].thinking ?? "") + textMsg
                 }
+                self.streamingThinking = ""
+                self.sdkEvents.append(thinkEvent)
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) {
                     if let lastIdx = $0.messages.lastIndex(where: { $0.role == "assistant" }) {
                         $0.messages[lastIdx].thinking = ($0.messages[lastIdx].thinking ?? "") + textMsg
                     }
+                    $0.streamingThinking = ""
+                    $0.sdkEvents.append(thinkEvent)
                 }
             }
         case "tool_use":
@@ -536,6 +566,17 @@ class WebSocketService: ObservableObject {
             let toolCalls = [toolCall]
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
+            // Serialize input to JSON string for SdkEvent (MessageModeToolUseView expects a string)
+            var inputStr = ""
+            if let inputData = try? JSONEncoder().encode(inputValue),
+               let str = String(data: inputData, encoding: .utf8) {
+                inputStr = str
+            }
+            let toolEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000, type: "tool_use", detail: toolName, data: [
+                "toolName": .string(toolName),
+                "toolId": .string(toolId),
+                "input": .string(inputStr),
+            ])
             if targetSid == sessionId {
                 if let lastIdx = self.messages.lastIndex(where: { $0.role == "system" }), self.messages[lastIdx].toolCalls != nil {
                     self.messages[lastIdx].toolCalls?.append(contentsOf: toolCalls)
@@ -543,6 +584,7 @@ class WebSocketService: ObservableObject {
                     let msg = ChatMessage(id: UUID().uuidString, role: "system", content: "", toolCalls: toolCalls, timestamp: Date().timeIntervalSince1970 * 1000)
                     self.messages.append(msg)
                 }
+                self.sdkEvents.append(toolEvent)
                 // Update Live Activity with tool name and detail
                 let toolDetail = Self.extractToolDetail(toolName: toolName, input: json["input"])
                 self.currentToolDetail = toolDetail
@@ -560,6 +602,7 @@ class WebSocketService: ObservableObject {
                         let msg = ChatMessage(id: UUID().uuidString, role: "system", content: "", toolCalls: toolCalls, timestamp: Date().timeIntervalSince1970 * 1000)
                         $0.messages.append(msg)
                     }
+                    $0.sdkEvents.append(toolEvent)
                 }
             }
         case "tool_result":
@@ -570,6 +613,10 @@ class WebSocketService: ObservableObject {
             let isError = json["isError"] as? Bool ?? false
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
+            let resultEvent = SdkEvent(ts: Date().timeIntervalSince1970 * 1000, type: "tool_result", detail: nil, data: [
+                "content": .string(result),
+                "isError": .bool(isError),
+            ])
             if targetSid == sessionId {
                 for i in 0..<self.messages.count {
                     if let tcs = self.messages[i].toolCalls, let tIdx = tcs.firstIndex(where: { $0.id == toolId }) {
@@ -578,6 +625,7 @@ class WebSocketService: ObservableObject {
                         break
                     }
                 }
+                self.sdkEvents.append(resultEvent)
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) {
                     for i in 0..<$0.messages.count {
@@ -587,6 +635,7 @@ class WebSocketService: ObservableObject {
                             break
                         }
                     }
+                    $0.sdkEvents.append(resultEvent)
                 }
             }
         case "ask_user_question":
