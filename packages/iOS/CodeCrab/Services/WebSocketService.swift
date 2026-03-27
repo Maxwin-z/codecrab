@@ -19,6 +19,20 @@ struct QueueItem: Identifiable, Equatable {
     var id: String { queryId }
 }
 
+struct BackgroundTask: Equatable {
+    let taskId: String
+    var status: String  // "started" | "progress" | "completed" | "failed" | "stopped"
+    var description: String?
+    var summary: String?
+    var usage: BackgroundTaskUsage?
+}
+
+struct BackgroundTaskUsage: Equatable {
+    var totalTokens: Int?
+    var toolUses: Int?
+    var durationMs: Double?
+}
+
 // Per-session state (isolated per session within a project)
 struct SessionChatState {
     var messages: [ChatMessage] = []
@@ -28,6 +42,14 @@ struct SessionChatState {
     var latestSummary: String? = nil
     var suggestions: [String] = []
     var pendingQuestion: PendingQuestion? = nil
+    var status: String = "idle"  // "idle" | "processing" | "error"
+    var providerId: String? = nil
+    var permissionMode: String = "bypassPermissions"
+    var isStreaming: Bool = false
+    var pendingPermission: PendingPermission? = nil
+    var activityHeartbeat: ActivityHeartbeat? = nil
+    var usage: SessionUsage? = nil
+    var backgroundTasks: [String: BackgroundTask] = [:]
 }
 
 // Per-project state (contains per-session state cache)
@@ -159,7 +181,15 @@ class WebSocketService: ObservableObject {
             sdkEvents: sdkEvents,
             latestSummary: latestSummary,
             suggestions: suggestions,
-            pendingQuestion: pendingQuestion
+            pendingQuestion: pendingQuestion,
+            status: projectStates[pid]?.sessionStates[sessionId]?.status ?? "idle",
+            providerId: projectStates[pid]?.sessionStates[sessionId]?.providerId,
+            permissionMode: permissionMode,
+            isStreaming: projectStates[pid]?.sessionStates[sessionId]?.isStreaming ?? false,
+            pendingPermission: pendingPermission,
+            activityHeartbeat: activityHeartbeat,
+            usage: sessionUsage,
+            backgroundTasks: projectStates[pid]?.sessionStates[sessionId]?.backgroundTasks ?? [:]
         )
     }
 
@@ -172,6 +202,9 @@ class WebSocketService: ObservableObject {
         latestSummary = state.latestSummary
         suggestions = state.suggestions
         pendingQuestion = state.pendingQuestion
+        pendingPermission = state.pendingPermission
+        activityHeartbeat = state.activityHeartbeat
+        sessionUsage = state.usage
     }
 
     /// Clear per-session @Published properties
@@ -183,6 +216,9 @@ class WebSocketService: ObservableObject {
         latestSummary = nil
         suggestions = []
         pendingQuestion = nil
+        pendingPermission = nil
+        activityHeartbeat = nil
+        sessionUsage = nil
     }
 
     private func ensureProjectState(_ projectId: String) {
@@ -352,17 +388,24 @@ class WebSocketService: ObservableObject {
                     projectName: activeProjectName,
                     projectIcon: activeProjectIcon
                 )
-                // Clear summary/suggestions for the session that's starting a query
+                // Set session status and clear streaming buffers
                 let targetSid = msgSessionId ?? sessionId
                 if !targetSid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: targetSid) {
+                        $0.status = "processing"
+                        $0.isStreaming = true
+                        $0.streamingText = ""
+                        $0.streamingThinking = ""
+                        $0.pendingPermission = nil
+                        $0.pendingQuestion = nil
+                        $0.latestSummary = nil
+                        $0.suggestions = []
+                    }
                     if targetSid == sessionId {
                         self.latestSummary = nil
                         self.suggestions = []
-                    } else {
-                        modifySessionState(projectId: pid, sessionId: targetSid) {
-                            $0.latestSummary = nil
-                            $0.suggestions = []
-                        }
+                        self.pendingPermission = nil
+                        self.pendingQuestion = nil
                     }
                 }
             }
@@ -404,6 +447,19 @@ class WebSocketService: ObservableObject {
                             sState.streamingThinking = ""
                         }
                     }
+                    // Register background tasks if any
+                    if let hasBackground = json["hasBackgroundTasks"] as? Bool, hasBackground,
+                       let taskIds = json["backgroundTaskIds"] as? [String] {
+                        modifySessionState(projectId: pid, sessionId: targetSid) { sState in
+                            for taskId in taskIds {
+                                if sState.backgroundTasks[taskId] == nil {
+                                    sState.backgroundTasks[taskId] = BackgroundTask(taskId: taskId, status: "started")
+                                }
+                            }
+                        }
+                    }
+                    // Clear heartbeat in session state
+                    modifySessionState(projectId: pid, sessionId: targetSid) { $0.activityHeartbeat = nil }
                 }
             }
         case "stream_delta":
@@ -432,9 +488,12 @@ class WebSocketService: ObservableObject {
             }
         case "assistant_text":
             guard let pid = projectId, isCurrentProject, let textMsg = json["text"] as? String else { break }
+            // Skip sub-agent text (has parentToolUseId)
+            if let parent = json["parentToolUseId"], !(parent is NSNull) { break }
+            let cleanText = self.cleanStreamingText(textMsg)
+            guard !cleanText.isEmpty else { break }
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
-            let cleanText = self.cleanStreamingText(textMsg)
             let assistantMsg = ChatMessage(id: UUID().uuidString, role: "assistant", content: cleanText, timestamp: Date().timeIntervalSince1970 * 1000)
             if targetSid == sessionId {
                 self.messages.append(assistantMsg)
@@ -546,11 +605,19 @@ class WebSocketService: ObservableObject {
             if isCurrentProject, let reqData = try? JSONSerialization.data(withJSONObject: json) {
                 if let req = try? JSONDecoder().decode(PendingPermission.self, from: reqData) {
                     self.pendingPermission = req
+                    // Also track at session level
+                    if let pid = projectId, let sid = msgSessionId, !sid.isEmpty {
+                        modifySessionState(projectId: pid, sessionId: sid) { $0.pendingPermission = req }
+                    }
                 }
             }
         case "permission_resolved":
             if isCurrentProject {
                 self.pendingPermission = nil
+                // Also track at session level
+                if let pid = projectId, let sid = msgSessionId, !sid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: sid) { $0.pendingPermission = nil }
+                }
             }
         case "question_resolved":
             if isCurrentProject {
@@ -580,8 +647,20 @@ class WebSocketService: ObservableObject {
                 pendingTempSessionId = nil
             }
         case "session_created":
-            // New session created on server-v2 (e.g. after provider change)
-            break
+            // Auto-update viewing session if current is temp/pending
+            if isCurrentProject, let pid = projectId, let sid = json["sessionId"] as? String {
+                let currentVid = self.sessionId
+                if currentVid.isEmpty || currentVid.hasPrefix("temp-") || currentVid.hasPrefix("pending-") {
+                    self.sessionId = sid
+                    ensureProjectState(pid)
+                    projectStates[pid]!.sessionId = sid
+                    // Move cached session state from temp ID to real ID
+                    if !currentVid.isEmpty, let cached = projectStates[pid]?.sessionStates[currentVid] {
+                        projectStates[pid]!.sessionStates[sid] = cached
+                        projectStates[pid]!.sessionStates.removeValue(forKey: currentVid)
+                    }
+                }
+            }
         case "prompt_received":
             // Sync ack from server-v2 — prompt was accepted
             break
@@ -598,6 +677,7 @@ class WebSocketService: ObservableObject {
                 // Update providerId from resumed session
                 if let providerId = json["providerId"] as? String, !providerId.isEmpty {
                     self.currentProviderId = providerId
+                    modifySessionState(projectId: pid, sessionId: sid) { $0.providerId = providerId }
                 }
                 // Fetch session history via HTTP (server no longer sends it over WS)
                 fetchSessionHistory(sessionId: sid)
@@ -634,6 +714,8 @@ class WebSocketService: ObservableObject {
                     if let pid = projectId {
                         ensureProjectState(pid)
                         projectStates[pid]!.sessionId = sid
+                        // Track providerId at session level
+                        modifySessionState(projectId: pid, sessionId: sid) { $0.providerId = providerId }
                     }
                     clearSessionPublished()
                 }
@@ -646,6 +728,12 @@ class WebSocketService: ObservableObject {
         case "permission_mode_changed":
             if isCurrentProject, let mode = json["mode"] as? String {
                 self.permissionMode = mode
+                // Also track at session level
+                if let pid = projectId, let sid = msgSessionId, !sid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: sid) {
+                        $0.permissionMode = mode
+                    }
+                }
             }
         case "cwd_changed":
             if isCurrentProject, let dir = json["cwd"] as? String {
@@ -660,6 +748,13 @@ class WebSocketService: ObservableObject {
                     self.messages.append(errorChatMsg)
                 } else if !targetSid.isEmpty {
                     modifySessionState(projectId: pid, sessionId: targetSid) { $0.messages.append(errorChatMsg) }
+                }
+                // Update session status
+                if !targetSid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: targetSid) {
+                        $0.isStreaming = false
+                        $0.status = "idle"
+                    }
                 }
             }
             runningProjectIds.remove(pid)
@@ -697,8 +792,18 @@ class WebSocketService: ObservableObject {
             let targetSid = msgSessionId ?? sessionId
             if !targetSid.isEmpty && targetSid == sessionId {
                 self.messages.append(resultMsg)
+                self.streamingText = ""
+                self.streamingThinking = ""
             } else if !targetSid.isEmpty {
                 modifySessionState(projectId: pid, sessionId: targetSid) { $0.messages.append(resultMsg) }
+            }
+            // Update session streaming state
+            if !targetSid.isEmpty {
+                modifySessionState(projectId: pid, sessionId: targetSid) {
+                    $0.isStreaming = false
+                    $0.streamingText = ""
+                    $0.streamingThinking = ""
+                }
             }
         case "query_summary":
             guard let pid = projectId, isCurrentProject, let summary = json["summary"] as? String else { break }
@@ -754,12 +859,17 @@ class WebSocketService: ObservableObject {
                 let lastToolName = json["lastToolName"] as? String
                 let paused = json["paused"] as? Bool ?? false
                 let serverSnippet = json["textSnippet"] as? String
-                self.activityHeartbeat = ActivityHeartbeat(
+                let heartbeat = ActivityHeartbeat(
                     elapsedMs: elapsedMs,
                     lastActivityType: lastActivityType,
                     lastToolName: lastToolName,
                     paused: paused
                 )
+                self.activityHeartbeat = heartbeat
+                // Also track at session level
+                if let pid = projectId, let sid = msgSessionId, !sid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: sid) { $0.activityHeartbeat = heartbeat }
+                }
                 // Update Live Activity from heartbeat
                 let actType: String
                 if paused {
@@ -806,6 +916,10 @@ class WebSocketService: ObservableObject {
                 self.sessionUsage = usage
                 ensureProjectState(pid)
                 projectStates[pid]!.sessionUsage = usage
+                // Also track at session level
+                if let sid = msgSessionId, !sid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: sid) { $0.usage = usage }
+                }
             }
         case "cron_task_completed":
             guard isCurrentProject else { break }
@@ -888,6 +1002,34 @@ class WebSocketService: ObservableObject {
                     )
                 }
             }
+        case "session_status_changed":
+            guard let pid = projectId, let sid = msgSessionId else { break }
+            let newStatus = json["status"] as? String ?? "idle"
+            modifySessionState(projectId: pid, sessionId: sid) { $0.status = newStatus }
+            if isCurrentProject && sid == sessionId {
+                // No direct @Published for session status — tracked in session state
+            }
+        case "background_task_update":
+            guard let pid = projectId, let sid = msgSessionId else { break }
+            guard let taskId = json["taskId"] as? String else { break }
+            let taskStatus = json["status"] as? String ?? "started"
+            var taskUsage: BackgroundTaskUsage? = nil
+            if let usageDict = json["usage"] as? [String: Any] {
+                taskUsage = BackgroundTaskUsage(
+                    totalTokens: usageDict["totalTokens"] as? Int,
+                    toolUses: usageDict["toolUses"] as? Int,
+                    durationMs: usageDict["durationMs"] as? Double
+                )
+            }
+            modifySessionState(projectId: pid, sessionId: sid) {
+                $0.backgroundTasks[taskId] = BackgroundTask(
+                    taskId: taskId,
+                    status: taskStatus,
+                    description: json["description"] as? String,
+                    summary: json["summary"] as? String,
+                    usage: taskUsage
+                )
+            }
         default:
             break
         }
@@ -911,7 +1053,7 @@ class WebSocketService: ObservableObject {
                 toolCalls = tcArray.compactMap { tc in
                     guard let name = tc["name"] as? String,
                           let tcId = tc["id"] as? String else { return nil }
-                    let resultPreview = tc["resultPreview"] as? String
+                    let result = (tc["result"] as? String) ?? (tc["resultPreview"] as? String)
                     let isError = tc["isError"] as? Bool
                     let input: JSONValue
                     if let inputObj = tc["input"] {
@@ -920,7 +1062,7 @@ class WebSocketService: ObservableObject {
                         let inputSummary = tc["inputSummary"] as? String ?? ""
                         input = .string(inputSummary)
                     }
-                    return ToolCall(name: name, id: tcId, input: input, result: resultPreview, isError: isError)
+                    return ToolCall(name: name, id: tcId, input: input, result: result, isError: isError)
                 }
             }
 

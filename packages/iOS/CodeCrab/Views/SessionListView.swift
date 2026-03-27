@@ -15,6 +15,7 @@ struct SessionListView: View {
     @State private var sessions: [SessionInfo] = []
     @State private var isLoading = false
     @State private var now = Date()
+    @State private var providerNames: [String: String] = [:]
 
     let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     let refreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -65,7 +66,7 @@ struct SessionListView: View {
                         (Date().timeIntervalSince1970 * 1000 - session.lastModified) < 600_000
 
                     NavigationLink(value: ChatRoute(project: project, sessionId: session.sessionId)) {
-                        SessionRowView(session: session, now: now, isProcessing: isProcessing, isRecentlyActive: isRecentlyActive)
+                        SessionRowView(session: session, now: now, isProcessing: isProcessing, isRecentlyActive: isRecentlyActive, providerName: session.providerId.flatMap { providerNames[$0] })
                     }
                 }
             }
@@ -86,6 +87,7 @@ struct SessionListView: View {
         }
         .task {
             await fetchSessions()
+            await fetchProviders()
         }
         .onReceive(timer) { _ in
             now = Date()
@@ -110,6 +112,30 @@ struct SessionListView: View {
         }
         if !silent { isLoading = false }
     }
+
+    private func fetchProviders() async {
+        do {
+            guard let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url"),
+                  let url = URL(string: "\(serverURL)/api/setup/providers") else { return }
+            var request = URLRequest(url: url)
+            if let token = KeychainHelper.shared.getToken() {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else { return }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let providers = json["providers"] as? [[String: Any]] else { return }
+            var names: [String: String] = [:]
+            for provider in providers {
+                if let id = provider["id"] as? String, let name = provider["name"] as? String {
+                    names[id] = name
+                }
+            }
+            self.providerNames = names
+        } catch {
+            print("Failed to fetch providers: \(error)")
+        }
+    }
 }
 
 // MARK: - Session Row
@@ -119,6 +145,7 @@ struct SessionRowView: View {
     let now: Date
     var isProcessing: Bool = false
     var isRecentlyActive: Bool = false
+    var providerName: String? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -152,6 +179,11 @@ struct SessionRowView: View {
                     Text("•")
                     Text(String(session.sessionId.suffix(6)))
                         .fontDesign(.monospaced)
+                    if let name = providerName {
+                        Text("·")
+                        Text(name)
+                            .lineLimit(1)
+                    }
                 }
                 .font(.caption)
                 .foregroundColor(.secondary)
