@@ -418,8 +418,15 @@ export class ClaudeAgent implements AgentInterface {
         })
 
         // Block until resolved
+        // SDK Zod schema requires updatedInput (record) for allow, message (string) for deny
         return new Promise<{ behavior: string; message?: string; updatedInput?: unknown }>((resolve) => {
-          this.permissionResolvers.set(requestId, resolve as any)
+          this.permissionResolvers.set(requestId, (result: { behavior: 'allow' | 'deny'; message?: string; updatedInput?: unknown }) => {
+            if (result.behavior === 'allow') {
+              resolve({ behavior: 'allow', updatedInput: result.updatedInput ?? input })
+            } else {
+              resolve({ behavior: 'deny', message: result.message || 'Permission denied by user' })
+            }
+          })
 
           // Resolve on abort
           const onAbort = () => {
