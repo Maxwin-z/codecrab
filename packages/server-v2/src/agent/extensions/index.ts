@@ -8,6 +8,7 @@ import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { tools as chromeTools } from './chrome/tools.js'
 import { tools as cronTools } from './cron/tools.js'
 import { tools as pushTools } from './push/tools.js'
+import { isApnsConfigured } from '../../push/apns.js'
 
 export interface McpExtension {
   id: string
@@ -60,13 +61,15 @@ export function getAvailableExtensions(): Array<{
   icon: string
   toolCount: number
 }> {
-  return extensions.map((ext) => ({
-    id: ext.id,
-    name: ext.name,
-    description: ext.description,
-    icon: ext.icon,
-    toolCount: ext.tools.length,
-  }))
+  return extensions
+    .filter((ext) => ext.id !== 'push' || isApnsConfigured())
+    .map((ext) => ({
+      id: ext.id,
+      name: ext.name,
+      description: ext.description,
+      icon: ext.icon,
+      toolCount: ext.tools.length,
+    }))
 }
 
 /**
@@ -79,6 +82,9 @@ export function buildExtensionServers(enabledMcps?: string[]): Record<string, un
   for (const ext of extensions) {
     // If enabledMcps not specified, enable all; otherwise check list
     if (!enabledMcps || enabledMcps.includes(ext.id)) {
+      // Skip push extension when APNs is not configured
+      if (ext.id === 'push' && !isApnsConfigured()) continue
+
       // Only create server if extension has tools
       if (ext.tools.length > 0) {
         servers[ext.id] = createSdkMcpServer({
