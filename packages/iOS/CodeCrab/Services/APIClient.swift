@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let apiUnauthorized = Notification.Name("APIClient.unauthorized")
+}
+
 class APIClient {
     static let shared = APIClient()
     private let session: URLSession
@@ -65,12 +69,13 @@ class APIClient {
             throw APIError.invalidURL
         }
         if httpResponse.statusCode == 401 {
+            NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
             throw APIError.unauthorized
         }
         guard (200...299).contains(httpResponse.statusCode) else {
             throw APIError.httpError(httpResponse.statusCode)
         }
-        
+
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
@@ -85,6 +90,7 @@ class APIClient {
             throw APIError.invalidURL
         }
         if httpResponse.statusCode == 401 {
+            NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
             throw APIError.unauthorized
         }
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -113,6 +119,7 @@ class APIClient {
             throw APIError.invalidURL
         }
         if httpResponse.statusCode == 401 {
+            NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
             throw APIError.unauthorized
         }
         guard (200...299).contains(httpResponse.statusCode) else {

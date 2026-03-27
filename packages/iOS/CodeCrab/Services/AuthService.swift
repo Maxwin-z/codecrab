@@ -6,10 +6,29 @@ import SwiftUI
 class AuthService: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var isLoading: Bool = true
-    
+
     private let serverURLKey = "codecrab_server_url"
     private let serverHistoryKey = "codecrab_server_history"
     private let maxHistoryCount = 10
+    private var unauthorizedObserver: Any?
+
+    init() {
+        unauthorizedObserver = NotificationCenter.default.addObserver(
+            forName: .apiUnauthorized,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.isAuthenticated = false
+            }
+        }
+    }
+
+    deinit {
+        if let observer = unauthorizedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
     
     func getToken() -> String? {
         return KeychainHelper.shared.getToken()
