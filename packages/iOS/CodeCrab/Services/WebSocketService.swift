@@ -38,7 +38,7 @@ struct ProjectChatState {
     var pendingPermission: PendingPermission? = nil
     var isAborting: Bool = false
     var cwd: String = ""
-    var currentModel: String = ""
+    var currentProviderId: String = ""
     var permissionMode: String = "bypassPermissions"
     var sdkMcpServers: [SdkMcpServer] = []
     var sdkSkills: [SdkSkill] = []
@@ -112,7 +112,7 @@ class WebSocketService: ObservableObject {
     @Published var pendingPermission: PendingPermission? = nil
     @Published var sessionId: String = ""
     @Published var cwd: String = ""
-    @Published var currentModel: String = ""
+    @Published var currentProviderId: String = ""
     @Published var permissionMode: String = "bypassPermissions"
     @Published var sdkMcpServers: [SdkMcpServer] = []
     @Published var sdkSkills: [SdkSkill] = []
@@ -122,6 +122,9 @@ class WebSocketService: ObservableObject {
     @Published var sessionUsage: SessionUsage? = nil
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
+
+    /// Temp session ID for correlating new session creation on server-v2
+    private var pendingTempSessionId: String? = nil
 
     private var activeProjectId: String? = nil
     private var activeProjectName: String = ""
@@ -204,6 +207,7 @@ class WebSocketService: ObservableObject {
             guard !self.connected else { return }
             guard let serverURLStr = UserDefaults.standard.string(forKey: "codecrab_server_url"),
                   let token = KeychainHelper.shared.getToken() else { return }
+            self.reconnectAttempts = 0
 
             let wsURLStr = serverURLStr.replacingOccurrences(of: "http://", with: "ws://")
                                        .replacingOccurrences(of: "https://", with: "wss://")
@@ -235,8 +239,16 @@ class WebSocketService: ObservableObject {
         }
     }
 
+    private var reconnectAttempts = 0
+
     private func reconnect() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        // Don't reconnect if token was cleared (logged out)
+        guard KeychainHelper.shared.getToken() != nil else { return }
+
+        let delay = min(2.0 * pow(2.0, Double(reconnectAttempts)), 30.0)
+        reconnectAttempts += 1
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, !self.connected else { return }
             self.connect()
         }
@@ -248,6 +260,8 @@ class WebSocketService: ObservableObject {
                 guard let self else { return }
                 switch result {
                 case .success(let message):
+                    // Connection is healthy — reset backoff
+                    self.reconnectAttempts = 0
                     switch message {
                     case .string(let text):
                         self.handleMessage(text)
@@ -259,8 +273,18 @@ class WebSocketService: ObservableObject {
                         break
                     }
                     self.receiveLoop()
-                case .failure(_):
+                case .failure(let error):
                     self.connected = false
+                    self.webSocketTask = nil
+
+                    // -1011 = NSURLErrorBadServerResponse (401 during WS handshake)
+                    let nsError = error as NSError
+                    if nsError.code == -1011 {
+                        print("[WebSocket] Auth rejected — stopping reconnect")
+                        NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
+                        return
+                    }
+
                     self.reconnect()
                 }
             }
@@ -422,7 +446,9 @@ class WebSocketService: ObservableObject {
                 }
             }
         case "thinking":
-            guard let pid = projectId, isCurrentProject, let textMsg = json["text"] as? String else { break }
+            // server-v2 sends "thinking", legacy sends "text"
+            guard let pid = projectId, isCurrentProject,
+                  let textMsg = (json["thinking"] as? String) ?? (json["text"] as? String) else { break }
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
             if targetSid == sessionId {
@@ -479,7 +505,9 @@ class WebSocketService: ObservableObject {
             }
         case "tool_result":
             guard let pid = projectId, isCurrentProject else { break }
-            guard let toolId = json["toolId"] as? String, let result = json["result"] as? String else { break }
+            // server-v2 sends "content", legacy server sends "result"
+            guard let toolId = json["toolId"] as? String,
+                  let result = (json["content"] as? String) ?? (json["result"] as? String) else { break }
             let isError = json["isError"] as? Bool ?? false
             let targetSid = msgSessionId ?? sessionId
             guard !targetSid.isEmpty else { break }
@@ -520,6 +548,43 @@ class WebSocketService: ObservableObject {
                     self.pendingPermission = req
                 }
             }
+        case "permission_resolved":
+            if isCurrentProject {
+                self.pendingPermission = nil
+            }
+        case "question_resolved":
+            if isCurrentProject {
+                let targetSid = msgSessionId ?? sessionId
+                if !targetSid.isEmpty && targetSid == sessionId {
+                    self.pendingQuestion = nil
+                } else if let pid = projectId, !targetSid.isEmpty {
+                    modifySessionState(projectId: pid, sessionId: targetSid) { $0.pendingQuestion = nil }
+                }
+            }
+        case "session_id_resolved":
+            // Map tempSessionId → real sessionId from server-v2
+            if isCurrentProject, let pid = projectId,
+               let realSid = json["sessionId"] as? String,
+               let tempSid = json["tempSessionId"] as? String {
+                // If we're viewing the temp session, switch to the real ID
+                if self.sessionId == tempSid {
+                    self.sessionId = realSid
+                    ensureProjectState(pid)
+                    projectStates[pid]!.sessionId = realSid
+                    // Move cached session state from temp ID to real ID
+                    if let cached = projectStates[pid]?.sessionStates[tempSid] {
+                        projectStates[pid]!.sessionStates[realSid] = cached
+                        projectStates[pid]!.sessionStates.removeValue(forKey: tempSid)
+                    }
+                }
+                pendingTempSessionId = nil
+            }
+        case "session_created":
+            // New session created on server-v2 (e.g. after provider change)
+            break
+        case "prompt_received":
+            // Sync ack from server-v2 — prompt was accepted
+            break
         case "session_resumed":
             // Only update viewing session if we're expecting it (user-initiated resume/switch).
             // The server also broadcasts session_resumed during background query execution,
@@ -529,6 +594,10 @@ class WebSocketService: ObservableObject {
                     self.sessionId = sid
                     projectStates[pid]!.sessionId = sid
                     projectStates[pid]!.awaitingSessionSwitch = false
+                }
+                // Update providerId from resumed session
+                if let providerId = json["providerId"] as? String, !providerId.isEmpty {
+                    self.currentProviderId = providerId
                 }
                 // Fetch session history via HTTP (server no longer sends it over WS)
                 fetchSessionHistory(sessionId: sid)
@@ -555,9 +624,24 @@ class WebSocketService: ObservableObject {
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) { $0.messages.append(msg) }
             }
+        case "provider_changed":
+            if isCurrentProject, let providerId = json["providerId"] as? String {
+                self.currentProviderId = providerId
+                // Provider change creates a new session on server-v2
+                if let sid = json["sessionId"] as? String, !sid.isEmpty {
+                    saveCurrentSessionToState()
+                    self.sessionId = sid
+                    if let pid = projectId {
+                        ensureProjectState(pid)
+                        projectStates[pid]!.sessionId = sid
+                    }
+                    clearSessionPublished()
+                }
+            }
+        // Legacy compat: still handle model_changed from older servers
         case "model_changed":
-            if isCurrentProject, let model = json["model"] as? String {
-                self.currentModel = model
+            if isCurrentProject, let _ = json["model"] as? String {
+                // No-op on v2; provider_changed handles this
             }
         case "permission_mode_changed":
             if isCurrentProject, let mode = json["mode"] as? String {
@@ -634,17 +718,8 @@ class WebSocketService: ObservableObject {
             } else {
                 modifySessionState(projectId: pid, sessionId: targetSid) { $0.suggestions = items }
             }
-        case "system":
-            if isCurrentProject, let pid = projectId, let subtype = json["subtype"] as? String, subtype == "init" {
-                if let model = json["model"] as? String { self.currentModel = model }
-                // Only update viewing session if awaiting (switch_project, /clear, reconnect)
-                if let sid = json["sessionId"] as? String, projectStates[pid]?.awaitingSessionSwitch == true {
-                    self.sessionId = sid
-                    projectStates[pid]!.sessionId = sid
-                    projectStates[pid]!.awaitingSessionSwitch = false
-                    // Fetch session history via HTTP (server no longer sends it over WS)
-                    fetchSessionHistory(sessionId: sid)
-                }
+        case "sdk_probe_result":
+            if isCurrentProject {
                 if let tools = json["tools"] as? [String] { self.sdkTools = tools }
                 if let skillsJson = json["sdkSkills"] as? [[String: Any]] {
                     self.sdkSkills = skillsJson.compactMap { s in
@@ -660,6 +735,17 @@ class WebSocketService: ObservableObject {
                         return SdkMcpServer(name: name, status: status)
                     }
                 }
+            }
+        // Legacy compat: still handle system init from older servers
+        case "system":
+            if isCurrentProject, let pid = projectId, let subtype = json["subtype"] as? String, subtype == "init" {
+                if let sid = json["sessionId"] as? String, projectStates[pid]?.awaitingSessionSwitch == true {
+                    self.sessionId = sid
+                    projectStates[pid]!.sessionId = sid
+                    projectStates[pid]!.awaitingSessionSwitch = false
+                    fetchSessionHistory(sessionId: sid)
+                }
+                if let tools = json["tools"] as? [String] { self.sdkTools = tools }
             }
         case "activity_heartbeat":
             if isCurrentProject {
@@ -892,29 +978,14 @@ class WebSocketService: ObservableObject {
         return .null
     }
 
-    /// Fetch session history via HTTP with incremental support.
-    /// If the session has cached data, sends afterTurn to only fetch new turns.
+    /// Fetch session history via HTTP.
+    /// Server-v2 returns {sessionId, messages: ChatMessage[]}
     private func fetchSessionHistory(sessionId sid: String) {
         Task { @MainActor in
             do {
                 guard let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url") else { return }
 
-                // Find last cached user message timestamp for incremental fetch
-                let cachedMessages: [ChatMessage]
-                if sid == self.sessionId {
-                    cachedMessages = self.messages
-                } else if let pid = self.activeProjectId,
-                          let state = projectStates[pid]?.sessionStates[sid] {
-                    cachedMessages = state.messages
-                } else {
-                    cachedMessages = []
-                }
-                let lastUserTs = cachedMessages.last(where: { $0.role == "user" })?.timestamp
-
-                var urlStr = "\(serverURL)/api/sessions/\(sid)/history"
-                if let ts = lastUserTs {
-                    urlStr += "?afterTurn=\(Int(ts))"
-                }
+                let urlStr = "\(serverURL)/api/sessions/\(sid)/history"
                 guard let url = URL(string: urlStr) else { return }
 
                 var request = URLRequest(url: url)
@@ -926,79 +997,14 @@ class WebSocketService: ObservableObject {
                 guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else { return }
                 guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
-                let isIncremental = lastUserTs != nil
-                let processingTurnTs = json["processingTurnTimestamp"] as? Double
-
-                // Parse and merge messages.
-                // When the server returns an in-progress turn (processingTurnTimestamp),
-                // remove any cached messages at or after that timestamp before merging,
-                // so the API snapshot replaces partial WebSocket data for the current turn.
                 if let messagesJson = json["messages"] as? [[String: Any]], !messagesJson.isEmpty {
                     let newMessages = parseMessageHistory(messagesJson)
                     if sid == self.sessionId {
-                        if isIncremental {
-                            // Replace messages from the latest queried turn onwards with fresh server data.
-                            // The server returns turns with ts >= afterTurn, so discard cached messages
-                            // from that point to avoid duplicates and ensure the latest turn is complete.
-                            let cutoffTs = lastUserTs ?? 0
-                            self.messages = self.messages.filter { $0.timestamp < cutoffTs } + newMessages
-                            if processingTurnTs != nil {
-                                self.streamingText = ""
-                                self.streamingThinking = ""
-                            }
-                        } else {
-                            self.messages = newMessages
-                        }
+                        self.messages = newMessages
                     } else if let pid = self.activeProjectId {
                         modifySessionState(projectId: pid, sessionId: sid) {
-                            if isIncremental {
-                                let cutoffTs = lastUserTs ?? 0
-                                $0.messages = $0.messages.filter { $0.timestamp < cutoffTs } + newMessages
-                                if processingTurnTs != nil {
-                                    $0.streamingText = ""
-                                    $0.streamingThinking = ""
-                                }
-                            } else {
-                                $0.messages = newMessages
-                            }
+                            $0.messages = newMessages
                         }
-                    }
-                }
-
-                // Parse and merge SDK events.
-                // Same logic: replace events from in-progress turn with the latest snapshot.
-                if let eventsArray = json["sdkEvents"] as? [[String: Any]], !eventsArray.isEmpty {
-                    let newEvents = eventsArray.compactMap { parseSdkEvent($0) }
-                    if sid == self.sessionId {
-                        if isIncremental {
-                            // Replace events from the latest queried turn onwards to ensure completeness.
-                            let cutoffTs = lastUserTs ?? 0
-                            self.sdkEvents = self.sdkEvents.filter { $0.ts < cutoffTs } + newEvents
-                        } else {
-                            self.sdkEvents = newEvents
-                        }
-                    } else if let pid = self.activeProjectId {
-                        modifySessionState(projectId: pid, sessionId: sid) {
-                            if isIncremental {
-                                let cutoffTs = lastUserTs ?? 0
-                                $0.sdkEvents = $0.sdkEvents.filter { $0.ts < cutoffTs } + newEvents
-                            } else {
-                                $0.sdkEvents = newEvents
-                            }
-                        }
-                    }
-                }
-
-                // Summary and suggestions reflect latest state, but only when
-                // no query is actively running. During an active query the summary
-                // has already been cleared by query_start; restoring the stale
-                // value from the HTTP response would flash the old banner.
-                if sid == self.sessionId && !self.isRunning {
-                    if let summary = json["summary"] as? String, !summary.isEmpty {
-                        self.latestSummary = summary
-                    }
-                    if let suggestions = json["suggestions"] as? [String], !suggestions.isEmpty {
-                        self.suggestions = suggestions
                     }
                 }
             } catch {
@@ -1127,9 +1133,21 @@ class WebSocketService: ObservableObject {
         var payload: [String: Any] = [
             "type": "prompt",
             "prompt": text,
-            "projectId": projectId,
-            "sessionId": sessionId
+            "projectId": projectId
         ]
+
+        // If no sessionId yet, generate a tempSessionId for new session creation (server-v2)
+        if sessionId.isEmpty {
+            let tempId = "temp-\(Int(Date().timeIntervalSince1970 * 1000))-\(Int.random(in: 1000...9999))"
+            payload["tempSessionId"] = tempId
+            pendingTempSessionId = tempId
+            // Set the temp ID as our viewing session immediately
+            self.sessionId = tempId
+            ensureProjectState(projectId)
+            projectStates[projectId]!.sessionId = tempId
+        } else {
+            payload["sessionId"] = sessionId
+        }
         if let images = images, !images.isEmpty, let imgData = try? JSONEncoder().encode(images), let imgJson = try? JSONSerialization.jsonObject(with: imgData) {
             payload["images"] = imgJson
         }
@@ -1222,11 +1240,11 @@ class WebSocketService: ObservableObject {
         ])
     }
 
-    func setModel(_ model: String) {
+    func setProvider(_ providerId: String) {
         guard let projectId = activeProjectId else { return }
         sendWebSocketMessage([
-            "type": "set_model",
-            "model": model,
+            "type": "set_provider",
+            "providerId": providerId,
             "projectId": projectId,
             "sessionId": sessionId
         ])
@@ -1352,7 +1370,7 @@ class WebSocketService: ObservableObject {
             projectStates[current]!.pendingPermission = pendingPermission
             projectStates[current]!.isAborting = isAborting
             projectStates[current]!.cwd = self.cwd
-            projectStates[current]!.currentModel = currentModel
+            projectStates[current]!.currentProviderId = currentProviderId
             projectStates[current]!.permissionMode = permissionMode
             projectStates[current]!.sdkMcpServers = sdkMcpServers
             projectStates[current]!.sdkSkills = sdkSkills
@@ -1373,7 +1391,7 @@ class WebSocketService: ObservableObject {
         pendingPermission = state.pendingPermission
         isAborting = state.isAborting
         self.cwd = state.cwd.isEmpty ? (cwd ?? "") : state.cwd
-        currentModel = state.currentModel
+        currentProviderId = state.currentProviderId
         permissionMode = state.permissionMode
         sdkMcpServers = state.sdkMcpServers
         sdkSkills = state.sdkSkills
@@ -1398,12 +1416,21 @@ class WebSocketService: ObservableObject {
     }
 
     func newChat() {
-        if let pid = activeProjectId {
-            // Save current session before clearing
-            saveCurrentSessionToState()
-            ensureProjectState(pid)
-            projectStates[pid]!.awaitingSessionSwitch = true
-        }
-        sendCommand("/clear")
+        guard let pid = activeProjectId else { return }
+        // Save current session before starting new one
+        saveCurrentSessionToState()
+        ensureProjectState(pid)
+        // Clear local state for new session
+        self.sessionId = ""
+        projectStates[pid]!.sessionId = ""
+        clearSessionPublished()
+        self.pendingPermission = nil
+        self.sessionUsage = nil
+        projectStates[pid]!.sessionUsage = nil
+        // Tell server to clear session binding (next prompt will create new session via tempSessionId)
+        sendWebSocketMessage([
+            "type": "new_session",
+            "projectId": pid
+        ])
     }
 }

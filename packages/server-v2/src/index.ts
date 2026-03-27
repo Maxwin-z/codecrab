@@ -1,9 +1,26 @@
+import { createRequire } from 'node:module'
+import { networkInterfaces } from 'node:os'
 import { ClaudeAgent } from './agent/index.js'
 import { CoreEngine } from './core/index.js'
 import { setupGateway } from './gateway/index.js'
 import { initSoul } from './soul/agent.js'
 import { initCronScheduler } from './cron/scheduler.js'
 import { ensureToken } from './gateway/auth.js'
+
+const require = createRequire(import.meta.url)
+const qrcode = require('qrcode-terminal')
+
+function getLocalIP(): string {
+  const nets = networkInterfaces()
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]!) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address
+      }
+    }
+  }
+  return '127.0.0.1'
+}
 
 const PORT = parseInt(process.env.PORT || '4200', 10)
 
@@ -31,8 +48,16 @@ async function main(): Promise<void> {
 
   // 6. Start server
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[CodeCrab v2] Server listening on http://0.0.0.0:${PORT}`)
+    const localIP = getLocalIP()
+    const serverURL = `http://${localIP}:${PORT}`
+    const qrContent = `codecrab://login?server=${encodeURIComponent(serverURL)}&token=${token}`
+
+    console.log(`[CodeCrab v2] Server listening on ${serverURL}`)
     console.log(`[CodeCrab v2] Access token: ${token}`)
+    console.log('')
+    console.log('[CodeCrab v2] Scan QR code to connect:')
+    qrcode.generate(qrContent, { small: true })
+    console.log('')
   })
 
   // Graceful shutdown

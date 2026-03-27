@@ -1,13 +1,17 @@
 import Foundation
 
-struct ModelConfig: Codable, Identifiable {
+/// Provider configuration — matches server-v2 ProviderConfig
+struct ProviderConfig: Codable, Identifiable {
     let id: String
     let name: String
-    let provider: String
-    let configDir: String?
+    let provider: String        // "anthropic" | "openai" | "google" | "custom"
     let apiKey: String?
+    let modelId: String?
     let baseUrl: String?
 }
+
+/// Backward compat alias
+typealias ModelConfig = ProviderConfig
 
 struct ModelInfo: Codable, Equatable {
     let value: String

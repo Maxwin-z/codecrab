@@ -68,11 +68,11 @@ struct ExecSessionSheet: View {
 
     private func loadSession() async {
         do {
-            let result: SessionMessagesResponse = try await APIClient.shared.fetch(
-                path: "/api/sessions/\(sessionId)/messages"
+            let result: SessionHistoryResponse = try await APIClient.shared.fetch(
+                path: "/api/sessions/\(sessionId)/history"
             )
             self.messages = result.messages
-            self.debugEvents = result.debugEvents
+            self.debugEvents = []
             isLoading = false
         } catch {
             self.error = "Failed to load session: \(error.localizedDescription)"
@@ -83,10 +83,9 @@ struct ExecSessionSheet: View {
 
 // MARK: - Response model
 
-private struct SessionMessagesResponse: Decodable {
+private struct SessionHistoryResponse: Decodable {
     let sessionId: String
     let messages: [ChatMessage]
-    let debugEvents: [SdkEvent]
 }
 
 // Make SdkEvent Decodable for API responses

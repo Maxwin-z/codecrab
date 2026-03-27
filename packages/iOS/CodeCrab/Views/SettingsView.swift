@@ -10,8 +10,8 @@ struct SettingsView: View {
     @EnvironmentObject var auth: AuthService
     @EnvironmentObject var wsService: WebSocketService
 
-    @State private var models: [ModelConfig] = []
-    @State private var defaultModelId: String? = nil
+    @State private var providers: [ProviderConfig] = []
+    @State private var defaultProviderId: String? = nil
     @State private var cliStatus: String = "Checking..."
 
     @State private var showAddModel = false
@@ -88,48 +88,48 @@ struct SettingsView: View {
                 }
             }
 
-            Section(header: Text("Default Model")) {
-                if models.isEmpty {
-                    Text("No models configured")
+            Section(header: Text("Default Provider")) {
+                if providers.isEmpty {
+                    Text("No providers configured")
                         .foregroundColor(.secondary)
                 } else {
-                    Picker("Select Model", selection: Binding(
-                        get: { defaultModelId ?? "" },
+                    Picker("Select Provider", selection: Binding(
+                        get: { defaultProviderId ?? "" },
                         set: { newId in
-                            defaultModelId = newId
-                            setDefaultModel(newId)
+                            defaultProviderId = newId
+                            setDefaultProvider(newId)
                         }
                     )) {
-                        ForEach(models) { model in
-                            Text(model.name).tag(model.id)
+                        ForEach(providers) { provider in
+                            Text(provider.name).tag(provider.id)
                         }
                     }
                 }
             }
-            
-            Section(header: Text("Models")) {
-                ForEach(models) { model in
-                    NavigationLink(destination: ModelEditView(model: model, isNew: false, onSave: fetchModels)) {
+
+            Section(header: Text("Providers")) {
+                ForEach(providers) { provider in
+                    NavigationLink(destination: ProviderEditView(provider: provider, isNew: false, onSave: fetchProviders)) {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(model.name).font(.headline)
-                                Text(model.provider).font(.caption).foregroundColor(.secondary)
+                                Text(provider.name).font(.headline)
+                                Text(provider.provider).font(.caption).foregroundColor(.secondary)
                             }
                             Spacer()
-                            if model.id == defaultModelId {
+                            if provider.id == defaultProviderId {
                                 Image(systemName: "star.fill").foregroundColor(.yellow)
                             }
                         }
                     }
                 }
-                .onDelete(perform: deleteModel)
-                
-                Button("Add Model") {
+                .onDelete(perform: deleteProvider)
+
+                Button("Add Provider") {
                     showAddModel = true
                 }
-                
+
                 Button("Use Claude Code CLI") {
-                    registerCLIModel()
+                    registerCLIProvider()
                 }
             }
         }
@@ -140,25 +140,25 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            fetchModels()
+            fetchProviders()
             checkCLI()
         }
         .sheet(isPresented: $showAddModel) {
             NavigationView {
-                ModelEditView(model: nil, isNew: true, onSave: fetchModels)
+                ProviderEditView(provider: nil, isNew: true, onSave: fetchProviders)
             }
         }
     }
     
-    private func fetchModels() {
+    private func fetchProviders() {
         Task {
             do {
-                struct ModelsResp: Codable { let models: [ModelConfig]; let defaultModelId: String? }
-                let resp: ModelsResp = try await APIClient.shared.fetch(path: "/api/setup/models")
-                self.models = resp.models
-                self.defaultModelId = resp.defaultModelId
+                struct ProvidersResp: Codable { let providers: [ProviderConfig]; let defaultProviderId: String? }
+                let resp: ProvidersResp = try await APIClient.shared.fetch(path: "/api/setup/providers")
+                self.providers = resp.providers
+                self.defaultProviderId = resp.defaultProviderId
             } catch {
-                print("Fetch models error: \(error)")
+                print("Fetch providers error: \(error)")
             }
         }
     }
@@ -166,10 +166,14 @@ struct SettingsView: View {
     private func checkCLI() {
         Task {
             do {
-                struct ProbeResp: Codable { let installed: Bool; let authenticated: Bool; let version: String? }
+                struct AuthInfo: Codable { let loggedIn: Bool; let authMethod: String?; let subscriptionType: String? }
+                struct ProbeResp: Codable { let claudeCodeInstalled: Bool; let cliAvailable: Bool; let cliVersion: String?; let auth: AuthInfo? }
                 let resp: ProbeResp = try await APIClient.shared.fetch(path: "/api/setup/detect/probe")
-                if resp.installed {
-                    cliStatus = "Installed (\(resp.version ?? "unknown"))" + (resp.authenticated ? " - Auth OK" : " - Needs Auth")
+                if resp.cliAvailable {
+                    let authStr = resp.auth?.loggedIn == true ? " - Auth OK" : " - Needs Auth"
+                    cliStatus = "Installed (\(resp.cliVersion ?? "unknown"))" + authStr
+                } else if resp.claudeCodeInstalled {
+                    cliStatus = "Config found, CLI not in PATH"
                 } else {
                     cliStatus = "Not Installed"
                 }
@@ -179,33 +183,33 @@ struct SettingsView: View {
         }
     }
     
-    private func setDefaultModel(_ id: String) {
+    private func setDefaultProvider(_ id: String) {
         Task {
             do {
-                struct Req: Encodable { let modelId: String }
-                try await APIClient.shared.request(path: "/api/setup/default-model", method: "PUT", body: Req(modelId: id))
+                struct Req: Encodable { let providerId: String }
+                try await APIClient.shared.request(path: "/api/setup/default-provider", method: "PUT", body: Req(providerId: id))
             } catch {
-                print("Set default model error: \(error)")
+                print("Set default provider error: \(error)")
             }
         }
     }
-    
-    private func deleteModel(at offsets: IndexSet) {
-        let ids = offsets.map { models[$0].id }
+
+    private func deleteProvider(at offsets: IndexSet) {
+        let ids = offsets.map { providers[$0].id }
         for id in ids {
             Task {
-                try? await APIClient.shared.request(path: "/api/setup/models/\(id)", method: "DELETE")
-                fetchModels()
+                try? await APIClient.shared.request(path: "/api/setup/providers/\(id)", method: "DELETE")
+                fetchProviders()
             }
         }
     }
-    
-    private func registerCLIModel() {
+
+    private func registerCLIProvider() {
         Task {
             do {
                 struct Req: Encodable { let subscriptionType: String? = nil }
                 try await APIClient.shared.request(path: "/api/setup/use-claude", method: "POST", body: Req())
-                fetchModels()
+                fetchProviders()
             } catch {
                 print("Register CLI error: \(error)")
             }
@@ -213,13 +217,13 @@ struct SettingsView: View {
     }
 }
 
-struct ModelEditView: View {
+struct ProviderEditView: View {
     @Environment(\.dismiss) var dismiss
-    
-    let modelId: String?
+
+    let providerId: String?
     let isNew: Bool
     var onSave: () -> Void
-    
+
     @State private var name: String = ""
     @State private var provider: String = "anthropic"
     @State private var apiKey: String = ""
@@ -231,7 +235,7 @@ struct ModelEditView: View {
 
     private let maskedKey: String?
 
-    let providers = ["anthropic", "openai", "google", "custom"]
+    let providerTypes = ["anthropic", "openai", "google", "custom"]
 
     private var apiKeyPlaceholder: String {
         if maskedKey != nil {
@@ -251,27 +255,27 @@ struct ModelEditView: View {
         return prefix + String(repeating: "•", count: 8)
     }
 
-    init(model: ModelConfig?, isNew: Bool, onSave: @escaping () -> Void) {
-        self.modelId = model?.id
+    init(provider config: ProviderConfig?, isNew: Bool, onSave: @escaping () -> Void) {
+        self.providerId = config?.id
         self.isNew = isNew
         self.onSave = onSave
-        let key = model?.apiKey ?? ""
+        let key = config?.apiKey ?? ""
         self.maskedKey = key.isEmpty ? nil : key
-        _name = State(initialValue: model?.name ?? "")
-        _provider = State(initialValue: model?.provider ?? "anthropic")
-        _baseUrl = State(initialValue: model?.baseUrl ?? "")
+        _name = State(initialValue: config?.name ?? "")
+        _provider = State(initialValue: config?.provider ?? "anthropic")
+        _baseUrl = State(initialValue: config?.baseUrl ?? "")
     }
-    
+
     var body: some View {
         Form {
             Section(header: Text("Details")) {
                 TextField("Name", text: $name)
                 Picker("Provider", selection: $provider) {
-                    ForEach(providers, id: \.self) { p in
+                    ForEach(providerTypes, id: \.self) { p in
                         Text(p.capitalized).tag(p)
                     }
                 }
-                
+
                 VStack(alignment: .leading, spacing: 6) {
                     if let masked = maskedKeyDisplay, apiKey.isEmpty {
                         Text(masked)
@@ -303,7 +307,7 @@ struct ModelEditView: View {
                         .autocapitalization(.none)
                 }
             }
-            
+
             Section {
                 Button(action: testKey) {
                     HStack {
@@ -313,10 +317,10 @@ struct ModelEditView: View {
                     }
                 }
                 if !testResult.isEmpty {
-                    Text(testResult).font(.caption).foregroundColor(testResult.contains("✅") || testResult.contains("⏭️") ? .green : .red)
+                    Text(testResult).font(.caption).foregroundColor(testResult.contains("OK") ? .green : .red)
                 }
             }
-            
+
             Section {
                 Button(action: save) {
                     if isSaving {
@@ -329,32 +333,32 @@ struct ModelEditView: View {
                 .disabled(name.isEmpty || isSaving)
             }
         }
-        .navigationTitle(isNew ? "New Model" : "Edit Model")
+        .navigationTitle(isNew ? "New Provider" : "Edit Provider")
         .navigationBarTitleDisplayMode(.inline)
     }
-    
+
     private func testKey() {
-        guard let id = modelId, !isNew else {
-            testResult = "❌ Save model first to test."
+        guard let id = providerId, !isNew else {
+            testResult = "Save provider first to test."
             return
         }
         isTesting = true
         Task {
             do {
-                struct TestResp: Codable { let ok: Bool; let error: String? }
-                let resp: TestResp = try await APIClient.shared.fetch(path: "/api/setup/models/\(id)/test", method: "POST")
+                struct TestResp: Codable { let ok: Bool; let error: String?; let skipped: Bool?; let message: String? }
+                let resp: TestResp = try await APIClient.shared.fetch(path: "/api/setup/providers/\(id)/test", method: "POST")
                 if resp.ok {
-                    testResult = "✅ Success"
+                    testResult = resp.skipped == true ? "OK (skipped: \(resp.message ?? "CLI OAuth"))" : "OK"
                 } else {
-                    testResult = "❌ \(resp.error ?? "Unknown error")"
+                    testResult = "Error: \(resp.error ?? "Unknown error")"
                 }
             } catch {
-                testResult = "❌ \(error.localizedDescription)"
+                testResult = "Error: \(error.localizedDescription)"
             }
             isTesting = false
         }
     }
-    
+
     private func save() {
         isSaving = true
         Task {
@@ -365,16 +369,16 @@ struct ModelEditView: View {
                 ]
                 if !apiKey.isEmpty { body["apiKey"] = apiKey }
                 if !baseUrl.isEmpty { body["baseUrl"] = baseUrl }
-                
+
                 if isNew {
-                    try await APIClient.shared.request(path: "/api/setup/models", method: "POST", body: body)
-                } else if let id = modelId {
-                    try await APIClient.shared.request(path: "/api/setup/models/\(id)", method: "PUT", body: body)
+                    try await APIClient.shared.request(path: "/api/setup/providers", method: "POST", body: body)
+                } else if let id = providerId {
+                    try await APIClient.shared.request(path: "/api/setup/providers/\(id)", method: "PUT", body: body)
                 }
                 onSave()
                 dismiss()
             } catch {
-                print("Save model error: \(error)")
+                print("Save provider error: \(error)")
                 isSaving = false
             }
         }

@@ -68,7 +68,11 @@ export function createRouter(core: CoreEngine): Router {
       return
     }
     const valid = await validateToken(token)
-    res.json({ valid })
+    if (!valid) {
+      res.status(401).json({ valid: false })
+      return
+    }
+    res.json({ valid: true })
   })
 
   router.post('/api/auth/refresh', async (req: Request, res: Response) => {
@@ -380,6 +384,31 @@ export function createRouter(core: CoreEngine): Router {
     } catch (err) {
       res.json({ ok: false, error: err instanceof Error ? err.message : 'Connection failed' })
     }
+  })
+
+  // ====== Cron API ======
+
+  router.use('/api/cron', authMiddleware)
+
+  router.get('/api/cron/jobs', (_req: Request, res: Response) => {
+    // TODO: wire up CronScheduler to gateway
+    res.json([])
+  })
+
+  router.get('/api/cron/summary', (_req: Request, res: Response) => {
+    res.json({ totalJobs: 0, activeJobs: 0, pausedJobs: 0 })
+  })
+
+  // ====== Push notifications (stub) ======
+
+  router.use('/api/push', authMiddleware)
+
+  router.post('/api/push/register', (_req: Request, res: Response) => {
+    res.json({ ok: true })
+  })
+
+  router.post('/api/push/unregister', (_req: Request, res: Response) => {
+    res.json({ ok: true })
   })
 
   // ====== Files API (directory browsing for project creation) ======

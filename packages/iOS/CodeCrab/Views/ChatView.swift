@@ -308,7 +308,7 @@ struct ChatView: View {
             onPermissionModeChange: { mode in wsService.setPermissionMode(mode) },
             isRunning: wsService.isRunning,
             isAborting: wsService.isAborting,
-            currentModel: wsService.currentModel.isEmpty ? "Model" : wsService.currentModel,
+            currentModel: wsService.currentProviderId.isEmpty ? "Model" : wsService.currentProviderId,
             permissionMode: wsService.permissionMode,
             availableMcps: allMcps,
             enabledMcps: enabledMcpsList,

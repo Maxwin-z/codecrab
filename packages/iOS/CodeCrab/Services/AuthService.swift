@@ -105,11 +105,13 @@ class AuthService: ObservableObject {
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            
+
             if let httpResponse = response as? HTTPURLResponse {
                 print("[AuthService] Status code: \(httpResponse.statusCode)")
-                
-                if httpResponse.statusCode == 200 {
+
+                if httpResponse.statusCode == 200,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   json["valid"] as? Bool == true {
                     print("[AuthService] Login successful")
                     setToken(token)
                     isAuthenticated = true
