@@ -142,11 +142,19 @@ class WebSocketService: ObservableObject {
     @Published var activityHeartbeat: ActivityHeartbeat? = nil
     @Published var queryQueue: [QueueItem] = []
     @Published var sessionUsage: SessionUsage? = nil
+    @Published var toastMessage: String? = nil
 
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
     /// Temp session ID for correlating new session creation on server-v2
     private var pendingTempSessionId: String? = nil
+
+    /// Timer for detecting unconfirmed prompts
+    private var promptConfirmationTimer: DispatchWorkItem? = nil
+    /// Tracks the prompt text pending confirmation so it can be cached on timeout
+    private var pendingPromptText: String? = nil
+    /// Tracks the attachments pending confirmation
+    private var pendingPromptImages: [ImageAttachment]? = nil
 
     private var activeProjectId: String? = nil
     private var activeProjectName: String = ""
@@ -378,6 +386,8 @@ class WebSocketService: ObservableObject {
                 }
             }
         case "query_start":
+            cancelPromptConfirmationTimer()
+            clearDraftCache()
             if let pid = projectId {
                 runningProjectIds.insert(pid)
                 recentlyEndedProjectIds.remove(pid)
@@ -712,7 +722,8 @@ class WebSocketService: ObservableObject {
             }
         case "prompt_received":
             // Sync ack from server-v2 — prompt was accepted
-            break
+            cancelPromptConfirmationTimer()
+            clearDraftCache()
         case "session_resumed":
             // Only update viewing session if we're expecting it (user-initiated resume/switch).
             // The server also broadcasts session_resumed during background query execution,
@@ -794,6 +805,7 @@ class WebSocketService: ObservableObject {
                 self.cwd = dir
             }
         case "error":
+            cancelPromptConfirmationTimer()
             guard let pid = projectId, isCurrentProject else { break }
             if let errMsg = json["message"] as? String ?? json["error"] as? String {
                 let errorChatMsg = ChatMessage(id: UUID().uuidString, role: "system", content: "Error: \(errMsg)", timestamp: Date().timeIntervalSince1970 * 1000)
@@ -1215,7 +1227,7 @@ class WebSocketService: ObservableObject {
     /// Convert ChatMessage history into SdkEvent array for rendering.
     /// The MessageListView renders agent responses via SdkEvents, so we synthesize
     /// them from assistant/system ChatMessages when loading session history.
-    private func chatMessagesToSdkEvents(_ messages: [ChatMessage]) -> [SdkEvent] {
+    func chatMessagesToSdkEvents(_ messages: [ChatMessage]) -> [SdkEvent] {
         var events: [SdkEvent] = []
         var offset = 0.001  // sub-ms offset to preserve ordering within a message
 
@@ -1436,7 +1448,11 @@ class WebSocketService: ObservableObject {
         if !SoulSettings.shared.isEnabled {
             payload["soulEnabled"] = false
         }
-        return sendWebSocketMessage(payload)
+        let sent = sendWebSocketMessage(payload)
+        if sent {
+            startPromptConfirmationTimer(text: text, images: images)
+        }
+        return sent
     }
 
     @discardableResult
@@ -1476,6 +1492,105 @@ class WebSocketService: ObservableObject {
             return
         }
         sendWebSocketMessage(payload)
+    }
+
+    // MARK: - Prompt Confirmation Timeout
+
+    private func startPromptConfirmationTimer(text: String, images: [ImageAttachment]?) {
+        // Cancel any previous timer
+        promptConfirmationTimer?.cancel()
+        pendingPromptText = text
+        pendingPromptImages = images
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingPromptText = nil
+            self.pendingPromptImages = nil
+            self.promptConfirmationTimer = nil
+            // Server did not confirm — show toast and cache draft
+            self.toastMessage = "后端服务可能存在异常，请稍候重试"
+            self.saveDraftToCache(text: text, images: images)
+            // Auto-dismiss toast after 4 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                if self?.toastMessage == "后端服务可能存在异常，请稍候重试" {
+                    self?.toastMessage = nil
+                }
+            }
+        }
+        promptConfirmationTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: work)
+    }
+
+    private func cancelPromptConfirmationTimer() {
+        promptConfirmationTimer?.cancel()
+        promptConfirmationTimer = nil
+        pendingPromptText = nil
+        pendingPromptImages = nil
+    }
+
+    // MARK: - Draft Cache
+
+    private static let draftKey = "codecrab_pending_draft"
+
+    private func saveDraftToCache(text: String, images: [ImageAttachment]?) {
+        var draft: [String: Any] = [
+            "text": text,
+            "projectId": activeProjectId ?? "",
+            "sessionId": sessionId,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        // Cache current session messages for offline viewing
+        if !messages.isEmpty,
+           let msgData = try? JSONEncoder().encode(messages),
+           let msgJson = try? JSONSerialization.jsonObject(with: msgData) {
+            draft["messages"] = msgJson
+        }
+        if let images = images, !images.isEmpty,
+           let imgData = try? JSONEncoder().encode(images),
+           let imgJson = try? JSONSerialization.jsonObject(with: imgData) {
+            draft["images"] = imgJson
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: draft) {
+            UserDefaults.standard.set(data, forKey: Self.draftKey)
+        }
+    }
+
+    struct CachedDraft {
+        let text: String
+        let images: [ImageAttachment]
+        let projectId: String
+        let sessionId: String
+        let messages: [ChatMessage]
+    }
+
+    func loadDraftFromCache(forProjectId projectId: String) -> CachedDraft? {
+        guard let data = UserDefaults.standard.data(forKey: Self.draftKey),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = json["text"] as? String,
+              let draftProjectId = json["projectId"] as? String,
+              draftProjectId == projectId else { return nil }
+
+        let sid = json["sessionId"] as? String ?? ""
+
+        var images: [ImageAttachment] = []
+        if let imgJson = json["images"],
+           let imgData = try? JSONSerialization.data(withJSONObject: imgJson),
+           let decoded = try? JSONDecoder().decode([ImageAttachment].self, from: imgData) {
+            images = decoded
+        }
+
+        var msgs: [ChatMessage] = []
+        if let msgsJson = json["messages"],
+           let msgsData = try? JSONSerialization.data(withJSONObject: msgsJson),
+           let decoded = try? JSONDecoder().decode([ChatMessage].self, from: msgsData) {
+            msgs = decoded
+        }
+
+        return CachedDraft(text: text, images: images, projectId: draftProjectId, sessionId: sid, messages: msgs)
+    }
+
+    func clearDraftCache() {
+        UserDefaults.standard.removeObject(forKey: Self.draftKey)
     }
 
     func resumeSession(_ newSessionId: String) {

@@ -115,6 +115,15 @@ struct ChatView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            if let toast = wsService.toastMessage {
+                ErrorToastView(message: toast) {
+                    wsService.toastMessage = nil
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(100)
+            }
+        }
         .sheet(isPresented: $showFileBrowser) {
             FileBrowserView(projectPath: project.path)
         }
@@ -129,6 +138,7 @@ struct ChatView: View {
             }
             fetchMcps()
             handlePendingShare()
+            restoreDraftIfNeeded()
         }
         .onChange(of: pendingAttachments) { _, newAttachments in
             if !newAttachments.isEmpty {
@@ -455,6 +465,21 @@ struct ChatView: View {
         // Pass attachments to input bar
         inputAttachments = pendingAttachments
         pendingAttachments = []
+    }
+
+    private func restoreDraftIfNeeded() {
+        guard let draft = wsService.loadDraftFromCache(forProjectId: project.id) else { return }
+        // Restore prompt text and attachments into the input bar
+        prefillText = draft.text
+        if !draft.images.isEmpty {
+            inputAttachments = draft.images
+        }
+        // Restore session messages if current session is empty and matches
+        if wsService.messages.isEmpty && !draft.messages.isEmpty {
+            wsService.messages = draft.messages
+            wsService.sdkEvents = wsService.chatMessagesToSdkEvents(draft.messages)
+        }
+        wsService.clearDraftCache()
     }
 
     private func autoEnableNewEntries() {
