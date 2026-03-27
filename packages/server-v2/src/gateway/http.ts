@@ -397,23 +397,37 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
 
   // Transform v2 CronJob to legacy-compatible response format (iOS expects this shape)
   function toClientCronJob(job: CronJob) {
-    const status = job.enabled
-      ? (job.lastRunStatus === 'failure' ? 'failed' : 'pending')
-      : 'disabled'
+    const jobType = job.type || 'cron'
+    const isCompletedOneShot = jobType === 'at' && !job.enabled && !!job.lastRunAt
+
+    const status = isCompletedOneShot
+      ? 'completed'
+      : job.enabled
+        ? (job.lastRunStatus === 'failure' ? 'failed' : 'pending')
+        : 'disabled'
+
+    // Build schedule object matching iOS CronSchedule model
+    let schedule: { kind: string; expr?: string; at?: string }
+    if (jobType === 'at' && job.runAt) {
+      schedule = { kind: 'at', at: new Date(job.runAt).toISOString() }
+    } else {
+      schedule = { kind: 'cron', expr: job.schedule }
+    }
+
     return {
       id: job.id,
       name: job.name,
       description: null,
-      schedule: { kind: 'cron', expr: job.schedule },
+      schedule,
       prompt: job.prompt,
       context: { projectId: job.projectId, sessionId: job.sessionId },
       status,
       createdAt: new Date(job.createdAt).toISOString(),
       updatedAt: new Date(job.updatedAt).toISOString(),
       lastRunAt: job.lastRunAt ? new Date(job.lastRunAt).toISOString() : null,
-      nextRunAt: null,
-      runCount: 0,
-      maxRuns: null,
+      nextRunAt: (jobType === 'at' && job.runAt && job.enabled) ? new Date(job.runAt).toISOString() : null,
+      runCount: job.lastRunAt ? 1 : 0,
+      maxRuns: jobType === 'at' ? 1 : null,
       deleteAfterRun: false,
     }
   }
@@ -429,6 +443,8 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
     // Filter by status (legacy-compatible values)
     if (status === 'enabled' || status === 'pending') {
       jobs = jobs.filter(j => j.enabled)
+    } else if (status === 'completed') {
+      jobs = jobs.filter(j => !j.enabled && (j.type || 'cron') === 'at' && !!j.lastRunAt)
     } else if (status === 'disabled') {
       jobs = jobs.filter(j => !j.enabled)
     } else if (status === 'failed') {
@@ -473,6 +489,8 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
     const disabledJobs = jobs.filter(j => !j.enabled)
     const failedJobs = enabledJobs.filter(j => j.lastRunStatus === 'failure')
     const pendingJobs = enabledJobs.filter(j => j.lastRunStatus !== 'failure')
+    const completedJobs = disabledJobs.filter(j => (j.type || 'cron') === 'at' && !!j.lastRunAt)
+    const pureDisabled = disabledJobs.filter(j => !((j.type || 'cron') === 'at' && !!j.lastRunAt))
 
     res.json({
       totalActive: enabledJobs.length,
@@ -480,9 +498,9 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
       statusCounts: {
         pending: pendingJobs.length,
         running: 0,
-        disabled: disabledJobs.length,
+        disabled: pureDisabled.length,
         failed: failedJobs.length,
-        completed: 0,
+        completed: completedJobs.length,
         deprecated: 0,
       },
       nextJob: null,

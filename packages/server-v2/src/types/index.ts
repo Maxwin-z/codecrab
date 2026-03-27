@@ -458,6 +458,10 @@ export interface CronJob {
   updatedAt: number
   lastRunAt?: number
   lastRunStatus?: 'success' | 'failure'
+  /** 'cron' = recurring (default), 'at' = one-shot at a specific time */
+  type?: 'cron' | 'at'
+  /** Epoch ms — absolute time for one-shot execution */
+  runAt?: number
 }
 
 export interface CronExecution {

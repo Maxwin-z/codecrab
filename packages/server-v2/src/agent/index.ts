@@ -293,6 +293,8 @@ export class ClaudeAgent implements AgentInterface {
       includePartialMessages: true,
       abortController: options.abortController,
       agentProgressSummaries: true,
+      // Block system cron tools — force AI to use our persistent MCP cron tools instead
+      disallowedTools: ['CronCreate', 'CronDelete', 'CronList'],
       ...(options.env ? { env: options.env } : {}),
 
       systemPrompt: {
@@ -311,6 +313,11 @@ export class ClaudeAgent implements AgentInterface {
           `\n\nWhen the MCP cron tools are available (mcp__cron__cron_create, mcp__cron__cron_list, mcp__cron__cron_delete, mcp__cron__cron_get), ` +
           `you MUST use them instead of the system CronCreate/CronDelete/CronList tools for all scheduling tasks. ` +
           `The MCP cron tools provide persistent scheduled tasks that survive server restarts, while the system cron tools are session-only and will be lost when the session ends.` +
+          `\n\nSCHEDULING GUIDE: cron_create supports three modes:` +
+          `\n- 'schedule' (cron expression): for RECURRING tasks only (e.g., "every day at 9am" → schedule: "0 9 * * *")` +
+          `\n- 'delay': for one-time tasks relative to now (e.g., "remind me in 5 minutes" → delay: "5m")` +
+          `\n- 'runAt' (ISO 8601): for one-time tasks at a specific time (e.g., "remind me at 3:30 PM" → runAt: "2026-03-27T15:30:00+08:00")` +
+          `\nNEVER use a cron expression for one-time reminders or delayed tasks — always use 'delay' or 'runAt' instead.` +
           `\n\nIMPORTANT: To reduce unnecessary API round-trips, you MUST proactively use the AskUserQuestion tool in these situations:` +
           `\n1. When the user's request is ambiguous or could be interpreted in multiple ways — ask for clarification BEFORE starting work.` +
           `\n2. When there are multiple possible approaches or solutions — present the options and let the user choose.` +
@@ -398,6 +405,11 @@ export class ClaudeAgent implements AgentInterface {
             }
             opts.signal.addEventListener('abort', onAbort, { once: true })
           })
+        }
+
+        // Auto-approve cron and push tools (whitelisted, no user confirmation needed)
+        if (toolName.startsWith('mcp__cron__') || toolName.startsWith('mcp__push__')) {
+          return { behavior: 'allow' as const }
         }
 
         // In bypass mode, auto-approve everything else
