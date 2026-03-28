@@ -267,6 +267,7 @@ struct SoulPageView: View {
 
     private func fetchSoulData() async {
         isLoading = true
+        async let settingsSync: () = SoulSettings.shared.syncFromServer()
         async let soulTask: SoulDocument? = {
             do { return try await APIClient.shared.fetch(path: "/api/soul") }
             catch { return nil }
@@ -280,7 +281,7 @@ struct SoulPageView: View {
             catch { return [] }
         }()
 
-        let (s, st, log) = await (soulTask, statusTask, logTask)
+        let (_, s, st, log) = await (settingsSync, soulTask, statusTask, logTask)
         self.soul = s
         self.status = st
         self.recentEvolution = log

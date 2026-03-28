@@ -179,6 +179,7 @@ struct SoulCardView: View {
     }
 
     private func fetchSoulData() async {
+        async let settingsSync: () = SoulSettings.shared.syncFromServer()
         async let soulTask: SoulDocument? = {
             do { return try await APIClient.shared.fetch(path: "/api/soul") }
             catch { return nil }
@@ -192,7 +193,7 @@ struct SoulCardView: View {
             catch { return [] }
         }()
 
-        let (s, st, log) = await (soulTask, statusTask, logTask)
+        let (_, s, st, log) = await (settingsSync, soulTask, statusTask, logTask)
         self.soul = s
         self.status = st
         self.recentEvolution = log

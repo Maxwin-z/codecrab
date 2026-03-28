@@ -13,6 +13,7 @@ import { isApnsConfigured } from '../push/apns.js'
 import { ProjectValidationError, ProjectConflictError, ProjectNotFoundError } from '../core/project.js'
 import { authMiddleware, getToken, validateToken, generateToken, readConfig, writeConfig } from './auth.js'
 import { getImageFilePath } from '../images.js'
+import { isSoulEnabled, setSoulEnabled } from '../soul/settings.js'
 import type { ProviderConfig, ProviderSettings, DetectResult } from '@codecrab/shared'
 
 const execFileAsync = promisify(execFile)
@@ -566,6 +567,139 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
   router.get('/api/push/devices', (_req: Request, res: Response) => {
     const devices = getDevices()
     res.json({ devices, apnsConfigured: isApnsConfigured() })
+  })
+
+  // ====== Soul API ======
+
+  const SOUL_DIR = path.join(os.homedir(), '.codecrab', 'soul')
+  const SOUL_MD_PATH = path.join(SOUL_DIR, 'SOUL.md')
+  const EVOLUTION_LOG_PATH = path.join(SOUL_DIR, 'evolution-log.jsonl')
+  const MAX_SOUL_LENGTH = 4000
+
+  function parseSoulMd(raw: string): { meta: { version: number; lastUpdated: string }; content: string } {
+    const match = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
+    if (!match) return { meta: { version: 0, lastUpdated: '' }, content: raw.trim() }
+    const fm = match[1]
+    const versionMatch = fm.match(/version:\s*(\d+)/)
+    const dateMatch = fm.match(/lastUpdated:\s*(.+)/)
+    return {
+      meta: {
+        version: versionMatch ? parseInt(versionMatch[1]) : 0,
+        lastUpdated: dateMatch ? dateMatch[1].trim() : '',
+      },
+      content: match[2].trim(),
+    }
+  }
+
+  function buildSoulMd(version: number, content: string): string {
+    return `---\nversion: ${version}\nlastUpdated: ${new Date().toISOString()}\n---\n${content}\n`
+  }
+
+  async function readEvolutionLog(limit: number): Promise<Array<{ timestamp: string; summary: string }>> {
+    try {
+      const raw = await fs.readFile(EVOLUTION_LOG_PATH, 'utf-8')
+      const lines = raw.trim().split('\n').filter(Boolean)
+      const entries: Array<{ timestamp: string; summary: string }> = []
+      for (const line of lines) {
+        try { entries.push(JSON.parse(line)) } catch { /* skip malformed */ }
+      }
+      return entries.slice(-limit)
+    } catch {
+      return []
+    }
+  }
+
+  router.use('/api/soul', authMiddleware)
+
+  // GET /api/soul — soul document
+  router.get('/api/soul', async (_req: Request, res: Response) => {
+    try {
+      const raw = await fs.readFile(SOUL_MD_PATH, 'utf-8')
+      const { meta, content } = parseSoulMd(raw)
+      res.json({ content, meta })
+    } catch {
+      res.status(404).json({ error: 'No soul document found' })
+    }
+  })
+
+  // GET /api/soul/status — soul status overview
+  router.get('/api/soul/status', async (_req: Request, res: Response) => {
+    let hasSoul = false
+    let version = 0
+    let contentLength = 0
+    let insightCount = 0
+
+    try {
+      const raw = await fs.readFile(SOUL_MD_PATH, 'utf-8')
+      const { meta, content } = parseSoulMd(raw)
+      hasSoul = content.length > 0
+      version = meta.version
+      contentLength = content.length
+      // Count bullet points as insights
+      insightCount = content.split('\n').filter(l => /^\s*[-*]\s/.test(l)).length
+    } catch { /* no soul file */ }
+
+    const log = await readEvolutionLog(10000) // count all
+
+    res.json({
+      hasSoul,
+      soulVersion: version,
+      evolutionCount: log.length,
+      insightCount,
+      contentLength,
+      maxLength: MAX_SOUL_LENGTH,
+    })
+  })
+
+  // GET /api/soul/log — evolution history
+  router.get('/api/soul/log', async (req: Request, res: Response) => {
+    const limit = parseInt(req.query.limit as string) || 10
+    const entries = await readEvolutionLog(limit)
+    res.json(entries)
+  })
+
+  // PUT /api/soul — update soul content
+  router.put('/api/soul', async (req: Request, res: Response) => {
+    const { content } = req.body as { content?: string }
+    if (content === undefined) {
+      res.status(400).json({ error: 'Missing content' })
+      return
+    }
+    if (content.length > MAX_SOUL_LENGTH) {
+      res.status(400).json({ error: `Content exceeds ${MAX_SOUL_LENGTH} character limit` })
+      return
+    }
+
+    // Read current version to increment
+    let currentVersion = 0
+    try {
+      const raw = await fs.readFile(SOUL_MD_PATH, 'utf-8')
+      const { meta } = parseSoulMd(raw)
+      currentVersion = meta.version
+    } catch { /* new file */ }
+
+    const newVersion = currentVersion + 1
+    await fs.mkdir(SOUL_DIR, { recursive: true })
+    await fs.writeFile(SOUL_MD_PATH, buildSoulMd(newVersion, content))
+
+    const meta = { version: newVersion, lastUpdated: new Date().toISOString() }
+    res.json({ content, meta })
+  })
+
+  // GET /api/soul/settings — soul enable/disable state
+  router.get('/api/soul/settings', (_req: Request, res: Response) => {
+    res.json({ enabled: isSoulEnabled() })
+  })
+
+  // PUT /api/soul/settings — toggle soul
+  router.put('/api/soul/settings', (req: Request, res: Response) => {
+    const { enabled } = req.body as { enabled?: boolean }
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ error: 'Missing enabled boolean' })
+      return
+    }
+    setSoulEnabled(enabled)
+    res.json({ enabled: isSoulEnabled() })
   })
 
   // ====== Files API (directory browsing for project creation) ======

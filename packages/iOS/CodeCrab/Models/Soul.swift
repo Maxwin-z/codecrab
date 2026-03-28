@@ -2,21 +2,55 @@ import Foundation
 import Combine
 import SwiftUI
 
-// MARK: - Soul Settings
+// MARK: - Soul Settings (server-authoritative)
 
 class SoulSettings: ObservableObject {
     static let shared = SoulSettings()
 
     @Published var isEnabled: Bool {
-        didSet { UserDefaults.standard.set(isEnabled, forKey: "soul_enabled") }
+        didSet {
+            UserDefaults.standard.set(isEnabled, forKey: "soul_enabled")
+            pushToServer(enabled: isEnabled)
+        }
     }
 
+    /// Prevents didSet from pushing back when syncing FROM server
+    private var isSyncing = false
+
     private init() {
-        // Default to true if not set
+        // UserDefaults is a local cache — real state comes from server via syncFromServer()
         if UserDefaults.standard.object(forKey: "soul_enabled") == nil {
             self.isEnabled = true
         } else {
             self.isEnabled = UserDefaults.standard.bool(forKey: "soul_enabled")
+        }
+    }
+
+    /// Fetch authoritative state from server and update local
+    func syncFromServer() async {
+        struct Settings: Codable { let enabled: Bool }
+        do {
+            let settings: Settings = try await APIClient.shared.fetch(path: "/api/soul/settings")
+            await MainActor.run {
+                guard self.isEnabled != settings.enabled else { return }
+                isSyncing = true
+                isEnabled = settings.enabled
+                isSyncing = false
+            }
+        } catch {
+            // Server unavailable — keep local cache
+        }
+    }
+
+    private func pushToServer(enabled: Bool) {
+        guard !isSyncing else { return }
+        struct Body: Encodable { let enabled: Bool }
+        Task {
+            try? await APIClient.shared.request(
+                path: "/api/soul/settings",
+                method: "PUT",
+                body: Body(enabled: enabled)
+            )
         }
     }
 }

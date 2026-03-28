@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   console.log(`[CodeCrab v2] Core initialized — ${core.projects.list().length} projects loaded`)
 
   // 3. Register consumers
-  initSoul(core)
+  const soulConsumer = initSoul(core)
   const cronScheduler = initCronScheduler(core)
   setCronScheduler(cronScheduler)
   initPushConsumer(core)
@@ -73,6 +73,7 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = () => {
     console.log('\n[CodeCrab v2] Shutting down...')
+    soulConsumer.destroy()
     heartbeat.destroy()
     cronScheduler.destroy()
     closeApns()
