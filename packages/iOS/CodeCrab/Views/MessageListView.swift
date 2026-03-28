@@ -94,7 +94,18 @@ struct AgentResponseView: View {
     var streamingText: String = ""
     var onResumeSession: ((String) -> Void)? = nil
     @State private var showDebug = false
-    @State private var renderMarkdown = false
+    @State private var renderMarkdown: Bool
+
+    init(events: [SdkEvent], isStreaming: Bool, streamingThinking: String = "", streamingText: String = "", onResumeSession: ((String) -> Void)? = nil) {
+        self.events = events
+        self.isStreaming = isStreaming
+        self.streamingThinking = streamingThinking
+        self.streamingText = streamingText
+        self.onResumeSession = onResumeSession
+        // Non-streaming (historical) turns start with markdown rendered;
+        // actively streaming turns start with plain text, auto-switch on completion.
+        self._renderMarkdown = State(initialValue: !isStreaming)
+    }
 
     private static let messageTypes: Set<String> = ["thinking", "text", "tool_use", "tool_result", "cron_task_completed"]
 
