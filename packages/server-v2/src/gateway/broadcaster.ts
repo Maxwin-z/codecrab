@@ -296,6 +296,25 @@ export class Broadcaster {
         sessionId: e.sessionId,
         providerId: e.providerId,
       })
+      // Send cached session usage so the client has context window info immediately
+      const session = this.core.sessions.getMeta(e.sessionId)
+      tsLog(`${C.dim}[broadcast]${C.reset} session:resumed  session=${e.sessionId.slice(0, 8)}  hasMeta=${!!session}  queryCount=${session?.usage.queryCount ?? 0}  ctxUsed=${session?.usage.contextWindowUsed ?? 0}  ctxMax=${session?.usage.contextWindowMax ?? 0}`)
+      if (session && session.usage.queryCount > 0) {
+        this.broadcastToProject(e.projectId, {
+          type: 'session_usage',
+          projectId: e.projectId,
+          sessionId: e.sessionId,
+          totalInputTokens: session.usage.totalInputTokens,
+          totalOutputTokens: session.usage.totalOutputTokens,
+          totalCacheReadTokens: session.usage.totalCacheReadTokens,
+          totalCacheCreateTokens: session.usage.totalCacheCreateTokens,
+          totalCostUsd: session.usage.totalCostUsd,
+          totalDurationMs: session.usage.totalDurationMs,
+          queryCount: session.usage.queryCount,
+          contextWindowUsed: session.usage.contextWindowUsed,
+          contextWindowMax: session.usage.contextWindowMax,
+        })
+      }
     })
 
     this.core.on('session:status_changed', (e) => {
