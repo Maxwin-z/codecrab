@@ -145,6 +145,8 @@ export interface TurnSubmitParams {
   prompt: string
   type: TurnType
   images?: ImageAttachment[]
+  /** URL-based image refs (data cleared, url set) for client broadcasting */
+  urlImages?: ImageAttachment[]
   enabledMcps?: string[]
   disabledSdkServers?: string[]
   disabledSkills?: string[]

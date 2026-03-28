@@ -12,6 +12,7 @@ import { registerDevice, unregisterDevice, getDevices } from '../push/store.js'
 import { isApnsConfigured } from '../push/apns.js'
 import { ProjectValidationError, ProjectConflictError, ProjectNotFoundError } from '../core/project.js'
 import { authMiddleware, getToken, validateToken, generateToken, readConfig, writeConfig } from './auth.js'
+import { getImageFilePath } from '../images.js'
 import type { ProviderConfig, ProviderSettings, DetectResult } from '@codecrab/shared'
 
 const execFileAsync = promisify(execFile)
@@ -134,6 +135,30 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
       result.auth = { loggedIn: false }
     }
     res.json(result)
+  })
+
+  // ====== Images (public — served by URL with content-hash filenames) ======
+
+  const MIME_MAP: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+  }
+
+  router.get('/api/images/:filename', async (req: Request, res: Response) => {
+    const filename = (req.params.filename as string).replace(/[^a-zA-Z0-9._-]/g, '')
+    const filepath = getImageFilePath(filename)
+    try {
+      const data = await fs.readFile(filepath)
+      const ext = filename.split('.').pop() || ''
+      res.setHeader('Content-Type', MIME_MAP[ext] || 'application/octet-stream')
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      res.send(data)
+    } catch {
+      res.status(404).json({ error: 'Image not found' })
+    }
   })
 
   // ====== Protected routes (require auth) ======

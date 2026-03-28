@@ -258,6 +258,53 @@ export class ClaudeAgent implements AgentInterface {
     }
   }
 
+  // ── Build prompt with optional image content blocks ─────────────────
+
+  private buildPrompt(
+    prompt: string,
+    images?: import('../types/index.js').ImageAttachment[],
+  ): string | AsyncIterable<{ type: 'user'; message: { role: 'user'; content: unknown[] }; parent_tool_use_id: null; session_id: string }> {
+    if (!images || images.length === 0) {
+      return prompt
+    }
+
+    const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+    const contentBlocks: unknown[] = []
+
+    for (const img of images) {
+      if (supportedTypes.has(img.mediaType) && img.data) {
+        contentBlocks.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            data: img.data,
+            media_type: img.mediaType,
+          },
+        })
+      }
+    }
+
+    // If no supported images, fall back to plain text
+    if (contentBlocks.length === 0) {
+      return prompt
+    }
+
+    contentBlocks.push({ type: 'text', text: prompt })
+
+    const userMessage = {
+      type: 'user' as const,
+      message: { role: 'user' as const, content: contentBlocks },
+      parent_tool_use_id: null,
+      session_id: '',
+    }
+
+    async function* singleMessage() {
+      yield userMessage
+    }
+
+    return singleMessage()
+  }
+
   // ── Internal: run query and push events into channel ────────────────────
 
   private async runQuery(
@@ -450,7 +497,10 @@ export class ClaudeAgent implements AgentInterface {
       },
     }
 
-    const q = sdkQuery({ prompt, options: sdkOptions as any })
+    // Build prompt: plain string or structured content blocks with images
+    const sdkPrompt = this.buildPrompt(prompt, options.images)
+
+    const q = sdkQuery({ prompt: sdkPrompt, options: sdkOptions as any })
 
     // Track for abort
     const sessionKey = options.resume || `pending-${Date.now()}`

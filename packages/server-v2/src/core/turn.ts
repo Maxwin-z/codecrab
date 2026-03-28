@@ -74,7 +74,7 @@ export class TurnManager {
       status: 'processing',
     })
 
-    // Emit turn start
+    // Emit turn start — use URL-based images for client broadcast (no base64 over WS)
     this.core.emit('turn:start', {
       projectId: params.projectId,
       sessionId: params.sessionId,
@@ -82,7 +82,7 @@ export class TurnManager {
       queryId: queuedQuery.id,
       prompt: params.prompt,
       type: params.type,
-      images: params.images,
+      images: params.urlImages || params.images,
     })
 
     // Emit project processing

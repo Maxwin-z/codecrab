@@ -5,6 +5,7 @@ import type { Broadcaster } from './broadcaster.js'
 import type { Client } from '../types/index.js'
 import type { ClientMessage } from '@codecrab/shared'
 import { verifyWebSocketToken } from './auth.js'
+import { saveAndConvertImages } from '../images.js'
 import { tsLog, C } from '../logger.js'
 
 let connectionCounter = 0
@@ -126,7 +127,7 @@ function handleClientMessage(core: CoreEngine, broadcaster: Broadcaster, client:
   }
 }
 
-function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client, message: any): void {
+async function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client, message: any): Promise<void> {
   const projectId = message.projectId
   if (!projectId) {
     broadcaster.send(client, { type: 'error', message: 'Missing projectId' })
@@ -177,6 +178,11 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     return
   }
 
+  // Save images to disk and convert to URL refs for broadcasting;
+  // keep original base64 data for the SDK agent.
+  const originalImages = message.images?.length ? message.images : undefined
+  const urlImages = originalImages ? await saveAndConvertImages(originalImages) : undefined
+
   // Send sync ack to the sending client only (message will appear in chat when execution starts)
   broadcaster.send(client, {
     type: 'prompt_received',
@@ -189,7 +195,8 @@ function handlePrompt(core: CoreEngine, broadcaster: Broadcaster, client: Client
     sessionId,
     prompt: message.prompt,
     type: 'user',
-    images: message.images,
+    images: originalImages,
+    urlImages,
     enabledMcps: message.enabledMcps,
     disabledSdkServers: message.disabledSdkServers,
     disabledSkills: message.disabledSkills,
