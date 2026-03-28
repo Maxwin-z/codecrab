@@ -1,5 +1,11 @@
+import dotenv from 'dotenv'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { networkInterfaces } from 'node:os'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') })
 import { ClaudeAgent } from './agent/index.js'
 import { CoreEngine } from './core/index.js'
 import { setupGateway } from './gateway/index.js'

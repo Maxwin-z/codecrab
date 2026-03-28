@@ -58,56 +58,27 @@ struct MessageListView: View {
                         MessageBubbleView(message: userMsg, isRunning: isRunning)
                             .padding(.vertical, 6)
                     }
-                    if !group.agentEvents.isEmpty {
-                        AgentResponseView(events: group.agentEvents, isStreaming: isRunning && index == turnGroups.count - 1, onResumeSession: onResumeSession)
+                    let isLastStreaming = isRunning && index == turnGroups.count - 1
+                    if !group.agentEvents.isEmpty || isLastStreaming {
+                        AgentResponseView(
+                            events: group.agentEvents,
+                            isStreaming: isLastStreaming,
+                            streamingThinking: isLastStreaming ? streamingThinking : "",
+                            streamingText: isLastStreaming ? streamingText : "",
+                            onResumeSession: onResumeSession
+                        )
                     }
                 }
 
-                // Live streaming content (before finalized as SdkEvents)
-                if isRunning {
-                    if !streamingThinking.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .medium))
-                            Text("🧠")
-                                .font(.caption)
-                            Text("Thinking")
-                                .font(.callout)
-                                .fontDesign(.monospaced)
-                            Text(streamingThinking.components(separatedBy: .newlines).joined(separator: " "))
-                                .font(.caption)
-                                .fontDesign(.monospaced)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        .foregroundColor(.orange.opacity(0.8))
-                    }
-                    if !streamingText.isEmpty {
-                        let displayText = streamingText
-                            .replacingOccurrences(of: "\\n?\\[SUMMARY:[^\\n]*\\]?", with: "", options: .regularExpression)
-                            .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[^\\n]*\\]?", with: "", options: .regularExpression)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !displayText.isEmpty {
-                            InlineSelectableText(
-                                text: displayText,
-                                font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
-                                textColor: .label
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-
-                // Running indicator (when no SDK events are flowing yet and no streaming text)
-                if isRunning && sdkEvents.isEmpty && streamingText.isEmpty && streamingThinking.isEmpty {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 8, height: 8)
-                        Text("Processing...")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
+                // Edge case: isRunning but no turn groups yet
+                if isRunning && turnGroups.isEmpty {
+                    AgentResponseView(
+                        events: [],
+                        isStreaming: true,
+                        streamingThinking: streamingThinking,
+                        streamingText: streamingText,
+                        onResumeSession: onResumeSession
+                    )
                 }
             }
         }
@@ -119,6 +90,8 @@ struct MessageListView: View {
 struct AgentResponseView: View {
     let events: [SdkEvent]
     let isStreaming: Bool
+    var streamingThinking: String = ""
+    var streamingText: String = ""
     var onResumeSession: ((String) -> Void)? = nil
     @State private var showDebug = false
     @State private var renderMarkdown = false
@@ -149,13 +122,46 @@ struct AgentResponseView: View {
                     } else if event.type == "result", let data = event.data, case .string(_) = data["execSessionId"] {
                         CronResultView(event: event, onResumeSession: onResumeSession)
                     } else {
-                        MessageModeEventView(event: event, isStreaming: isStreaming, renderMarkdown: renderMarkdown)
+                        MessageModeEventView(event: event, isStreaming: isStreaming, renderMarkdown: isStreaming ? false : renderMarkdown)
                     }
                 }
             }
 
-            // Loading indicator when streaming
+            // Live streaming content (before "Generating..." indicator)
             if isStreaming {
+                if !streamingThinking.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("🧠")
+                            .font(.caption)
+                        Text("Thinking")
+                            .font(.callout)
+                            .fontDesign(.monospaced)
+                        Text(streamingThinking.components(separatedBy: .newlines).joined(separator: " "))
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .foregroundColor(.orange.opacity(0.8))
+                }
+                if !streamingText.isEmpty {
+                    let displayText = streamingText
+                        .replacingOccurrences(of: "\\n?\\[SUMMARY:[^\\n]*\\]?", with: "", options: .regularExpression)
+                        .replacingOccurrences(of: "\\n?\\[SUGGESTIONS:[^\\n]*\\]?", with: "", options: .regularExpression)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !displayText.isEmpty {
+                        InlineSelectableText(
+                            text: displayText,
+                            font: .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular),
+                            textColor: .label
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                // "Generating..." at the bottom
                 HStack(spacing: 6) {
                     StreamingDotsView()
                     Text("Generating...")
