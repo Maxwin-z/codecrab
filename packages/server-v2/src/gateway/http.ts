@@ -27,6 +27,13 @@ const SKIP_DIRS = new Set([
   '__pycache__', '.venv', 'venv', '.tox', 'coverage', '.nyc_output',
 ])
 
+function hasNullByte(buf: Buffer, length: number): boolean {
+  for (let i = 0; i < length; i++) {
+    if (buf[i] === 0) return true
+  }
+  return false
+}
+
 async function ensureConfigDir() {
   await fs.mkdir(CONFIG_DIR, { recursive: true })
 }
@@ -864,17 +871,32 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
 
   router.get('/api/files', async (req: Request, res: Response) => {
     const dirPath = (req.query.path as string) || os.homedir()
+    const showHidden = req.query.showHidden === '1'
     try {
       const resolved = path.resolve(dirPath)
       const entries = await fs.readdir(resolved, { withFileTypes: true })
-      const items = entries
-        .filter(e => !e.name.startsWith('.'))
+      const filtered = entries
+        .filter(e => showHidden || !e.name.startsWith('.'))
         .filter(e => !e.isDirectory() || !SKIP_DIRS.has(e.name))
-        .map(e => ({
-          name: e.name,
-          path: path.join(resolved, e.name),
-          isDirectory: e.isDirectory(),
-        }))
+      const items = await Promise.all(
+        filtered.map(async (e) => {
+          const fullPath = path.join(resolved, e.name)
+          let size: number | undefined
+          let modifiedAt: number | undefined
+          try {
+            const stat = await fs.stat(fullPath)
+            size = stat.size
+            modifiedAt = stat.mtimeMs / 1000
+          } catch { /* ignore stat errors */ }
+          return {
+            name: e.name,
+            path: fullPath,
+            isDirectory: e.isDirectory(),
+            size,
+            modifiedAt,
+          }
+        })
+      )
       items.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
         return a.name.localeCompare(b.name)
@@ -883,6 +905,131 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
     } catch (err) {
       res.status(400).json({ error: (err as Error).message })
     }
+  })
+
+  // Read file content with metadata
+  const MAX_FILE_SIZE = 512 * 1024 // 512 KB
+  router.get('/api/files/read', async (req: Request, res: Response) => {
+    const filePath = req.query.path as string
+    if (!filePath) { res.status(400).json({ error: 'Missing path' }); return }
+    try {
+      const resolved = path.resolve(filePath)
+      const stat = await fs.stat(resolved)
+      if (stat.isDirectory()) { res.status(400).json({ error: 'Path is a directory' }); return }
+      const name = path.basename(resolved)
+      const size = stat.size
+      const modifiedAt = stat.mtimeMs / 1000
+
+      // Check if binary by reading first bytes
+      let binary = false
+      let content: string | null = null
+      let lineCount: number | null = null
+      let truncated = false
+
+      if (size > MAX_FILE_SIZE) {
+        // Try to detect binary from first chunk
+        const fd = await fs.open(resolved, 'r')
+        const buf = Buffer.alloc(8192)
+        const { bytesRead } = await fd.read(buf, 0, 8192, 0)
+        await fd.close()
+        binary = hasNullByte(buf, bytesRead)
+        truncated = !binary
+      } else {
+        const buf = await fs.readFile(resolved)
+        binary = hasNullByte(buf, Math.min(buf.length, 8192))
+        if (!binary) {
+          content = buf.toString('utf-8')
+          lineCount = content.split('\n').length
+        }
+      }
+
+      res.json({ path: resolved, name, size, modifiedAt, binary, content, lineCount, truncated })
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  // Serve raw file data (images, videos, etc.)
+  router.get('/api/files/raw', async (req: Request, res: Response) => {
+    const filePath = req.query.path as string
+    if (!filePath) { res.status(400).json({ error: 'Missing path' }); return }
+    try {
+      const resolved = path.resolve(filePath)
+      const stat = await fs.stat(resolved)
+      if (stat.isDirectory()) { res.status(400).json({ error: 'Path is a directory' }); return }
+      const ext = path.extname(resolved).toLowerCase().slice(1)
+      const mimeTypes: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', svg: 'image/svg+xml',
+        mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo',
+        mkv: 'video/x-matroska', webm: 'video/webm',
+        mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+      }
+      const contentType = mimeTypes[ext] || 'application/octet-stream'
+      res.setHeader('Content-Type', contentType)
+      res.setHeader('Content-Length', stat.size)
+      const data = await fs.readFile(resolved)
+      res.send(data)
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  // Search files recursively within a project root
+  router.get('/api/files/search', async (req: Request, res: Response) => {
+    const query = ((req.query.q as string) || '').toLowerCase()
+    const root = req.query.root as string
+    const limit = Math.min(parseInt(req.query.limit as string) || 500, 2000)
+    if (!root) { res.status(400).json({ error: 'Missing root' }); return }
+    try {
+      const resolved = path.resolve(root)
+      const results: { name: string; path: string; relativePath: string; isDirectory: boolean }[] = []
+      const walk = async (dir: string) => {
+        if (results.length >= limit) return
+        let entries: import('node:fs').Dirent[]
+        try { entries = await fs.readdir(dir, { withFileTypes: true, encoding: 'utf-8' }) as unknown as import('node:fs').Dirent[] } catch { return }
+        for (const e of entries) {
+          if (results.length >= limit) break
+          if (e.name.startsWith('.')) continue
+          const fullPath = path.join(dir, e.name)
+          const relativePath = path.relative(resolved, fullPath)
+          if (e.isDirectory()) {
+            if (SKIP_DIRS.has(e.name)) continue
+            results.push({ name: e.name, path: fullPath, relativePath, isDirectory: true })
+            await walk(fullPath)
+          } else {
+            if (!query || e.name.toLowerCase().includes(query) || relativePath.toLowerCase().includes(query)) {
+              results.push({ name: e.name, path: fullPath, relativePath, isDirectory: false })
+            }
+          }
+        }
+      }
+      await walk(resolved)
+      res.json(results)
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  // Batch probe file existence
+  router.post('/api/files/probe', async (req: Request, res: Response) => {
+    const { paths: filePaths } = req.body as { paths?: string[] }
+    if (!filePaths || !Array.isArray(filePaths)) {
+      res.status(400).json({ error: 'Missing paths array' }); return
+    }
+    const results: Record<string, { exists: boolean; isFile: boolean; size: number | null }> = {}
+    await Promise.all(
+      filePaths.slice(0, 200).map(async (p) => {
+        try {
+          const resolved = path.resolve(p)
+          const stat = await fs.stat(resolved)
+          results[p] = { exists: true, isFile: stat.isFile(), size: stat.size }
+        } catch {
+          results[p] = { exists: false, isFile: false, size: null }
+        }
+      })
+    )
+    res.json({ results })
   })
 
   router.post('/api/files/mkdir', async (req: Request, res: Response) => {
