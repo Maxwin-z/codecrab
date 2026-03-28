@@ -481,7 +481,7 @@ describe('TurnManager', () => {
 
       const meta = sessions.getMeta('sess-1')!
       expect(meta.pendingQuestion).toBeNull()
-      expect(agent.resolveQuestionMock).toHaveBeenCalledWith('sess-1', answers)
+      expect(agent.resolveQuestionMock).toHaveBeenCalledWith('tool-1', answers)
     })
   })
 

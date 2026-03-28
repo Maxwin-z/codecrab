@@ -477,7 +477,7 @@ export class TurnManager {
         toolId: pending?.toolId || '',
       })
     }
-    this.agent.resolveQuestion(sessionId, answers)
+    this.agent.resolveQuestion(pending?.toolId || sessionId, answers)
   }
 
   /** Get queue snapshot for a project */
