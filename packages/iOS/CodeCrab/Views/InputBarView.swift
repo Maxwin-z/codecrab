@@ -679,7 +679,7 @@ struct InputBarView: View {
         print("[Voice] duration=\(String(format: "%.2f", duration))s, samples=\(samples.count), peakRMS=\(String(format: "%.6f", peakLevel))")
 
         // Short recording with no significant voice → skip transcription (saves tokens)
-        if duration < 3 && peakLevel < 0.01 {
+        if duration < 1.5 && peakLevel < 0.002 {
             print("[Voice] SKIP: short recording (\(String(format: "%.1f", duration))s) with no voice (peak: \(String(format: "%.6f", peakLevel)))")
             showVoiceHint("No voice detected, please try again")
             return
