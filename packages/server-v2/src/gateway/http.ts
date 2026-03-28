@@ -370,7 +370,7 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
     }
   })
 
-  /** Start editing an agent — returns system-agent project info */
+  /** Start editing an agent — returns per-agent editor project info */
   router.post('/api/agents/:id/edit', async (req: Request, res: Response) => {
     const agentId = req.params.id as string
     try {
@@ -380,17 +380,13 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
         return
       }
       const currentClaudeMd = await core.agents.getClaudeMd(agentId)
-      const systemAgentProjectId = core.agents.getSystemAgentProjectId()
-      const systemAgentProject = core.projects.get(systemAgentProjectId)
-      if (!systemAgentProject) {
-        res.status(500).json({ error: 'System agent project not found' })
-        return
-      }
+      const editorProject = await core.agents.ensureAgentEditorProject(agentId)
       res.json({
-        projectId: systemAgentProjectId,
-        projectPath: systemAgentProject.path,
+        projectId: editorProject.id,
+        projectPath: editorProject.path,
         agentId,
         agentName: agent.name,
+        agentEmoji: agent.emoji,
         currentClaudeMd,
       })
     } catch (err) {

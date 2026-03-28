@@ -9,7 +9,6 @@ struct ProjectListView: View {
     @State private var isLoading = false
     @State private var cardRefreshID = UUID()
     @State private var editingProject: Project?
-    @State private var editingAgent: Agent?
     @State private var showCopiedToast = false
 
     private var selectedProjectId: String? {
@@ -71,7 +70,7 @@ struct ProjectListView: View {
                         .listRowBackground(Color.clear)
                         .contextMenu {
                             Button {
-                                editingAgent = agent
+                                Task { await startEditingAgent(agent) }
                             } label: {
                                 Label("Edit", systemImage: "pencil")
                             }
@@ -178,9 +177,6 @@ struct ProjectListView: View {
                 }
             }
         }
-        .sheet(item: $editingAgent) { agent in
-            EditAgentView(agent: agent)
-        }
         .refreshable {
             await fetchAll()
         }
@@ -215,6 +211,36 @@ struct ProjectListView: View {
             self.agents = fetched
         } catch {
             print("Failed to fetch agents: \(error)")
+        }
+    }
+
+    private func startEditingAgent(_ agent: Agent) async {
+        do {
+            struct EditAgentResponse: Codable {
+                let projectId: String
+                let projectPath: String
+                let agentId: String
+                let agentName: String
+                let agentEmoji: String
+                let currentClaudeMd: String
+            }
+            let response: EditAgentResponse = try await APIClient.shared.fetch(
+                path: "/api/agents/\(agent.id)/edit",
+                method: "POST"
+            )
+            let now = Date().timeIntervalSince1970 * 1000
+            let editorProject = Project(
+                id: response.projectId,
+                name: agent.name,
+                path: response.projectPath,
+                icon: agent.emoji,
+                createdAt: now,
+                updatedAt: now,
+                lastActivityAt: nil
+            )
+            selection = .project(editorProject)
+        } catch {
+            print("Failed to start editing agent: \(error)")
         }
     }
 

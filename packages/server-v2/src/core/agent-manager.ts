@@ -86,6 +86,13 @@ export class AgentManager {
 
     // Ensure internal project exists for system-agent
     await this.ensureAgentProject(SYSTEM_AGENT_ID)
+
+    // Ensure editor projects exist for all user agents
+    for (const agent of this.agents.values()) {
+      if (agent.id !== SYSTEM_AGENT_ID) {
+        await this.ensureAgentEditorProject(agent.id)
+      }
+    }
   }
 
   private async persist(): Promise<void> {
@@ -110,6 +117,11 @@ export class AgentManager {
   /** Get the internal project ID for an agent */
   getProjectId(agentId: string): string {
     return `__agent-${agentId}`
+  }
+
+  /** Get the editor project ID for an agent (per-agent editing sessions) */
+  getEditorProjectId(agentId: string): string {
+    return `__agent-editor-${agentId}`
   }
 
   /** Get agent's directory path */
@@ -178,6 +190,9 @@ export class AgentManager {
     // Create internal project for this agent
     await this.ensureAgentProject(agent.id)
 
+    // Create editor project for this agent
+    await this.ensureAgentEditorProject(agent.id)
+
     return agent
   }
 
@@ -200,22 +215,32 @@ export class AgentManager {
       }
       agent.name = trimmedName
 
-      // Also update the internal project name
+      // Also update the internal project name and editor project name
       const projectId = this.getProjectId(agentId)
       const project = this.projects.get(projectId)
       if (project) {
         await this.projects.update(projectId, { name: trimmedName })
+      }
+      const editorProjectId = this.getEditorProjectId(agentId)
+      const editorProject = this.projects.get(editorProjectId)
+      if (editorProject) {
+        await this.projects.update(editorProjectId, { name: trimmedName })
       }
     }
 
     if (params.emoji) {
       agent.emoji = params.emoji
 
-      // Also update the internal project icon
+      // Also update the internal project icon and editor project icon
       const projectId = this.getProjectId(agentId)
       const project = this.projects.get(projectId)
       if (project) {
         await this.projects.update(projectId, { icon: params.emoji })
+      }
+      const editorProjectId = this.getEditorProjectId(agentId)
+      const editorProject = this.projects.get(editorProjectId)
+      if (editorProject) {
+        await this.projects.update(editorProjectId, { icon: params.emoji })
       }
     }
 
@@ -232,12 +257,13 @@ export class AgentManager {
     this.agents.delete(agentId)
     await this.persist()
 
-    // Delete the internal project
-    const projectId = this.getProjectId(agentId)
-    try {
-      await this.projects.delete(projectId)
-    } catch {
-      // Project might not exist
+    // Delete the internal project and editor project
+    for (const pid of [this.getProjectId(agentId), this.getEditorProjectId(agentId)]) {
+      try {
+        await this.projects.delete(pid)
+      } catch {
+        // Project might not exist
+      }
     }
   }
 
@@ -259,6 +285,27 @@ export class AgentManager {
       path: agentDir,
       icon: agent.emoji,
       id: projectId,
+    })
+  }
+
+  /** Ensure an editor project exists for this agent (uses system-agent CLAUDE.md for editing sessions) */
+  async ensureAgentEditorProject(agentId: string): Promise<ProjectConfig> {
+    const editorProjectId = this.getEditorProjectId(agentId)
+    const existing = this.projects.get(editorProjectId)
+    if (existing) return existing
+
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new AgentNotFoundError('Agent not found')
+
+    // Editor project points to system-agent dir so SDK loads system-agent CLAUDE.md
+    const systemAgentDir = this.getAgentDir(SYSTEM_AGENT_ID)
+    await ensureDir(systemAgentDir)
+
+    return this.projects.create({
+      name: agent.name,
+      path: systemAgentDir,
+      icon: agent.emoji,
+      id: editorProjectId,
     })
   }
 

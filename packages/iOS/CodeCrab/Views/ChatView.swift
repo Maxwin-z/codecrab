@@ -25,6 +25,21 @@ struct ChatView: View {
     @State private var selectedProviderId: String = ""
     @State private var showSessionDetail = false
 
+    // Agent editor mode
+    @State private var agentEditorCompleting = false
+    @State private var agentEditorSentInitial = false
+    @State private var agentEditorError: String?
+    @Environment(\.dismiss) private var dismiss
+
+    private var isAgentEditor: Bool {
+        project.id.hasPrefix("__agent-editor-")
+    }
+
+    private var editingAgentId: String? {
+        guard isAgentEditor else { return nil }
+        return String(project.id.dropFirst("__agent-editor-".count))
+    }
+
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
         guard !wsService.sdkMcpServers.isEmpty else { return [] }
@@ -125,8 +140,20 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: { showFileBrowser = true }) {
-                    Image(systemName: "folder")
+                if isAgentEditor {
+                    Button(action: { completeAgentEditing() }) {
+                        if agentEditorCompleting {
+                            ProgressView()
+                        } else {
+                            Text("Done")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(agentEditorCompleting || wsService.messages.isEmpty)
+                } else {
+                    Button(action: { showFileBrowser = true }) {
+                        Image(systemName: "folder")
+                    }
                 }
             }
         }
@@ -147,6 +174,19 @@ struct ChatView: View {
                 ExecSessionSheet(sessionId: sid)
             }
         }
+        .overlay(alignment: .top) {
+            if let error = agentEditorError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.red.cornerRadius(8))
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onTapGesture { agentEditorError = nil }
+            }
+        }
         .onAppear {
             if autoConnect {
                 connectToProject()
@@ -155,6 +195,9 @@ struct ChatView: View {
             fetchProviders()
             handlePendingShare()
             restoreDraftIfNeeded()
+            if isAgentEditor && initialSessionId == nil {
+                sendAgentEditorInitialPrompt()
+            }
         }
         .onChange(of: pendingAttachments) { _, newAttachments in
             if !newAttachments.isEmpty {
@@ -608,6 +651,116 @@ struct ChatView: View {
             get: { execSessionId != nil },
             set: { if !$0 { execSessionId = nil } }
         )
+    }
+
+    // MARK: - Agent Editor
+
+    private func sendAgentEditorInitialPrompt() {
+        guard !agentEditorSentInitial, let agentId = editingAgentId else { return }
+        agentEditorSentInitial = true
+
+        Task {
+            // Wait for project switch to settle
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+            // Fetch current CLAUDE.md
+            do {
+                struct ClaudeMdResponse: Codable { let content: String }
+                let resp: ClaudeMdResponse = try await APIClient.shared.fetch(
+                    path: "/api/agents/\(agentId)/claude-md"
+                )
+                let prompt: String
+                if resp.content.isEmpty {
+                    prompt = """
+                    I want to create a new agent called "\(project.name)". This agent doesn't have any instructions yet. \
+                    Please help me define what this agent should do. Ask me about its purpose, target tasks, and any specific requirements.
+                    """
+                } else {
+                    prompt = """
+                    I want to edit the agent "\(project.name)". Here is its current CLAUDE.md:
+
+                    ```
+                    \(resp.content)
+                    ```
+
+                    Please help me refine or update these instructions. What would you like to change?
+                    """
+                }
+                wsService.sendPrompt(prompt)
+            } catch {
+                agentEditorError = "Failed to load agent instructions"
+            }
+        }
+    }
+
+    private func completeAgentEditing() {
+        guard let agentId = editingAgentId else { return }
+        agentEditorCompleting = true
+
+        let finalPrompt = """
+        Please finalize the agent's CLAUDE.md now. Output the complete, final CLAUDE.md content wrapped in <agent-claude-md> tags. \
+        Include everything we discussed — the agent's role, capabilities, constraints, and any specific instructions.
+        """
+        wsService.sendPrompt(finalPrompt)
+
+        Task {
+            var attempts = 0
+            while attempts < 120 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                attempts += 1
+
+                guard !wsService.isRunning else { continue }
+
+                let allText = wsService.messages.map { $0.content }.joined(separator: "\n")
+                if let extracted = extractAgentClaudeMd(from: allText) {
+                    await saveAgentClaudeMd(agentId: agentId, content: extracted)
+                    return
+                }
+
+                if let lastAssistant = wsService.messages.last(where: { $0.role == "assistant" }) {
+                    if let extracted = extractAgentClaudeMd(from: lastAssistant.content) {
+                        await saveAgentClaudeMd(agentId: agentId, content: extracted)
+                        return
+                    }
+                }
+
+                await MainActor.run {
+                    agentEditorError = "Could not extract CLAUDE.md content. Please try again."
+                    agentEditorCompleting = false
+                }
+                return
+            }
+
+            await MainActor.run {
+                agentEditorError = "Timed out waiting for response"
+                agentEditorCompleting = false
+            }
+        }
+    }
+
+    private func extractAgentClaudeMd(from text: String) -> String? {
+        guard let startRange = text.range(of: "<agent-claude-md>"),
+              let endRange = text.range(of: "</agent-claude-md>") else {
+            return nil
+        }
+        return String(text[startRange.upperBound..<endRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @MainActor
+    private func saveAgentClaudeMd(agentId: String, content: String) async {
+        do {
+            struct SaveReq: Encodable { let content: String }
+            try await APIClient.shared.request(
+                path: "/api/agents/\(agentId)/edit/complete",
+                method: "POST",
+                body: SaveReq(content: content)
+            )
+            dismiss()
+        } catch {
+            agentEditorError = "Failed to save: \(error.localizedDescription)"
+            agentEditorCompleting = false
+        }
     }
 }
 
