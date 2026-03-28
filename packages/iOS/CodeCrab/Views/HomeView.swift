@@ -3,12 +3,14 @@ import SwiftUI
 /// What the detail column shows
 enum DetailDestination: Hashable {
     case project(Project)
+    case agent(Agent)
     case soul
     case cron
 
     static func == (lhs: DetailDestination, rhs: DetailDestination) -> Bool {
         switch (lhs, rhs) {
         case (.project(let a), .project(let b)): return a.id == b.id
+        case (.agent(let a), .agent(let b)): return a.id == b.id
         case (.soul, .soul): return true
         case (.cron, .cron): return true
         default: return false
@@ -20,6 +22,9 @@ enum DetailDestination: Hashable {
         case .project(let p):
             hasher.combine(0)
             hasher.combine(p)
+        case .agent(let a):
+            hasher.combine(3)
+            hasher.combine(a)
         case .soul:
             hasher.combine(1)
         case .cron:
@@ -36,6 +41,8 @@ struct HomeView: View {
     @State private var detailDestination: DetailDestination?
     @State private var detailPath = NavigationPath()
     @State private var showCreate = false
+    @State private var showCreateAgent = false
+    @State private var showCreateChoice = false
     @State private var showSettings = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var projects: [Project] = []
@@ -51,8 +58,13 @@ struct HomeView: View {
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             HStack {
-                                Button(action: { showCreate = true }) {
+                                Button(action: { showCreateChoice = true }) {
                                     Image(systemName: "plus")
+                                }
+                                .confirmationDialog("Create", isPresented: $showCreateChoice) {
+                                    Button("New Project") { showCreate = true }
+                                    Button("New Agent") { showCreateAgent = true }
+                                    Button("Cancel", role: .cancel) {}
                                 }
                                 Button(action: { showSettings = true }) {
                                     Image(systemName: "gear")
@@ -76,6 +88,11 @@ struct HomeView: View {
             .sheet(isPresented: $showCreate) {
                 NavigationStack {
                     CreateProjectView()
+                }
+            }
+            .sheet(isPresented: $showCreateAgent) {
+                NavigationStack {
+                    CreateAgentView()
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -130,6 +147,9 @@ struct HomeView: View {
         case .project(let project):
             SessionListView(project: project)
                 .id(project.id)
+        case .agent(let agent):
+            AgentDetailView(agent: agent)
+                .id(agent.id)
         case .soul:
             SoulPageView()
         case .cron:

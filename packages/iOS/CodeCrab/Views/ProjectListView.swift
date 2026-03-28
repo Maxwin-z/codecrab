@@ -4,10 +4,12 @@ struct ProjectListView: View {
     @EnvironmentObject var wsService: WebSocketService
     @Binding var selection: DetailDestination?
     @State private var projects: [Project] = []
+    @State private var agents: [Agent] = []
     @State private var cronJobs: [CronJob] = []
     @State private var isLoading = false
     @State private var cardRefreshID = UUID()
     @State private var editingProject: Project?
+    @State private var editingAgent: Agent?
     @State private var showCopiedToast = false
 
     private var selectedProjectId: String? {
@@ -53,6 +55,40 @@ struct ProjectListView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
+            }
+
+            // Agent list
+            if !agents.isEmpty {
+                Section {
+                    ForEach(agents) { agent in
+                        AgentCard(agent: agent, isSelected: {
+                            if case .agent(let a) = selection { return a.id == agent.id }
+                            return false
+                        }())
+                        .tag(DetailDestination.agent(agent))
+                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                        .listRowSeparator(.automatic)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            Button {
+                                editingAgent = agent
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                deleteAgent(agent)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Agents")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(nil)
+                }
             }
 
             // Project list
@@ -142,6 +178,9 @@ struct ProjectListView: View {
                 }
             }
         }
+        .sheet(item: $editingAgent) { agent in
+            EditAgentView(agent: agent)
+        }
         .refreshable {
             await fetchAll()
         }
@@ -155,8 +194,9 @@ struct ProjectListView: View {
         isLoading = true
         cardRefreshID = UUID()
         async let projectsTask: () = fetchProjects()
+        async let agentsTask: () = fetchAgents()
         async let cronTask: () = fetchCronJobs()
-        _ = await (projectsTask, cronTask)
+        _ = await (projectsTask, agentsTask, cronTask)
         isLoading = false
     }
 
@@ -166,6 +206,29 @@ struct ProjectListView: View {
             self.projects = fetched.filter { !$0.id.hasPrefix("__") }
         } catch {
             print("Failed to fetch projects: \(error)")
+        }
+    }
+
+    private func fetchAgents() async {
+        do {
+            let fetched: [Agent] = try await APIClient.shared.fetch(path: "/api/agents")
+            self.agents = fetched
+        } catch {
+            print("Failed to fetch agents: \(error)")
+        }
+    }
+
+    private func deleteAgent(_ agent: Agent) {
+        Task {
+            do {
+                try await APIClient.shared.request(path: "/api/agents/\(agent.id)", method: "DELETE")
+                agents.removeAll { $0.id == agent.id }
+                if case .agent(let a) = selection, a.id == agent.id {
+                    selection = nil
+                }
+            } catch {
+                print("Failed to delete agent: \(error)")
+            }
         }
     }
 
@@ -343,6 +406,41 @@ struct ProjectCard: View {
             p = "~" + p.dropFirst(homeDir.count)
         }
         return p
+    }
+}
+
+// MARK: - Agent Card
+
+struct AgentCard: View {
+    let agent: Agent
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(agent.emoji)
+                .font(.system(size: 28))
+                .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(agent.name)
+                    .font(.headline)
+                    .foregroundColor(isSelected ? .accentColor : .primary)
+                    .lineLimit(1)
+                Text("Agent")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
     }
 }
 

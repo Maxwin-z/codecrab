@@ -11,6 +11,7 @@ import type { CronJob } from '../types/index.js'
 import { registerDevice, unregisterDevice, getDevices } from '../push/store.js'
 import { isApnsConfigured } from '../push/apns.js'
 import { ProjectValidationError, ProjectConflictError, ProjectNotFoundError } from '../core/project.js'
+import { AgentValidationError, AgentConflictError, AgentNotFoundError } from '../core/agent-manager.js'
 import { authMiddleware, getToken, validateToken, generateToken, readConfig, writeConfig } from './auth.js'
 import { getImageFilePath } from '../images.js'
 import { isSoulEnabled, setSoulEnabled } from '../soul/settings.js'
@@ -269,6 +270,165 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
     const id = req.params.id as string
     await core.sessions.delete(id)
     res.json({ ok: true })
+  })
+
+  // ====== Agents API ======
+
+  router.use('/api/agents', authMiddleware)
+
+  router.get('/api/agents', (_req: Request, res: Response) => {
+    const agents = core.agents.list()
+    res.json(agents)
+  })
+
+  router.post('/api/agents', async (req: Request, res: Response) => {
+    const { name, emoji } = req.body as { name?: string; emoji?: string }
+    try {
+      const agent = await core.agents.create({ name: name || '', emoji: emoji || '🤖' })
+      res.status(201).json(agent)
+    } catch (err) {
+      if (err instanceof AgentValidationError) {
+        res.status(400).json({ error: err.message })
+      } else if (err instanceof AgentConflictError) {
+        res.status(409).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
+  })
+
+  router.get('/api/agents/:id', (req: Request, res: Response) => {
+    const agent = core.agents.get(req.params.id as string)
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' })
+      return
+    }
+    res.json(agent)
+  })
+
+  router.patch('/api/agents/:id', async (req: Request, res: Response) => {
+    const { name, emoji } = req.body as { name?: string; emoji?: string }
+    try {
+      const agent = await core.agents.update(req.params.id as string, { name, emoji })
+      res.json(agent)
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        res.status(404).json({ error: err.message })
+      } else if (err instanceof AgentValidationError) {
+        res.status(400).json({ error: err.message })
+      } else if (err instanceof AgentConflictError) {
+        res.status(409).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
+  })
+
+  router.delete('/api/agents/:id', async (req: Request, res: Response) => {
+    try {
+      await core.agents.delete(req.params.id as string)
+      res.status(204).end()
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        res.status(404).json({ error: err.message })
+      } else if (err instanceof AgentValidationError) {
+        res.status(400).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
+  })
+
+  router.get('/api/agents/:id/claude-md', async (req: Request, res: Response) => {
+    try {
+      const content = await core.agents.getClaudeMd(req.params.id as string)
+      res.json({ content })
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        res.status(404).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
+  })
+
+  router.put('/api/agents/:id/claude-md', async (req: Request, res: Response) => {
+    const { content } = req.body as { content?: string }
+    if (content === undefined) {
+      res.status(400).json({ error: 'Missing content' })
+      return
+    }
+    try {
+      await core.agents.saveClaudeMd(req.params.id as string, content)
+      res.json({ content })
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        res.status(404).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
+  })
+
+  /** Start editing an agent — returns system-agent project info */
+  router.post('/api/agents/:id/edit', async (req: Request, res: Response) => {
+    const agentId = req.params.id as string
+    try {
+      const agent = core.agents.get(agentId)
+      if (!agent) {
+        res.status(404).json({ error: 'Agent not found' })
+        return
+      }
+      const currentClaudeMd = await core.agents.getClaudeMd(agentId)
+      const systemAgentProjectId = core.agents.getSystemAgentProjectId()
+      const systemAgentProject = core.projects.get(systemAgentProjectId)
+      if (!systemAgentProject) {
+        res.status(500).json({ error: 'System agent project not found' })
+        return
+      }
+      res.json({
+        projectId: systemAgentProjectId,
+        projectPath: systemAgentProject.path,
+        agentId,
+        agentName: agent.name,
+        currentClaudeMd,
+      })
+    } catch (err) {
+      res.status(500).json({ error: 'Internal server error' })
+    }
+  })
+
+  /** Complete editing — save updated CLAUDE.md */
+  router.post('/api/agents/:id/edit/complete', async (req: Request, res: Response) => {
+    const { content } = req.body as { content?: string }
+    if (content === undefined) {
+      res.status(400).json({ error: 'Missing content' })
+      return
+    }
+    try {
+      await core.agents.saveClaudeMd(req.params.id as string, content)
+      res.json({ content })
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        res.status(404).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
+  })
+
+  /** Get the internal project for an agent (for starting chat sessions) */
+  router.post('/api/agents/:id/use', async (req: Request, res: Response) => {
+    try {
+      const project = await core.agents.ensureAgentProject(req.params.id as string)
+      res.json(project)
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        res.status(404).json({ error: err.message })
+      } else {
+        res.status(500).json({ error: 'Internal server error' })
+      }
+    }
   })
 
   // Setup — provider management

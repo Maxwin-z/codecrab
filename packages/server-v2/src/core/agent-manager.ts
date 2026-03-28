@@ -1,0 +1,281 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+import type { Agent } from '@codecrab/shared'
+import type { ProjectManager } from './project.js'
+import type { ProjectConfig, PermissionMode } from '../types/index.js'
+
+const CONFIG_DIR = join(homedir(), '.codecrab')
+const AGENTS_FILE = join(CONFIG_DIR, 'agents.json')
+const AGENTS_DIR = join(CONFIG_DIR, 'agents')
+
+const SYSTEM_AGENT_ID = '__system-agent'
+const SYSTEM_AGENT_NAME = 'system-agent'
+
+const SYSTEM_AGENT_CLAUDE_MD = `# System Agent — Agent Definition Helper
+
+You are a specialized assistant that helps users define and configure AI agents. Your sole purpose is to help the user craft a clear, effective CLAUDE.md that defines an agent's role, capabilities, and behavior.
+
+## Your Role
+- Help users articulate what their agent should do
+- Ask clarifying questions about the agent's purpose, target tasks, and constraints
+- Suggest improvements and best practices for agent instructions
+- Guide users who send off-topic messages back to agent definition
+
+## Guidelines
+- If the user's message is not about defining the agent's role or capabilities, politely redirect them: "This session is for defining your agent's role and capabilities. Could you describe what you'd like this agent to do?"
+- Be concise and practical in your suggestions
+- Structure the CLAUDE.md with clear sections: Role, Capabilities, Constraints, Output Format, etc.
+- Tailor instructions to the agent's specific domain (writing, coding, research, data collection, etc.)
+
+## Finalization
+When the user is satisfied or when asked to finalize, output the complete CLAUDE.md content wrapped in special markers:
+
+<agent-claude-md>
+... complete CLAUDE.md content here ...
+</agent-claude-md>
+
+Always include these markers so the system can extract the content automatically.
+`
+
+async function ensureDir(dir: string) {
+  await mkdir(dir, { recursive: true })
+}
+
+export class AgentManager {
+  private agents = new Map<string, Agent>()
+
+  constructor(private projects: ProjectManager) {}
+
+  async load(): Promise<void> {
+    try {
+      const data = await readFile(AGENTS_FILE, 'utf-8')
+      const agents: Agent[] = JSON.parse(data)
+      for (const a of agents) {
+        this.agents.set(a.id, a)
+      }
+    } catch {
+      // No agents file yet
+    }
+  }
+
+  /** Ensure system-agent exists on startup */
+  async ensureSystemAgent(): Promise<void> {
+    if (!this.agents.has(SYSTEM_AGENT_ID)) {
+      const now = Date.now()
+      const agent: Agent = {
+        id: SYSTEM_AGENT_ID,
+        name: SYSTEM_AGENT_NAME,
+        emoji: '🤖',
+        createdAt: now,
+        updatedAt: now,
+      }
+      this.agents.set(SYSTEM_AGENT_ID, agent)
+      await this.persist()
+    }
+
+    // Ensure directory and CLAUDE.md
+    const agentDir = this.getAgentDir(SYSTEM_AGENT_ID)
+    await ensureDir(agentDir)
+    const claudeMdPath = join(agentDir, 'CLAUDE.md')
+    try {
+      await readFile(claudeMdPath, 'utf-8')
+    } catch {
+      await writeFile(claudeMdPath, SYSTEM_AGENT_CLAUDE_MD)
+    }
+
+    // Ensure internal project exists for system-agent
+    await this.ensureAgentProject(SYSTEM_AGENT_ID)
+  }
+
+  private async persist(): Promise<void> {
+    await ensureDir(CONFIG_DIR)
+    const agents = Array.from(this.agents.values())
+    await writeFile(AGENTS_FILE, JSON.stringify(agents, null, 2))
+  }
+
+  private getAgentDir(agentId: string): string {
+    return join(AGENTS_DIR, agentId)
+  }
+
+  /** List all agents, excluding system-agent */
+  list(): Agent[] {
+    return Array.from(this.agents.values()).filter(a => a.id !== SYSTEM_AGENT_ID)
+  }
+
+  get(agentId: string): Agent | null {
+    return this.agents.get(agentId) ?? null
+  }
+
+  /** Get the internal project ID for an agent */
+  getProjectId(agentId: string): string {
+    return `__agent-${agentId}`
+  }
+
+  /** Get agent's directory path */
+  getPath(agentId: string): string {
+    return this.getAgentDir(agentId)
+  }
+
+  /** Read agent's CLAUDE.md content */
+  async getClaudeMd(agentId: string): Promise<string> {
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new AgentNotFoundError('Agent not found')
+    const claudeMdPath = join(this.getAgentDir(agentId), 'CLAUDE.md')
+    try {
+      return await readFile(claudeMdPath, 'utf-8')
+    } catch {
+      return ''
+    }
+  }
+
+  /** Save agent's CLAUDE.md content */
+  async saveClaudeMd(agentId: string, content: string): Promise<void> {
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new AgentNotFoundError('Agent not found')
+    const agentDir = this.getAgentDir(agentId)
+    await ensureDir(agentDir)
+    await writeFile(join(agentDir, 'CLAUDE.md'), content)
+  }
+
+  /** Create a new agent */
+  async create(params: { name: string; emoji: string }): Promise<Agent> {
+    if (!params.name || !params.name.trim()) {
+      throw new AgentValidationError('Agent name is required')
+    }
+
+    const trimmedName = params.name.trim()
+
+    // Check reserved name
+    if (trimmedName.toLowerCase() === SYSTEM_AGENT_NAME) {
+      throw new AgentConflictError(`"${SYSTEM_AGENT_NAME}" is a reserved agent name`)
+    }
+
+    // Check duplicate name
+    for (const a of this.agents.values()) {
+      if (a.id !== SYSTEM_AGENT_ID && a.name === trimmedName) {
+        throw new AgentConflictError('An agent with this name already exists')
+      }
+    }
+
+    const now = Date.now()
+    const agent: Agent = {
+      id: `agent-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      name: trimmedName,
+      emoji: params.emoji || '🤖',
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    // Create agent directory and empty CLAUDE.md
+    const agentDir = this.getAgentDir(agent.id)
+    await ensureDir(agentDir)
+    await writeFile(join(agentDir, 'CLAUDE.md'), '')
+
+    this.agents.set(agent.id, agent)
+    await this.persist()
+
+    // Create internal project for this agent
+    await this.ensureAgentProject(agent.id)
+
+    return agent
+  }
+
+  /** Update an existing agent's name and/or emoji */
+  async update(agentId: string, params: { name?: string; emoji?: string }): Promise<Agent> {
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new AgentNotFoundError('Agent not found')
+    if (agentId === SYSTEM_AGENT_ID) throw new AgentValidationError('Cannot modify system agent')
+
+    if (params.name) {
+      const trimmedName = params.name.trim()
+      if (trimmedName.toLowerCase() === SYSTEM_AGENT_NAME) {
+        throw new AgentConflictError(`"${SYSTEM_AGENT_NAME}" is a reserved agent name`)
+      }
+      // Check duplicate name (excluding self)
+      for (const a of this.agents.values()) {
+        if (a.id !== agentId && a.id !== SYSTEM_AGENT_ID && a.name === trimmedName) {
+          throw new AgentConflictError('An agent with this name already exists')
+        }
+      }
+      agent.name = trimmedName
+
+      // Also update the internal project name
+      const projectId = this.getProjectId(agentId)
+      const project = this.projects.get(projectId)
+      if (project) {
+        await this.projects.update(projectId, { name: trimmedName })
+      }
+    }
+
+    if (params.emoji) {
+      agent.emoji = params.emoji
+
+      // Also update the internal project icon
+      const projectId = this.getProjectId(agentId)
+      const project = this.projects.get(projectId)
+      if (project) {
+        await this.projects.update(projectId, { icon: params.emoji })
+      }
+    }
+
+    agent.updatedAt = Date.now()
+    await this.persist()
+    return agent
+  }
+
+  /** Delete an agent */
+  async delete(agentId: string): Promise<void> {
+    if (!this.agents.has(agentId)) throw new AgentNotFoundError('Agent not found')
+    if (agentId === SYSTEM_AGENT_ID) throw new AgentValidationError('Cannot delete system agent')
+
+    this.agents.delete(agentId)
+    await this.persist()
+
+    // Delete the internal project
+    const projectId = this.getProjectId(agentId)
+    try {
+      await this.projects.delete(projectId)
+    } catch {
+      // Project might not exist
+    }
+  }
+
+  /** Ensure an internal project exists for this agent (for session/WS infrastructure) */
+  async ensureAgentProject(agentId: string): Promise<ProjectConfig> {
+    const projectId = this.getProjectId(agentId)
+    const existing = this.projects.get(projectId)
+    if (existing) return existing
+
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new AgentNotFoundError('Agent not found')
+
+    const agentDir = this.getAgentDir(agentId)
+    await ensureDir(agentDir)
+
+    // Create internal project with __ prefix (filtered out by iOS/web)
+    return this.projects.create({
+      name: agent.name,
+      path: agentDir,
+      icon: agent.emoji,
+      id: projectId,
+    })
+  }
+
+  /** Get the system-agent's internal project ID */
+  getSystemAgentProjectId(): string {
+    return this.getProjectId(SYSTEM_AGENT_ID)
+  }
+}
+
+export class AgentValidationError extends Error {
+  constructor(message: string) { super(message); this.name = 'AgentValidationError' }
+}
+
+export class AgentConflictError extends Error {
+  constructor(message: string) { super(message); this.name = 'AgentConflictError' }
+}
+
+export class AgentNotFoundError extends Error {
+  constructor(message: string) { super(message); this.name = 'AgentNotFoundError' }
+}

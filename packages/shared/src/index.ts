@@ -8,3 +8,6 @@ export * from './models'
 
 // Project & session types
 export * from './projects'
+
+// Agent types
+export * from './agents'

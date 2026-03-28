@@ -141,21 +141,23 @@ export class ProjectManager {
   }
 
   /** Create a new project. Returns the created project or throws on validation error. */
-  async create(params: { name: string; path: string; icon?: string }): Promise<ProjectConfig> {
+  async create(params: { name: string; path: string; icon?: string; id?: string }): Promise<ProjectConfig> {
     if (!params.name || !params.path) {
       throw new ProjectValidationError('Missing name or path')
     }
 
-    // Check for duplicate path
-    for (const p of this.projects.values()) {
-      if (p.path === params.path) {
-        throw new ProjectConflictError('A project already exists for this directory')
+    // Check for duplicate path (skip for internal __ projects)
+    if (!params.id?.startsWith('__')) {
+      for (const p of this.projects.values()) {
+        if (p.path === params.path) {
+          throw new ProjectConflictError('A project already exists for this directory')
+        }
       }
     }
 
     const now = Date.now()
     const config: ProjectConfig = {
-      id: `proj-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      id: params.id || `proj-${now}-${Math.random().toString(36).slice(2, 8)}`,
       name: params.name,
       path: params.path,
       icon: params.icon || '📁',
