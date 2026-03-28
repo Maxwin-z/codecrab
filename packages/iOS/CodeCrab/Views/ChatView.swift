@@ -21,6 +21,8 @@ struct ChatView: View {
     @State private var isNearBottom: Bool = true
     @State private var isUserInteracting: Bool = false
     @State private var scrollViewHeight: CGFloat = 0
+    @State private var providers: [ProviderConfig] = []
+    @State private var selectedProviderId: String = ""
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -137,6 +139,7 @@ struct ChatView: View {
                 connectToProject()
             }
             fetchMcps()
+            fetchProviders()
             handlePendingShare()
             restoreDraftIfNeeded()
         }
@@ -360,6 +363,39 @@ struct ChatView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            // Provider Picker
+            if providers.count > 1 {
+                Menu {
+                    ForEach(providers) { provider in
+                        Button {
+                            selectedProviderId = provider.id
+                        } label: {
+                            HStack {
+                                Text(provider.name)
+                                if selectedProviderId == provider.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 12))
+                        Text(selectedProviderName)
+                            .font(.subheadline)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color(UIColor.tertiarySystemFill))
+                    .cornerRadius(8)
+                }
+                .padding(.top, 20)
+            }
+
             // Down arrow indicator
             VStack(spacing: 6) {
                 Image(systemName: "arrow.down")
@@ -376,6 +412,13 @@ struct ChatView: View {
         }
         .padding(.horizontal)
         .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+    }
+
+    private var selectedProviderName: String {
+        if selectedProviderId.isEmpty {
+            return "Default Provider"
+        }
+        return providers.first(where: { $0.id == selectedProviderId })?.name ?? selectedProviderId
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, force: Bool = false) {
@@ -425,7 +468,8 @@ struct ChatView: View {
                 images: images,
                 enabledMcps: enabledCustomMcps,
                 disabledSdkServers: disabledSdkServers.isEmpty ? nil : disabledSdkServers,
-                disabledSkills: disabledSkills.isEmpty ? nil : disabledSkills
+                disabledSkills: disabledSkills.isEmpty ? nil : disabledSkills,
+                providerId: selectedProviderId.isEmpty ? nil : selectedProviderId
             )
         }
     }
@@ -447,6 +491,36 @@ struct ChatView: View {
                 initializedMcps = true
             } catch {
                 print("Failed to load MCPs: \(error)")
+            }
+        }
+    }
+
+    private func fetchProviders() {
+        Task {
+            do {
+                guard let serverURL = UserDefaults.standard.string(forKey: "codecrab_server_url"),
+                      let url = URL(string: "\(serverURL)/api/setup/providers") else { return }
+                var request = URLRequest(url: url)
+                if let token = KeychainHelper.shared.getToken() {
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                }
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else { return }
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let providersList = json["providers"] as? [[String: Any]],
+                      let defaultId = json["defaultProviderId"] as? String else { return }
+                var configs: [ProviderConfig] = []
+                for p in providersList {
+                    guard let id = p["id"] as? String, let name = p["name"] as? String, let provider = p["provider"] as? String else { continue }
+                    configs.append(ProviderConfig(id: id, name: name, provider: provider, apiKey: nil, modelId: p["modelId"] as? String, baseUrl: p["baseUrl"] as? String))
+                }
+                self.providers = configs
+                // Pre-select the default provider
+                if selectedProviderId.isEmpty {
+                    selectedProviderId = defaultId
+                }
+            } catch {
+                print("Failed to fetch providers: \(error)")
             }
         }
     }

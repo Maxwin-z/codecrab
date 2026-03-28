@@ -201,6 +201,10 @@ export function useWebSocket(): UseWebSocketReturn {
     send({ type: 'respond_question', sessionId, toolId, answers })
   }, [send])
 
+  const dismissQuestion = useCallback((sessionId: string, toolId: string) => {
+    send({ type: 'dismiss_question', sessionId, toolId } as any)
+  }, [send])
+
   const dequeue = useCallback((queryId: string) => {
     send({ type: 'dequeue', queryId })
   }, [send])
@@ -227,6 +231,7 @@ export function useWebSocket(): UseWebSocketReturn {
     setPermissionMode,
     respondPermission,
     respondQuestion,
+    dismissQuestion,
     dequeue,
     executeNow,
     requestQueueSnapshot,

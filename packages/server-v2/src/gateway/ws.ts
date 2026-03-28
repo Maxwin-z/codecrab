@@ -91,6 +91,9 @@ function handleClientMessage(core: CoreEngine, broadcaster: Broadcaster, client:
     case 'respond_question':
       handleRespondQuestion(core, message)
       break
+    case 'dismiss_question':
+      handleDismissQuestion(core, message)
+      break
     case 'respond_permission':
       handleRespondPermission(core, message)
       break
@@ -246,6 +249,12 @@ function handleRespondQuestion(core: CoreEngine, message: any): void {
   const sessionId = message.sessionId
   if (!sessionId) return
   core.turns.respondQuestion(sessionId, message.answers)
+}
+
+function handleDismissQuestion(core: CoreEngine, message: any): void {
+  const sessionId = message.sessionId
+  if (!sessionId) return
+  core.turns.dismissQuestion(sessionId)
 }
 
 function handleRespondPermission(core: CoreEngine, message: any): void {

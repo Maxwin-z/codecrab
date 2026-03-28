@@ -364,6 +364,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           <UserQuestionForm
             pending={pendingQuestion}
             onSubmit={(answers) => ws.respondQuestion(viewingSessionId!, pendingQuestion!.toolId, answers)}
+            onDismiss={() => ws.dismissQuestion(viewingSessionId!, pendingQuestion!.toolId)}
           />
         )}
 

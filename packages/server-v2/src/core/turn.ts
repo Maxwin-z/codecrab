@@ -430,12 +430,25 @@ export class TurnManager {
   abort(projectId: string): void {
     const running = this.queue.getRunning(projectId)
     if (running) {
-      // Abort via the abort controller
+      // 1. Clear pending interaction state BEFORE aborting
+      //    so session doesn't retain stale pendingQuestion/pendingPermission
+      this.sessions.clearPendingQuestion(running.sessionId)
+      this.sessions.clearPendingPermission(running.sessionId)
+      this.core.emit('interaction:question_resolved', {
+        projectId,
+        sessionId: running.sessionId,
+        toolId: '',
+      })
+
+      // 2. Clean up agent resolvers first (resolves with deny, no SDK write needed)
+      this.agent.abort(running.sessionId)
+
+      // 3. Then fire abort signal — the resolvers are already cleaned up
+      //    so the signal won't trigger a stale canUseTool resolve → SDK write race
       const ac = this.abortControllers.get(running.id)
       if (ac) {
         ac.abort()
       }
-      this.agent.abort(running.sessionId)
       this.queue.cancel(running.id)
     }
   }
@@ -478,6 +491,15 @@ export class TurnManager {
       })
     }
     this.agent.resolveQuestion(pending?.toolId || sessionId, answers)
+  }
+
+  /** Dismiss a pending question — aborts the entire turn */
+  dismissQuestion(sessionId: string): void {
+    const meta = this.sessions.getMeta(sessionId)
+    if (!meta) return
+    // Abort the turn for this project — this clears pending state,
+    // resolvers, and stops the query cleanly.
+    this.abort(meta.projectId)
   }
 
   /** Get queue snapshot for a project */

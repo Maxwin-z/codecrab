@@ -60,6 +60,7 @@ export interface AgentInterface {
   probe(cwd: string, model?: string, env?: Record<string, string | undefined>): Promise<SdkInitInfo>
   resolvePermission(requestId: string, behavior: 'allow' | 'deny'): void
   resolveQuestion(sessionId: string, answers: Record<string, string | string[]>): void
+  denyQuestion(toolId: string): void
 }
 
 // ============ Core Layer Types ============

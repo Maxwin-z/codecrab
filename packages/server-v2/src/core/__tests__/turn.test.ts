@@ -11,6 +11,7 @@ function createMockAgent(events: AgentStreamEvent[] = []): AgentInterface & {
   abortMock: ReturnType<typeof vi.fn>
   resolvePermissionMock: ReturnType<typeof vi.fn>
   resolveQuestionMock: ReturnType<typeof vi.fn>
+  denyQuestionMock: ReturnType<typeof vi.fn>
 } {
   const queryMock = vi.fn()
   const abortMock = vi.fn()
@@ -24,16 +25,20 @@ function createMockAgent(events: AgentStreamEvent[] = []): AgentInterface & {
     }
   })
 
+  const denyQuestionMock = vi.fn()
+
   return {
     query: queryMock,
     abort: abortMock,
     probe: probeMock,
     resolvePermission: resolvePermissionMock,
     resolveQuestion: resolveQuestionMock,
+    denyQuestion: denyQuestionMock,
     queryMock,
     abortMock,
     resolvePermissionMock,
     resolveQuestionMock,
+    denyQuestionMock,
   }
 }
 

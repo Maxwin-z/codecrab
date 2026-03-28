@@ -46,6 +46,11 @@ export interface RespondQuestionMessage extends ProjectContext {
   answers: Record<string, string | string[]>
 }
 
+export interface DismissQuestionMessage extends ProjectContext {
+  type: 'dismiss_question'
+  toolId: string
+}
+
 export interface RespondPermissionMessage extends ProjectContext {
   type: 'respond_permission'
   requestId: string
@@ -103,6 +108,7 @@ export type ClientMessage =
   | AbortMessage
   | ResumeSessionMessage
   | RespondQuestionMessage
+  | DismissQuestionMessage
   | RespondPermissionMessage
   | SetProviderMessage
   | SetModelMessage

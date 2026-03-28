@@ -1412,7 +1412,7 @@ class WebSocketService: ObservableObject {
     // MARK: - Actions
 
     @discardableResult
-    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil, disabledSdkServers: [String]? = nil, disabledSkills: [String]? = nil) -> Bool {
+    func sendPrompt(_ text: String, images: [ImageAttachment]? = nil, enabledMcps: [String]? = nil, disabledSdkServers: [String]? = nil, disabledSkills: [String]? = nil, providerId: String? = nil) -> Bool {
         guard let projectId = activeProjectId else { return false }
 
         var payload: [String: Any] = [
@@ -1430,6 +1430,10 @@ class WebSocketService: ObservableObject {
             self.sessionId = tempId
             ensureProjectState(projectId)
             projectStates[projectId]!.sessionId = tempId
+            // Include providerId for new session creation
+            if let providerId = providerId, !providerId.isEmpty {
+                payload["providerId"] = providerId
+            }
         } else {
             payload["sessionId"] = sessionId
         }
@@ -1688,6 +1692,13 @@ class WebSocketService: ObservableObject {
     }
 
     func dismissQuestion() {
+        guard let pq = self.pendingQuestion, let projectId = activeProjectId else { return }
+        sendWebSocketMessage([
+            "type": "dismiss_question",
+            "toolId": pq.toolId,
+            "projectId": projectId,
+            "sessionId": sessionId
+        ])
         self.pendingQuestion = nil
     }
 

@@ -8,7 +8,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { initApns, isApnsConfigured, broadcastPush, closeApns } from './apns.js'
-import { getLastActiveDeviceToken } from './store.js'
+import { getDeviceTokens } from './store.js'
 import type { CoreEngine } from '../core/index.js'
 
 const PROJECTS_FILE = path.join(os.homedir(), '.codecrab', 'projects.json')
@@ -31,18 +31,21 @@ function getProjectDisplayName(projectId: string): string {
   return 'CodeCrab'
 }
 
-/** Best-effort push — never throws */
+/** Best-effort push to all registered devices — never throws */
 async function sendPush(title: string, body: string, data?: Record<string, string>): Promise<void> {
   if (!isApnsConfigured()) return
-  const token = getLastActiveDeviceToken()
-  if (!token) return
+  const tokens = getDeviceTokens()
+  if (tokens.length === 0) return
 
   try {
-    const results = await broadcastPush([token], title, body, data)
-    if (results[0]?.success) {
-      console.log(`[Push] Sent to ${token.slice(0, 8)}...`)
-    } else {
-      console.log(`[Push] Failed for ${token.slice(0, 8)}... reason=${results[0]?.reason}`)
+    const results = await broadcastPush(tokens, title, body, data)
+    for (let i = 0; i < results.length; i++) {
+      const token = tokens[i]
+      if (results[i]?.success) {
+        console.log(`[Push] Sent to ${token.slice(0, 8)}...`)
+      } else {
+        console.log(`[Push] Failed for ${token.slice(0, 8)}... reason=${results[i]?.reason}`)
+      }
     }
   } catch (err: any) {
     console.error(`[Push] Failed: ${err.message}`)

@@ -124,10 +124,10 @@ export class ClaudeAgent implements AgentInterface {
     (result: { behavior: 'allow' | 'deny'; message?: string; updatedInput?: unknown }) => void
   >()
 
-  /** Question resolvers: toolId -> resolver function */
+  /** Question resolvers: toolId -> { resolve, input } for allow/deny */
   private questionResolvers = new Map<
     string,
-    (answers: Record<string, string | string[]>) => void
+    { resolve: (value: { behavior: string; updatedInput?: unknown }) => void; input: unknown }
   >()
 
   // ── query ───────────────────────────────────────────────────────────────
@@ -159,25 +159,26 @@ export class ClaudeAgent implements AgentInterface {
   // ── abort ───────────────────────────────────────────────────────────────
 
   abort(sessionId: string): void {
+    // 1. Clear pending resolvers BEFORE aborting the query
+    //    so canUseTool promises are resolved before the signal fires
+    for (const [id, resolver] of this.permissionResolvers) {
+      resolver({ behavior: 'deny', message: 'Aborted' })
+      this.permissionResolvers.delete(id)
+    }
+    // Remove question resolvers without calling them —
+    // they will NOT be resolved via the allow path.
+    // The abort signal handler in canUseTool won't fire either
+    // since we delete the resolver first.
+    this.questionResolvers.clear()
+
+    // 2. Then abort the query stream
     const q = this.activeQueries.get(sessionId)
     if (q) {
-      // Signal abort — delayed close to let the signal propagate
       try { q.abort?.() } catch { /* ignore */ }
       setTimeout(() => {
         try { q.close() } catch { /* already closed */ }
       }, 500)
       this.activeQueries.delete(sessionId)
-    }
-
-    // Reject any pending permission/question resolvers for this session
-    // (they hold session-keyed IDs, so iterate all)
-    for (const [id, resolver] of this.permissionResolvers) {
-      resolver({ behavior: 'deny', message: 'Aborted' })
-      this.permissionResolvers.delete(id)
-    }
-    for (const [id, resolver] of this.questionResolvers) {
-      resolver({})
-      this.questionResolvers.delete(id)
     }
   }
 
@@ -251,9 +252,21 @@ export class ClaudeAgent implements AgentInterface {
   }
 
   resolveQuestion(toolId: string, answers: Record<string, string | string[]>): void {
-    const resolver = this.questionResolvers.get(toolId)
-    if (resolver) {
-      resolver(answers)
+    const entry = this.questionResolvers.get(toolId)
+    if (entry) {
+      entry.resolve({
+        behavior: 'allow',
+        updatedInput: { ...(entry.input as any), answers },
+      })
+      this.questionResolvers.delete(toolId)
+    }
+  }
+
+  /** Deny/dismiss a pending question — resolves the canUseTool promise with 'deny' */
+  denyQuestion(toolId: string): void {
+    const entry = this.questionResolvers.get(toolId)
+    if (entry) {
+      entry.resolve({ behavior: 'deny' })
       this.questionResolvers.delete(toolId)
     }
   }
@@ -370,6 +383,9 @@ export class ClaudeAgent implements AgentInterface {
           `\n2. When there are multiple possible approaches or solutions — present the options and let the user choose.` +
           `\n3. When you need to confirm potentially destructive or irreversible actions (deleting files, overwriting data, force-pushing, etc.).` +
           `\n4. When a task requires assumptions about the user's intent, preferences, or environment that you cannot determine from context.` +
+          `\n5. When the user explicitly asks you to ask questions, confirm with them, or discuss before proceeding ` +
+          `(e.g. "问我几个问题", "有什么问题先和我确认", "ask me questions", "check with me first", "先问我再做", "和我讨论一下方案"). ` +
+          `In these cases you MUST use the AskUserQuestion tool — do NOT just output text. The user is on a chat interface and can ONLY respond through the AskUserQuestion tool's interactive form.` +
           `\nPrefer using select/multi-select question types when there are discrete options, and free-text when open-ended input is needed. ` +
           `Do NOT guess and iterate — ask once, then act. This saves both time and API costs.` +
           `\n\nHIGHEST PRIORITY OVERRIDE: If the user explicitly says to decide on your own (e.g. "你自主决定", "let you decide", "你来决定", "自己判断", "不用问我"), ` +
@@ -436,19 +452,16 @@ export class ClaudeAgent implements AgentInterface {
             questions: (input as any).questions,
           })
 
-          // Block until resolved
+          // Block until resolved (by resolveQuestion or denyQuestion)
           return new Promise<{ behavior: string; updatedInput?: unknown }>((resolve) => {
-            this.questionResolvers.set(toolId, (answers) => {
-              resolve({
-                behavior: 'allow',
-                updatedInput: { ...input, answers },
-              })
-            })
+            this.questionResolvers.set(toolId, { resolve, input })
 
-            // Resolve on abort
+            // On abort, just clean up the resolver — do NOT call resolve().
+            // The SDK handles abort via its own signal mechanism.
+            // Resolving with 'deny' here races with the abort and causes
+            // "Operation aborted" when the SDK tries to write the deny response.
             const onAbort = () => {
               this.questionResolvers.delete(toolId)
-              resolve({ behavior: 'deny', message: 'Aborted' } as any)
             }
             opts.signal.addEventListener('abort', onAbort, { once: true })
           })

@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { MessageCircleQuestion, Send } from 'lucide-react'
+import { MessageCircleQuestion, Send, X } from 'lucide-react'
 import type { PendingQuestion } from '@/store/types'
 
 export function UserQuestionForm({
   pending,
   onSubmit,
+  onDismiss,
 }: {
   pending: PendingQuestion
   onSubmit: (answers: Record<string, string | string[]>) => void
+  onDismiss: () => void
 }) {
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({})
 
@@ -64,10 +66,16 @@ export function UserQuestionForm({
           </div>
         ))}
 
-        <Button type="submit" size="sm" className="gap-1">
-          <Send className="h-3.5 w-3.5" />
-          Submit
-        </Button>
+        <div className="flex gap-2">
+          <Button type="submit" size="sm" className="gap-1">
+            <Send className="h-3.5 w-3.5" />
+            Submit
+          </Button>
+          <Button type="button" size="sm" variant="ghost" className="gap-1" onClick={onDismiss}>
+            <X className="h-3.5 w-3.5" />
+            Dismiss
+          </Button>
+        </div>
       </form>
     </div>
   )
