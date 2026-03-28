@@ -728,6 +728,12 @@ export class ClaudeAgent implements AgentInterface {
             resultText = resultText.replace(suggestionsMatch[0], '').trim()
           }
 
+          // Extract contextWindow from modelUsage (keyed by model name)
+          const modelUsageValues = Object.values(m.modelUsage || {}) as Array<{ contextWindow?: number }>
+          if (modelUsageValues.length > 0 && modelUsageValues[0].contextWindow) {
+            contextWindowMax = modelUsageValues[0].contextWindow
+          }
+
           const usage: UsageInfo = {
             inputTokens: m.usage?.input_tokens ?? 0,
             outputTokens: m.usage?.output_tokens ?? 0,

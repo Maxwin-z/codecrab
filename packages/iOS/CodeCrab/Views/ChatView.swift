@@ -23,6 +23,7 @@ struct ChatView: View {
     @State private var scrollViewHeight: CGFloat = 0
     @State private var providers: [ProviderConfig] = []
     @State private var selectedProviderId: String = ""
+    @State private var showSessionDetail = false
 
     // Build SDK MCP entries from init message (mirrors web sdkMcpEntries)
     private var sdkMcpEntries: [McpInfo] {
@@ -75,7 +76,6 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            sessionUsageBar
             messagesSection
             bottomControlsSection
         }
@@ -98,6 +98,13 @@ struct ChatView: View {
                                 .fontDesign(.monospaced)
                                 .foregroundStyle(.secondary)
                         }
+                        if let usage = wsService.sessionUsage,
+                           usage.contextWindowMax > 0, usage.contextWindowUsed > 0 {
+                            Button(action: { showSessionDetail = true }) {
+                                ContextRingView(ratio: Double(usage.contextWindowUsed) / Double(usage.contextWindowMax))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     if let hb = wsService.activityHeartbeat {
                         HStack(spacing: 4) {
@@ -108,6 +115,12 @@ struct ChatView: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    }
+                }
+                .sheet(isPresented: $showSessionDetail) {
+                    if let usage = wsService.sessionUsage {
+                        SessionDetailView(usage: usage, sessionId: wsService.sessionId)
+                            .presentationDetents([.medium, .large])
                     }
                 }
             }
@@ -588,48 +601,6 @@ struct ChatView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return "\(minutes)m \(seconds)s"
-    }
-
-    // MARK: - Session Usage Bar
-
-    @ViewBuilder
-    private var sessionUsageBar: some View {
-        if let usage = wsService.sessionUsage {
-            HStack(spacing: 8) {
-                let totalTokensK = Double(usage.totalInputTokens + usage.totalOutputTokens) / 1000.0
-                Text("$\(usage.totalCostUsd, specifier: "%.4f")")
-                    .fontDesign(.monospaced)
-                Text("·").foregroundStyle(.quaternary)
-                Text("\(totalTokensK, specifier: "%.1f")k tok")
-                    .fontDesign(.monospaced)
-                Text("·").foregroundStyle(.quaternary)
-                Text("\(usage.queryCount)q")
-                    .fontDesign(.monospaced)
-                if usage.contextWindowUsed > 0 && usage.contextWindowMax > 0 {
-                    Text("·").foregroundStyle(.quaternary)
-                    let ratio = Double(usage.contextWindowUsed) / Double(usage.contextWindowMax)
-                    GeometryReader { _ in
-                        Capsule()
-                            .fill(Color.secondary.opacity(0.2))
-                            .frame(width: 48, height: 6)
-                            .overlay(alignment: .leading) {
-                                Capsule()
-                                    .fill(ratio > 0.8 ? Color.red : ratio > 0.5 ? Color.yellow : Color.blue)
-                                    .frame(width: min(48, 48 * ratio), height: 6)
-                            }
-                    }
-                    .frame(width: 48, height: 6)
-                    Text("\(Int(ratio * 100))%")
-                        .fontDesign(.monospaced)
-                }
-                Spacer()
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
-            .padding(.vertical, 4)
-            .background(Color(UIColor.secondarySystemBackground))
-        }
     }
 
     private var showExecSession: Binding<Bool> {
