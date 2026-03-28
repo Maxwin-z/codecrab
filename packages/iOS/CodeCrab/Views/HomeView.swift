@@ -43,12 +43,6 @@ struct HomeView: View {
     @State private var shareAttachments: [ImageAttachment] = []
     @State private var shareSessionId: String? = nil
 
-    @StateObject private var gridManager = GridLayoutManager()
-
-    private var isIPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
-    }
-
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -57,9 +51,6 @@ struct HomeView: View {
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             HStack {
-                                if isIPad {
-                                    GridLayoutPicker(gridManager: gridManager)
-                                }
                                 Button(action: { showCreate = true }) {
                                     Image(systemName: "plus")
                                 }
@@ -70,7 +61,17 @@ struct HomeView: View {
                         }
                     }
             } detail: {
-                detailContent
+                NavigationStack(path: $detailPath) {
+                    detailRootView
+                        .navigationDestination(for: ChatRoute.self) { route in
+                            ChatView(
+                                project: route.project,
+                                initialSessionId: route.sessionId,
+                                pendingAttachments: $shareAttachments,
+                                pendingSessionId: $shareSessionId
+                            )
+                        }
+                }
             }
             .sheet(isPresented: $showCreate) {
                 NavigationStack {
@@ -82,15 +83,8 @@ struct HomeView: View {
                     SettingsView()
                 }
             }
-            .onChange(of: detailDestination) { _, newDest in
-                if gridManager.isSingleLayout {
-                    // Single layout: reset navigation path as before
-                    detailPath = NavigationPath()
-                }
-                // Route sidebar selection to the active grid cell
-                if let dest = newDest {
-                    gridManager.setContentForActiveCell(.from(dest))
-                }
+            .onChange(of: detailDestination) { _, _ in
+                detailPath = NavigationPath()
             }
 
             // Toast overlay
@@ -128,58 +122,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Detail Content
-
-    @ViewBuilder
-    private var detailContent: some View {
-        if isIPad && !gridManager.isSingleLayout {
-            if gridManager.isExpanded {
-                // Expanded cell mode: show single cell with nav bar visible
-                GridContainerView(
-                    gridManager: gridManager,
-                    shareAttachments: $shareAttachments,
-                    shareSessionId: $shareSessionId
-                )
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                gridManager.collapseCell()
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                    .font(.system(size: 14))
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Grid mode on iPad
-                GridContainerView(
-                    gridManager: gridManager,
-                    shareAttachments: $shareAttachments,
-                    shareSessionId: $shareSessionId
-                )
-                .toolbar(.hidden, for: .navigationBar)
-            }
-        } else {
-            // Single mode (iPhone or iPad single layout)
-            NavigationStack(path: $detailPath) {
-                detailRootView
-                    .navigationDestination(for: ChatRoute.self) { route in
-                        ChatView(
-                            project: route.project,
-                            initialSessionId: route.sessionId,
-                            pendingAttachments: $shareAttachments,
-                            pendingSessionId: $shareSessionId
-                        )
-                    }
-            }
-        }
-    }
-
-    // MARK: - Detail Root (single layout)
+    // MARK: - Detail Root
 
     @ViewBuilder
     private var detailRootView: some View {
@@ -234,28 +177,6 @@ struct HomeView: View {
     }
 
     private func navigateToDeepLink(projectId: String, sessionId: String) {
-        // In grid mode, navigate to chat in the active cell
-        if isIPad && !gridManager.isSingleLayout {
-            if let project = projects.first(where: { $0.id == projectId }) {
-                gridManager.navigateToChat(
-                    ChatRoute(project: project, sessionId: sessionId),
-                    inCell: gridManager.activeCellIndex
-                )
-            } else {
-                Task {
-                    await fetchProjects()
-                    if let project = projects.first(where: { $0.id == projectId }) {
-                        gridManager.navigateToChat(
-                            ChatRoute(project: project, sessionId: sessionId),
-                            inCell: gridManager.activeCellIndex
-                        )
-                    }
-                }
-            }
-            return
-        }
-
-        // Single mode
         if let project = projects.first(where: { $0.id == projectId }) {
             selectProject(project)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -292,16 +213,9 @@ struct HomeView: View {
             shareSessionId = sid
             shareHandler.clear()
 
-            if isIPad && !gridManager.isSingleLayout {
-                gridManager.navigateToChat(
-                    ChatRoute(project: project, sessionId: sid),
-                    inCell: gridManager.activeCellIndex
-                )
-            } else {
-                selectProject(project)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    detailPath.append(ChatRoute(project: project, sessionId: sid))
-                }
+            selectProject(project)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                detailPath.append(ChatRoute(project: project, sessionId: sid))
             }
         } else {
             Task {
@@ -312,16 +226,9 @@ struct HomeView: View {
                     shareSessionId = sid
                     shareHandler.clear()
 
-                    if isIPad && !gridManager.isSingleLayout {
-                        gridManager.navigateToChat(
-                            ChatRoute(project: project, sessionId: sid),
-                            inCell: gridManager.activeCellIndex
-                        )
-                    } else {
-                        selectProject(project)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            detailPath.append(ChatRoute(project: project, sessionId: sid))
-                        }
+                    selectProject(project)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        detailPath.append(ChatRoute(project: project, sessionId: sid))
                     }
                 } else {
                     shareHandler.clear()
