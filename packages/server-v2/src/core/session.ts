@@ -37,6 +37,10 @@ export class SessionManager {
           }
           const meta: SessionMeta = raw
           if (meta.sdkSessionId) {
+            // Clear stale pending interactions — resolvers are in-memory only
+            // and cannot survive a server restart
+            if (meta.pendingQuestion) meta.pendingQuestion = null
+            if (meta.pendingPermissionRequest) meta.pendingPermissionRequest = null
             this.metas.set(meta.sdkSessionId, meta)
           }
         } catch {

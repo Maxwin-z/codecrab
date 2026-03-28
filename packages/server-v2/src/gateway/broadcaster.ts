@@ -315,6 +315,28 @@ export class Broadcaster {
           contextWindowMax: session.usage.contextWindowMax,
         })
       }
+      // Re-send pending question if one was waiting when client disconnected
+      if (session?.pendingQuestion) {
+        this.broadcastToProject(e.projectId, {
+          type: 'ask_user_question',
+          projectId: e.projectId,
+          sessionId: e.sessionId,
+          toolId: session.pendingQuestion.toolId,
+          questions: session.pendingQuestion.questions,
+        })
+      }
+      // Re-send pending permission request if one was waiting
+      if (session?.pendingPermissionRequest) {
+        this.broadcastToProject(e.projectId, {
+          type: 'permission_request',
+          projectId: e.projectId,
+          sessionId: e.sessionId,
+          requestId: session.pendingPermissionRequest.requestId,
+          toolName: session.pendingPermissionRequest.toolName,
+          input: session.pendingPermissionRequest.input,
+          reason: session.pendingPermissionRequest.reason || '',
+        })
+      }
     })
 
     this.core.on('session:status_changed', (e) => {
