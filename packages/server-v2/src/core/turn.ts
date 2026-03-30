@@ -142,6 +142,17 @@ export class TurnManager {
       sessionId: params.sessionId,
     })
 
+    // Create ctx BEFORE try so catch/finally can use ctx.sessionId
+    // (which gets updated to the real SDK session ID during session_init).
+    const ctx = {
+      projectId: params.projectId,
+      sessionId: params.sessionId,
+      turnId,
+      queryId: queuedQuery.id,
+      type: params.type,
+      startTime: Date.now(),
+    }
+
     try {
       const stream = this.agent.query(params.prompt, {
         model: resolvedModel,
@@ -158,18 +169,7 @@ export class TurnManager {
         systemPromptAppend: params.metadata?.systemPromptAppend,
       })
 
-      const startTime = Date.now()
-
-      // Create ctx ONCE so session_init can mutate ctx.sessionId and
-      // all subsequent events use the resolved SDK session ID.
-      const ctx = {
-        projectId: params.projectId,
-        sessionId: params.sessionId,
-        turnId,
-        queryId: queuedQuery.id,
-        type: params.type,
-        startTime,
-      }
+      ctx.startTime = Date.now()
 
       for await (const event of stream) {
         this.handleStreamEvent(event, ctx)
@@ -178,25 +178,25 @@ export class TurnManager {
       tsLog(`${tag} ${C.red}${C.bold}✗ error${C.reset}  project=${C.bold}${projectName}${C.reset}  ${error.message || 'Unknown error'}`)
       this.core.emit('turn:error', {
         projectId: params.projectId,
-        sessionId: params.sessionId,
+        sessionId: ctx.sessionId,
         turnId,
         error: error.message || 'Unknown error',
       })
-      this.sessions.setStatus(params.sessionId, 'error')
+      this.sessions.setStatus(ctx.sessionId, 'error')
       this.core.emit('session:status_changed', {
         projectId: params.projectId,
-        sessionId: params.sessionId,
+        sessionId: ctx.sessionId,
         status: 'error',
       })
     } finally {
       this.abortControllers.delete(queuedQuery.id)
 
-      // Session back to idle
+      // Session back to idle — use ctx.sessionId (resolved SDK ID)
       if (session.status === 'processing') {
-        this.sessions.setStatus(params.sessionId, 'idle')
+        this.sessions.setStatus(ctx.sessionId, 'idle')
         this.core.emit('session:status_changed', {
           projectId: params.projectId,
-          sessionId: params.sessionId,
+          sessionId: ctx.sessionId,
           status: 'idle',
         })
       }
