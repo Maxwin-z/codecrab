@@ -37,6 +37,26 @@ function getMimeType(filename: string): string {
   return MIME_MAP[ext] || 'text/plain'
 }
 
+/**
+ * Ensure a filename has a proper extension.
+ * If no extension is present, infer from content or default to .md.
+ */
+function normalizeArtifactName(name: string, content: string): string {
+  const ext = extname(name).toLowerCase()
+  if (ext && MIME_MAP[ext]) return name // already has a known extension
+
+  // Try to detect from content
+  const trimmed = content.trimStart()
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try { JSON.parse(content); return `${name}.json` } catch { /* not json */ }
+  }
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) return `${name}.html`
+  if (trimmed.startsWith('<?xml')) return `${name}.xml`
+
+  // Default: markdown for documents
+  return `${name}.md`
+}
+
 export class ThreadManager {
   private threads = new Map<string, Thread>()
   private messages = new Map<string, ThreadMessage[]>()
@@ -295,17 +315,20 @@ export class ThreadManager {
     const thread = this.threads.get(threadId)
     if (!thread) throw new Error(`Thread not found: ${threadId}`)
 
+    // Ensure filename always has a proper extension
+    const normalizedName = normalizeArtifactName(name, content)
+
     const artifactsDir = join(this.threadsDir, threadId, 'artifacts')
     await mkdir(artifactsDir, { recursive: true })
 
-    const filePath = join(artifactsDir, name)
+    const filePath = join(artifactsDir, normalizedName)
     await writeFile(filePath, content)
 
-    const mimeType = getMimeType(name)
+    const mimeType = getMimeType(normalizedName)
     const artifact: Artifact = {
       id: generateId('artifact'),
       threadId,
-      name,
+      name: normalizedName,
       mimeType,
       createdBy,
       path: filePath,
@@ -315,7 +338,7 @@ export class ThreadManager {
 
     const arts = this.artifacts.get(threadId) || []
     // Replace existing artifact with same name (version update)
-    const existingIdx = arts.findIndex(a => a.name === name)
+    const existingIdx = arts.findIndex(a => a.name === normalizedName)
     if (existingIdx >= 0) {
       arts[existingIdx] = artifact
     } else {

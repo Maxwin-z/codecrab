@@ -1050,6 +1050,37 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
 
   // ====== Threads API ======
 
+  // Raw artifact download — registered before authMiddleware because
+  // browser <a>/<img> cannot send Bearer headers; supports ?token= query param instead.
+  router.get('/api/threads/:threadId/artifacts/:artifactId/raw', async (req, res) => {
+    const queryToken = req.query.token as string | undefined
+    if (queryToken) {
+      const valid = await validateToken(queryToken)
+      if (!valid) return res.status(401).json({ error: 'Invalid token' })
+    } else {
+      const authHeader = req.headers.authorization
+      if (!authHeader?.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Missing authorization token' })
+      }
+      const valid = await validateToken(authHeader.slice(7))
+      if (!valid) return res.status(401).json({ error: 'Invalid token' })
+    }
+
+    const artifact = core.threads.getArtifactById(req.params.artifactId)
+    if (!artifact || artifact.threadId !== req.params.threadId) {
+      return res.status(404).json({ error: 'Artifact not found' })
+    }
+    try {
+      await fs.access(artifact.path)
+      res.setHeader('Content-Type', artifact.mimeType)
+      res.setHeader('Content-Disposition', `inline; filename="${artifact.name}"`)
+      const data = await fs.readFile(artifact.path)
+      res.send(data)
+    } catch {
+      res.status(404).json({ error: 'Artifact file not found on disk' })
+    }
+  })
+
   router.use('/api/threads', authMiddleware)
 
   // List all threads
@@ -1082,6 +1113,20 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
   router.get('/api/threads/:threadId/artifacts', (req, res) => {
     const artifacts = core.threads.listArtifacts(req.params.threadId)
     res.json({ artifacts })
+  })
+
+  // Get artifact content
+  router.get('/api/threads/:threadId/artifacts/:artifactId/content', async (req, res) => {
+    const artifact = core.threads.getArtifactById(req.params.artifactId)
+    if (!artifact || artifact.threadId !== req.params.threadId) {
+      return res.status(404).json({ error: 'Artifact not found' })
+    }
+    try {
+      const content = await fs.readFile(artifact.path, 'utf-8')
+      res.json({ content, mimeType: artifact.mimeType, name: artifact.name, size: artifact.size })
+    } catch {
+      res.status(404).json({ error: 'Artifact file not found on disk' })
+    }
   })
 
   // Complete a thread

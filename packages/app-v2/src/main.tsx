@@ -5,6 +5,7 @@ import { LoadingScreen } from '@/components/LoadingScreen'
 import { LoginPage } from '@/components/LoginPage'
 import { HomePage } from '@/components/HomePage'
 import { ChatPage } from '@/components/ChatPage'
+import { ThreadViewPage } from '@/components/ThreadViewPage'
 import { SettingsPage } from '@/components/SettingsPage'
 import { CreateProjectPage } from '@/components/CreateProjectPage'
 import { AppSidebar } from '@/components/AppSidebar'
@@ -100,6 +101,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/chat" element={<ChatPage onUnauthorized={handleUnauthorized} />} />
+        <Route path="/thread" element={<ThreadViewPage onUnauthorized={handleUnauthorized} />} />
         <Route path="/settings" element={<SettingsPage onUnauthorized={handleUnauthorized} />} />
         <Route path="/projects/new" element={<CreateProjectPage onUnauthorized={handleUnauthorized} />} />
         <Route path="/" element={<HomePage onUnauthorized={handleUnauthorized} />} />

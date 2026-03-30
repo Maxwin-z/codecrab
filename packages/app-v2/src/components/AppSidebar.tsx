@@ -2,10 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { useStore } from '@/store/store'
-import { selectProjectStatuses } from '@/store/selectors'
+import { selectProjectStatuses, selectThreads } from '@/store/selectors'
 import { authFetch } from '@/lib/auth'
+import { fetchThreads } from '@/lib/threads'
 import { cn } from '@/lib/utils'
-import { Search, Settings, FolderOpen, Plus, ChevronRight, Pencil } from 'lucide-react'
+import type { ThreadInfo } from '@/store/types'
+import { Search, Settings, FolderOpen, Plus, ChevronRight, Pencil, MessageCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { CreateAgentDialog } from '@/components/CreateAgentDialog'
 
@@ -32,19 +34,24 @@ export function AppSidebar({
   const [searchParams] = useSearchParams()
   const { switchProject } = useWs()
   const projectStatuses = useStore(selectProjectStatuses)
+  const storeThreads = useStore(selectThreads)
   const [projects, setProjects] = useState<Project[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [restThreads, setRestThreads] = useState<ThreadInfo[]>([])
   const [filter, setFilter] = useState('')
   const [projectsCollapsed, setProjectsCollapsed] = useState(false)
   const [agentsCollapsed, setAgentsCollapsed] = useState(false)
+  const [threadsCollapsed, setThreadsCollapsed] = useState(false)
   const [showCreateAgent, setShowCreateAgent] = useState(false)
   const currentProjectId = searchParams.get('project')
+  const currentThreadId = searchParams.get('id')
 
   const loadData = useCallback(async () => {
     try {
-      const [projectsRes, agentsRes] = await Promise.all([
+      const [projectsRes, agentsRes, threads] = await Promise.all([
         authFetch('/api/projects', {}, onUnauthorized),
         authFetch('/api/agents', {}, onUnauthorized),
+        fetchThreads(undefined, onUnauthorized),
       ])
       if (projectsRes.ok) {
         const all: Project[] = await projectsRes.json()
@@ -54,6 +61,7 @@ export function AppSidebar({
       if (agentsRes.ok) {
         setAgents(await agentsRes.json())
       }
+      setRestThreads(threads)
     } catch { /* ignore */ }
   }, [onUnauthorized])
 
@@ -108,8 +116,24 @@ export function AppSidebar({
   const getAgentStatus = (agentId: string) =>
     getProjectStatus(`__agent-${agentId}`)
 
-  const totalFiltered = filteredProjects.length + filteredAgents.length
-  const hasData = projects.length > 0 || agents.length > 0
+  // Merge REST threads with real-time store threads (store wins)
+  const mergedThreads = (() => {
+    const map = new Map<string, ThreadInfo>()
+    for (const t of restThreads) map.set(t.id, t)
+    for (const t of storeThreads) map.set(t.id, t)
+    return Array.from(map.values()).sort((a, b) => b.updatedAt - a.updatedAt)
+  })()
+
+  const filteredThreads = mergedThreads.filter(t =>
+    t.title.toLowerCase().includes(filterLower),
+  )
+
+  const handleSelectThread = (thread: ThreadInfo) => {
+    navigate(`/thread?id=${thread.id}`)
+  }
+
+  const totalFiltered = filteredProjects.length + filteredAgents.length + filteredThreads.length
+  const hasData = projects.length > 0 || agents.length > 0 || mergedThreads.length > 0
 
   return (
     <aside className="w-56 border-r border-sidebar-border bg-sidebar flex flex-col h-full shrink-0">
@@ -239,6 +263,52 @@ export function AppSidebar({
                   <Plus className="h-3.5 w-3.5" />
                   New agent
                 </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Threads section */}
+        {(filteredThreads.length > 0 || !filter) && mergedThreads.length > 0 && (
+          <div className="mt-1">
+            <button
+              className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors cursor-pointer"
+              onClick={() => setThreadsCollapsed(!threadsCollapsed)}
+            >
+              <ChevronRight className={cn('h-3 w-3 transition-transform', !threadsCollapsed && 'rotate-90')} />
+              Threads
+              <span className="text-muted-foreground/60 ml-auto">{filteredThreads.length}</span>
+            </button>
+
+            {!threadsCollapsed && (
+              <>
+                {filteredThreads.map(t => {
+                  const isActive = location.pathname === '/thread' && currentThreadId === t.id
+                  return (
+                    <button
+                      key={t.id}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors cursor-pointer',
+                        isActive
+                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                          : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
+                      )}
+                      onClick={() => handleSelectThread(t)}
+                    >
+                      <MessageCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate flex-1">{t.title}</span>
+                      {t.status === 'active' && (
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      )}
+                      {t.status === 'stalled' && (
+                        <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+                      )}
+                      {t.status === 'completed' && (
+                        <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />
+                      )}
+                    </button>
+                  )
+                })}
               </>
             )}
           </div>

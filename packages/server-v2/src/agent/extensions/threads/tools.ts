@@ -80,10 +80,10 @@ export const tools = [
 
   tool(
     'thread_save_artifact',
-    'Save a work artifact (document, data, etc.) to the current collaboration thread. The artifact is stored on disk and can be referenced by ID in messages. Other agents can read it via the Read tool using the returned path.',
+    'Save a work artifact (document, data, etc.) to the current collaboration thread. The artifact is stored on disk and can be referenced by ID in messages. Other agents can read it via the Read tool using the returned path. IMPORTANT: Always include a file extension in the name. Use .md (markdown) for any text documents, reports, analyses, or summaries.',
     {
-      name: z.string().describe('File name, e.g. "report.md", "data.json"'),
-      content: z.string().describe('File content'),
+      name: z.string().describe('File name with extension. Use .md for documents/reports/text (e.g. "report.md", "analysis.md"), .json for structured data, .csv for tabular data, etc.'),
+      content: z.string().describe('File content. For .md files, use proper markdown formatting.'),
     },
     async (input) => {
       if (!router) return notReady()

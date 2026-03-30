@@ -46,6 +46,27 @@ export async function fetchArtifacts(
   return data.artifacts ?? []
 }
 
+export interface ArtifactContent {
+  content: string
+  mimeType: string
+  name: string
+  size: number
+}
+
+export async function fetchArtifactContent(
+  threadId: string,
+  artifactId: string,
+  onUnauthorized?: () => void,
+): Promise<ArtifactContent | null> {
+  const res = await authFetch(`/api/threads/${threadId}/artifacts/${artifactId}/content`, {}, onUnauthorized)
+  if (!res.ok) return null
+  return res.json()
+}
+
+export function getArtifactRawUrl(threadId: string, artifactId: string): string {
+  return `/api/threads/${threadId}/artifacts/${artifactId}/raw`
+}
+
 export async function completeThread(
   threadId: string,
   onUnauthorized?: () => void,
