@@ -217,7 +217,7 @@ export interface QueryQueueStatusMessage extends ServerProjectContext {
   position?: number
   queueLength?: number
   prompt?: string
-  queryType?: 'user' | 'cron' | 'channel'
+  queryType?: 'user' | 'cron' | 'channel' | 'agent'
   cronJobName?: string
 }
 
@@ -226,7 +226,7 @@ export interface QueryQueueSnapshotItem {
   status: QueryQueueItemStatus
   position: number
   prompt: string
-  queryType: 'user' | 'cron' | 'channel'
+  queryType: 'user' | 'cron' | 'channel' | 'agent'
   sessionId?: string
   cronJobName?: string
 }
@@ -449,6 +449,67 @@ export interface SdkProbeResultMessage {
   models: Array<{ id: string; name: string }>
 }
 
+// ============ Thread Messages (Inter-Agent Communication) ============
+
+export interface ThreadCreatedMessage {
+  type: 'thread_created'
+  data: {
+    id: string
+    title: string
+    status: string
+    parentThreadId: string | null
+    participants: Array<{ agentId: string; agentName: string }>
+    createdAt: number
+  }
+}
+
+export interface ThreadUpdatedMessage {
+  type: 'thread_updated'
+  data: {
+    id: string
+    title: string
+    status: string
+    participants: Array<{ agentId: string; agentName: string }>
+    updatedAt: number
+  }
+}
+
+export interface ThreadCompletedMessage {
+  type: 'thread_completed'
+  data: { id: string; title: string; status: 'completed' }
+}
+
+export interface ThreadStalledMessage {
+  type: 'thread_stalled'
+  data: { id: string; title: string; status: 'stalled'; reason: string }
+}
+
+export interface AgentMessageMessage {
+  type: 'agent_message'
+  data: {
+    message: {
+      id: string
+      from: string
+      to: string
+      content: string
+      artifacts: Array<{ id: string; name: string; path: string }>
+      timestamp: number
+    }
+    threadId: string
+  }
+}
+
+export interface AgentAutoResumeMessage {
+  type: 'agent_auto_resume'
+  data: {
+    agentId: string
+    agentName: string
+    threadId: string
+    threadTitle: string
+    triggeredBy: { agentId: string; agentName: string }
+  }
+}
+
 export type ServerMessage =
   | SystemMessage
   | StreamDeltaMessage
@@ -493,6 +554,12 @@ export type ServerMessage =
   | SdkProbeResultMessage
   | PermissionResolvedMessage
   | QuestionResolvedMessage
+  | ThreadCreatedMessage
+  | ThreadUpdatedMessage
+  | ThreadCompletedMessage
+  | ThreadStalledMessage
+  | AgentMessageMessage
+  | AgentAutoResumeMessage
 
 // ============ Image Attachments ============
 

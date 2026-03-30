@@ -12,6 +12,7 @@ import { setupGateway } from './gateway/index.js'
 import { initSoul } from './soul/agent.js'
 import { initCronScheduler } from './cron/scheduler.js'
 import { setCronScheduler } from './agent/extensions/cron/tools.js'
+import { setMessageRouter } from './agent/extensions/threads/tools.js'
 import { initPushConsumer, closeApns } from './push/index.js'
 import { ensureToken } from './gateway/auth.js'
 
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   const soulConsumer = initSoul(core)
   const cronScheduler = initCronScheduler(core)
   setCronScheduler(cronScheduler)
+  setMessageRouter(core.router)
   initPushConsumer(core)
 
   // 4. Create Gateway (pass in Core + Cron)

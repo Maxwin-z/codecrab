@@ -3,6 +3,7 @@ import type { SessionManager } from './session.js'
 import { QueryQueue } from './queue.js'
 import { tsLog, C } from '../logger.js'
 import { setCronQueryContext } from '../agent/extensions/cron/tools.js'
+import { setThreadQueryContext } from '../agent/extensions/threads/tools.js'
 import type { AgentInterface, TurnSubmitParams, QueuedQuery, AgentStreamEvent, TurnType } from '../types/index.js'
 
 export class TurnManager {
@@ -131,6 +132,16 @@ export class TurnManager {
     // Set cron query context so cron_create can access projectId/sessionId
     setCronQueryContext({ projectId: params.projectId, sessionId: params.sessionId })
 
+    // Set thread query context so inter-agent tools can access agentId/sessionId
+    // Extract agentId from project ID pattern: __agent-{agentId}
+    const agentIdMatch = params.projectId.match(/^__agent-(?!editor-)(.+)$/)
+    const resolvedAgentId = agentIdMatch?.[1] || params.metadata?.fromAgentId
+    tsLog(`${tag}   ${C.dim}thread context: projectId=${params.projectId} → agentId=${resolvedAgentId || 'NONE'} sessionId=${params.sessionId.slice(0, 20)}${C.reset}`)
+    setThreadQueryContext({
+      agentId: resolvedAgentId,
+      sessionId: params.sessionId,
+    })
+
     try {
       const stream = this.agent.query(params.prompt, {
         model: resolvedModel,
@@ -144,6 +155,7 @@ export class TurnManager {
         abortController,
         soulEnabled: params.soulEnabled,
         env: providerEnv,
+        systemPromptAppend: params.metadata?.systemPromptAppend,
       })
 
       const startTime = Date.now()

@@ -114,6 +114,14 @@ export class AgentManager {
     return this.agents.get(agentId) ?? null
   }
 
+  /** Find an agent by name (case-sensitive) */
+  findByName(name: string): Agent | null {
+    for (const agent of this.agents.values()) {
+      if (agent.name === name) return agent
+    }
+    return null
+  }
+
   /** Get the internal project ID for an agent */
   getProjectId(agentId: string): string {
     return `__agent-${agentId}`

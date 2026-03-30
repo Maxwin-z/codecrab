@@ -1048,5 +1048,64 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
     }
   })
 
+  // ====== Threads API ======
+
+  router.use('/api/threads', authMiddleware)
+
+  // List all threads
+  router.get('/api/threads', (req, res) => {
+    const status = req.query.status as string | undefined
+    const agentId = req.query.agentId as string | undefined
+    const threads = core.threads.list({
+      status: status as any,
+      agentId,
+    })
+    res.json({ threads })
+  })
+
+  // Get thread by ID
+  router.get('/api/threads/:threadId', (req, res) => {
+    const thread = core.threads.get(req.params.threadId)
+    if (!thread) return res.status(404).json({ error: 'Thread not found' })
+    res.json(thread)
+  })
+
+  // Get thread messages
+  router.get('/api/threads/:threadId/messages', (req, res) => {
+    const limitParam = req.query.limit
+    const limit = typeof limitParam === 'string' ? parseInt(limitParam, 10) : 20
+    const messages = core.threads.getMessages(req.params.threadId, limit)
+    res.json({ messages })
+  })
+
+  // List thread artifacts
+  router.get('/api/threads/:threadId/artifacts', (req, res) => {
+    const artifacts = core.threads.listArtifacts(req.params.threadId)
+    res.json({ artifacts })
+  })
+
+  // Complete a thread
+  router.post('/api/threads/:threadId/complete', async (req, res) => {
+    const thread = core.threads.get(req.params.threadId)
+    if (!thread) return res.status(404).json({ error: 'Thread not found' })
+    core.threads.complete(req.params.threadId)
+    core.emit('thread:completed', { thread })
+    res.json({ threadId: req.params.threadId, status: 'completed' })
+  })
+
+  // Update thread config
+  router.patch('/api/threads/:threadId/config', (req, res) => {
+    const updated = core.threads.updateConfig(req.params.threadId, req.body)
+    if (!updated) return res.status(404).json({ error: 'Thread not found' })
+    res.json(updated)
+  })
+
+  // Get threads by agent
+  router.get('/api/agents/:agentId/threads', authMiddleware, (req, res) => {
+    const agentId = req.params.agentId as string
+    const threads = core.threads.getThreadsByAgent(agentId)
+    res.json({ threads })
+  })
+
   return router
 }

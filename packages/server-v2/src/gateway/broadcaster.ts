@@ -375,5 +375,67 @@ export class Broadcaster {
         cronJobName: e.cronJobName,
       })
     })
+
+    // ── Thread events (global broadcast) ──────────────────────────────────
+
+    this.core.on('thread:created', (e) => {
+      this.broadcastGlobal({
+        type: 'thread_created',
+        data: {
+          id: e.thread.id,
+          title: e.thread.title,
+          status: e.thread.status,
+          parentThreadId: e.thread.parentThreadId,
+          participants: e.thread.participants.map(p => ({ agentId: p.agentId, agentName: p.agentName })),
+          createdAt: e.thread.createdAt,
+        },
+      })
+    })
+
+    this.core.on('thread:completed', (e) => {
+      this.broadcastGlobal({
+        type: 'thread_completed',
+        data: { id: e.thread.id, title: e.thread.title, status: 'completed' },
+      })
+    })
+
+    this.core.on('thread:stalled', (e) => {
+      this.broadcastGlobal({
+        type: 'thread_stalled',
+        data: { id: e.thread.id, title: e.thread.title, status: 'stalled', reason: e.reason },
+      })
+    })
+
+    this.core.on('message:sent', (e) => {
+      const fromName = e.message.from.agentName
+      const toName = e.message.to === 'broadcast' ? 'broadcast' : e.message.to.agentName
+      this.broadcastGlobal({
+        type: 'agent_message',
+        data: {
+          message: {
+            id: e.message.id,
+            from: fromName,
+            to: toName,
+            content: e.message.content,
+            artifacts: e.message.artifacts,
+            timestamp: e.message.createdAt,
+          },
+          threadId: e.threadId,
+        },
+      })
+    })
+
+    this.core.on('agent:auto_resume', (e) => {
+      this.broadcastGlobal({
+        type: 'agent_auto_resume',
+        data: {
+          agentId: e.agentId,
+          agentName: e.agentName,
+          threadId: e.threadId,
+          threadTitle: e.threadTitle,
+          triggeredBy: e.triggeredBy,
+        },
+      })
+    })
   }
 }

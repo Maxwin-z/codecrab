@@ -100,6 +100,17 @@ const SAFE_MODE_ALLOWED_TOOLS: readonly string[] = [
   'Grep',
   'WebSearch',
   'WebFetch',
+  // Auto-approve inter-agent thread tools in safe mode
+  'mcp__threads__thread_send_message',
+  'mcp__threads__thread_save_artifact',
+  'mcp__threads__thread_list_threads',
+  'mcp__threads__thread_get_messages',
+  'mcp__threads__thread_complete_thread',
+  // Auto-approve cron tools in safe mode
+  'mcp__cron__cron_create',
+  'mcp__cron__cron_list',
+  'mcp__cron__cron_delete',
+  'mcp__cron__cron_get',
 ]
 
 // ── Default query constants ─────────────────────────────────────────────────
@@ -354,7 +365,8 @@ export class ClaudeAgent implements AgentInterface {
       abortController: options.abortController,
       agentProgressSummaries: true,
       // Block system cron tools — force AI to use our persistent MCP cron tools instead
-      disallowedTools: ['CronCreate', 'CronDelete', 'CronList'],
+      // Block SendMessage — it conflicts with our inter-agent thread_send_message tool
+      disallowedTools: ['CronCreate', 'CronDelete', 'CronList', 'SendMessage'],
       ...(options.env ? { env: options.env } : {}),
 
       systemPrompt: {
@@ -378,6 +390,14 @@ export class ClaudeAgent implements AgentInterface {
           `\n- 'delay': for one-time tasks relative to now (e.g., "remind me in 5 minutes" → delay: "5m")` +
           `\n- 'runAt' (ISO 8601): for one-time tasks at a specific time (e.g., "remind me at 3:30 PM" → runAt: "2026-03-27T15:30:00+08:00")` +
           `\nNEVER use a cron expression for one-time reminders or delayed tasks — always use 'delay' or 'runAt' instead.` +
+          `\n\nINTER-AGENT COMMUNICATION: When you need to send messages to other agents (referenced as @agentName in user prompts or your CLAUDE.md), ` +
+          `you MUST use the thread-based inter-agent tools (mcp__threads__*). These tools create collaboration threads ` +
+          `and automatically resume the target agent to process your message. Do NOT use any other messaging tools.` +
+          `\n- mcp__threads__thread_send_message: Send a message to @agentName or "broadcast" to all thread participants. Set new_thread=true to create a sub-thread.` +
+          `\n- mcp__threads__thread_save_artifact: Save work artifacts (documents, data) to the current thread for sharing.` +
+          `\n- mcp__threads__thread_list_threads: List collaboration threads you participate in.` +
+          `\n- mcp__threads__thread_get_messages: View message history of a thread.` +
+          `\n- mcp__threads__thread_complete_thread: Mark the current thread as completed when your work is done.` +
           `\n\nIMPORTANT: To reduce unnecessary API round-trips, you MUST proactively use the AskUserQuestion tool in these situations:` +
           `\n1. When the user's request is ambiguous or could be interpreted in multiple ways — ask for clarification BEFORE starting work.` +
           `\n2. When there are multiple possible approaches or solutions — present the options and let the user choose.` +
@@ -390,7 +410,8 @@ export class ClaudeAgent implements AgentInterface {
           `Do NOT guess and iterate — ask once, then act. This saves both time and API costs.` +
           `\n\nHIGHEST PRIORITY OVERRIDE: If the user explicitly says to decide on your own (e.g. "你自主决定", "let you decide", "你来决定", "自己判断", "不用问我"), ` +
           `do NOT use AskUserQuestion and do NOT ask for confirmation — just proceed autonomously with your best judgment. This override takes precedence over all the rules above.` +
-          SUMMARY_INSTRUCTION,
+          SUMMARY_INSTRUCTION +
+          (options.systemPromptAppend || ''),
       },
 
       // Capture stderr from the SDK subprocess for debugging
@@ -468,7 +489,7 @@ export class ClaudeAgent implements AgentInterface {
         }
 
         // Auto-approve cron and push tools (whitelisted, no user confirmation needed)
-        if (toolName.startsWith('mcp__cron__') || toolName.startsWith('mcp__push__')) {
+        if (toolName.startsWith('mcp__cron__') || toolName.startsWith('mcp__push__') || toolName.startsWith('mcp__threads__')) {
           return { behavior: 'allow' as const }
         }
 

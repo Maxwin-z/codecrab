@@ -8,6 +8,7 @@ import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import { tools as chromeTools } from './chrome/tools.js'
 import { tools as cronTools } from './cron/tools.js'
 import { tools as pushTools } from './push/tools.js'
+import { tools as threadTools } from './threads/tools.js'
 import { isApnsConfigured } from '../../push/apns.js'
 
 export interface McpExtension {
@@ -40,6 +41,13 @@ const extensions: McpExtension[] = [
     description: 'Send push notifications to iOS devices via Apple Push Notification service',
     icon: '🔔',
     tools: pushTools,
+  },
+  {
+    id: 'threads',
+    name: 'Threads',
+    description: 'Inter-agent communication — send messages, share artifacts, manage collaboration threads',
+    icon: '🔗',
+    tools: threadTools,
   },
 ]
 

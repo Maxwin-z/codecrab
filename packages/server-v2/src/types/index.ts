@@ -44,6 +44,7 @@ export interface AgentQueryOptions {
   abortController?: AbortController
   soulEnabled?: boolean
   env?: Record<string, string | undefined>
+  systemPromptAppend?: string
 }
 
 export interface SdkInitInfo {
@@ -95,6 +96,8 @@ export interface SessionMeta {
   } | null
   cronJobId?: string
   cronJobName?: string
+  threadId?: string
+  autoResumeCount?: number
   createdAt: number
   /** Cumulative usage for this session */
   usage: SessionUsage
@@ -138,7 +141,7 @@ export interface Turn {
   completedAt?: number
 }
 
-export type TurnType = 'user' | 'cron' | 'channel'
+export type TurnType = 'user' | 'cron' | 'channel' | 'agent'
 
 export interface TurnSubmitParams {
   projectId: string
@@ -160,6 +163,10 @@ export interface TurnMetadata {
   cronJobName?: string
   channelId?: string
   channelInstanceId?: string
+  threadId?: string
+  fromAgentId?: string
+  fromAgentName?: string
+  systemPromptAppend?: string
 }
 
 // ============ Core Events ============
@@ -207,6 +214,19 @@ export interface CoreEventMap {
   // Queue state
   'queue:status': QueueStatusEvent
   'queue:snapshot': QueueSnapshotEvent
+
+  // Thread lifecycle (inter-agent communication)
+  'thread:created': ThreadCreatedEvent
+  'thread:updated': ThreadUpdatedEvent
+  'thread:completed': ThreadCompletedEvent
+  'thread:stalled': ThreadStalledEvent
+
+  // Inter-agent messaging
+  'message:sent': MessageSentEvent
+  'message:delivered': MessageDeliveredEvent
+
+  // Auto-resume
+  'agent:auto_resume': AgentAutoResumeEvent
 }
 
 export interface TurnStartEvent {
@@ -477,4 +497,82 @@ export interface CronExecution {
   completedAt?: number
   success?: boolean
   error?: string
+}
+
+// ============ Thread Types (Inter-Agent Communication) ============
+
+export type ThreadStatus = 'active' | 'completed' | 'stalled'
+
+export interface Thread {
+  id: string
+  title: string
+  parentThreadId: string | null
+  status: ThreadStatus
+  participants: ThreadParticipant[]
+  config: ThreadConfig
+  turnCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ThreadParticipant {
+  agentId: string
+  agentName: string
+  sessionId: string
+  joinedAt: number
+  lastActiveAt: number
+}
+
+export interface ThreadConfig {
+  maxTurns: number
+}
+
+export interface ThreadMessage {
+  id: string
+  threadId: string
+  from: AgentRef
+  to: AgentRef | 'broadcast'
+  content: string
+  artifacts: ArtifactRef[]
+  status: MessageStatus
+  createdAt: number
+}
+
+export interface AgentRef {
+  agentId: string
+  agentName: string
+}
+
+export type MessageStatus = 'pending' | 'delivered' | 'failed'
+
+export interface Artifact {
+  id: string
+  threadId: string
+  name: string
+  mimeType: string
+  createdBy: AgentRef
+  path: string
+  size: number
+  createdAt: number
+}
+
+export type ArtifactRef = Pick<Artifact, 'id' | 'name' | 'path'>
+
+// ============ Thread Event Types ============
+
+export interface ThreadCreatedEvent { thread: Thread }
+export interface ThreadUpdatedEvent { thread: Thread }
+export interface ThreadCompletedEvent { thread: Thread }
+export interface ThreadStalledEvent { thread: Thread; reason: string }
+
+export interface MessageSentEvent { message: ThreadMessage; threadId: string }
+export interface MessageDeliveredEvent { message: ThreadMessage; targetAgentId: string; targetSessionId: string }
+
+export interface AgentAutoResumeEvent {
+  agentId: string
+  agentName: string
+  sessionId: string
+  threadId: string
+  threadTitle: string
+  triggeredBy: AgentRef
 }

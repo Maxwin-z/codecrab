@@ -4,12 +4,16 @@ import { ProjectManager } from './project.js'
 import { SessionManager } from './session.js'
 import { TurnManager } from './turn.js'
 import { AgentManager } from './agent-manager.js'
+import { ThreadManager } from './thread.js'
+import { MessageRouter } from './message-router.js'
 
 export class CoreEngine extends EventEmitter {
   readonly projects: ProjectManager
   readonly sessions: SessionManager
   readonly turns: TurnManager
   readonly agents: AgentManager
+  readonly threads: ThreadManager
+  readonly router: MessageRouter
 
   constructor(private agent: AgentInterface) {
     super()
@@ -18,6 +22,8 @@ export class CoreEngine extends EventEmitter {
     this.sessions = new SessionManager()
     this.turns = new TurnManager(this.agent, this.sessions, this)
     this.agents = new AgentManager(this.projects)
+    this.threads = new ThreadManager()
+    this.router = new MessageRouter(this.threads, this.sessions, this.agents, this)
   }
 
   async init(): Promise<void> {
@@ -25,6 +31,7 @@ export class CoreEngine extends EventEmitter {
     await this.sessions.load()
     await this.agents.load()
     await this.agents.ensureSystemAgent()
+    await this.threads.load()
   }
 
   /** Submit a Turn — Gateway and CronScheduler both call this */
