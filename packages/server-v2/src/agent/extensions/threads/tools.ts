@@ -44,7 +44,7 @@ export const tools = [
     'thread_send_message',
     'Send a message to another agent. Use @name to specify the target, or "broadcast" to send to all participants in the current thread. Set new_thread=true to create an independent sub-thread for this message. Use the artifacts parameter to attach previously saved work artifacts by their IDs (returned from thread_save_artifact).',
     {
-      to: z.string().describe('Target: "@agentName" or "broadcast"'),
+      to: z.string().describe('Target: "@agentName" or "broadcast". IMPORTANT: You cannot send messages to yourself — always specify a different agent.'),
       content: z.string().describe('Message content'),
       artifacts: z.array(z.string()).optional().describe('Artifact IDs to attach (from thread_save_artifact)'),
       new_thread: z.boolean().optional().describe('Create a new sub-thread (default: false)'),

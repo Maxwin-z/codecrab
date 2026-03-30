@@ -358,6 +358,11 @@ export class MessageRouter {
     const agent = this.agents.findByName(name)
     if (!agent) throw new Error(`Agent not found: @${name}`)
 
+    // Prevent self-send
+    if (agent.id === excludeAgentId) {
+      throw new Error(`Cannot send message to yourself (@${name}). Use thread_save_artifact to save work products, or send to another agent.`)
+    }
+
     return [{ agentId: agent.id, agentName: agent.name }]
   }
 
