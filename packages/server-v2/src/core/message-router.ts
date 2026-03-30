@@ -373,9 +373,14 @@ export class MessageRouter {
   }
 
   private buildResumePrompt(message: ThreadMessage, thread: Thread): string {
+    const turnCount = this.threads.getTurnCount(thread.id)
+    const maxTurns = thread.config.maxTurns
+    const remaining = maxTurns - turnCount
+
     const lines: string[] = []
     lines.push(`[Message from @${message.from.agentName}]`)
     lines.push(`Thread: ${thread.title}`)
+    lines.push(`Turn budget: ${turnCount}/${maxTurns} used, ${remaining} remaining`)
     lines.push('')
     lines.push(message.content)
 
@@ -387,22 +392,46 @@ export class MessageRouter {
       }
     }
 
+    // Urgency hint when turns are running low
+    if (remaining <= 3 && remaining > 0) {
+      lines.push('')
+      lines.push(`⚠ Only ${remaining} turn(s) left. Wrap up discussion and produce deliverables now. Use thread_save_artifact for output and thread_complete_thread when done.`)
+    }
+
     return lines.join('\n')
   }
 
   private buildThreadContext(thread: Thread, existingMessages: ThreadMessage[]): string {
+    const turnCount = this.threads.getTurnCount(thread.id)
+    const maxTurns = thread.config.maxTurns
+    const remaining = maxTurns - turnCount
+
     const lines: string[] = []
     lines.push('\n## Current Collaboration Thread')
     lines.push(`- Thread: ${thread.title}`)
     lines.push(`- Participants: ${thread.participants.map(p => `@${p.agentName}`).join(', ')}`)
+    lines.push(`- Turn budget: ${turnCount}/${maxTurns} used, ${remaining} remaining`)
 
     if (thread.parentThreadId) {
       const parent = this.threads.get(thread.parentThreadId)
       if (parent) lines.push(`- Source: ${parent.title}`)
     }
 
+    // Collaboration protocol
+    lines.push('')
+    lines.push('### Collaboration Protocol')
+    lines.push('- Be direct and concise. Skip pleasantries, flattery, and restatements of what the other agent said.')
+    lines.push('- Batch all feedback, questions, and responses into a single message — avoid ping-ponging one point at a time.')
+    lines.push('- Each message should either (a) provide actionable feedback/decisions, or (b) deliver a concrete work product via thread_save_artifact.')
+    lines.push('- When you have enough direction, stop discussing and start producing. Use thread_save_artifact to deliver output.')
+    lines.push('- Call thread_complete_thread when the objective is achieved or when you have delivered your final output.')
+    if (remaining <= Math.ceil(maxTurns * 0.4)) {
+      lines.push(`- ⚠ Budget is running low (${remaining} turns left). Prioritize producing deliverables over further discussion.`)
+    }
+
     if (existingMessages.length > 0) {
-      lines.push('\n### Message History')
+      lines.push('')
+      lines.push('### Message History')
       for (const msg of existingMessages.slice(-5)) {
         const fromName = typeof msg.from === 'string' ? msg.from : msg.from.agentName
         lines.push(`- @${fromName}: ${msg.content.slice(0, 200)}`)
