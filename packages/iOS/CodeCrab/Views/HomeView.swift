@@ -6,6 +6,7 @@ enum DetailDestination: Hashable {
     case agent(Agent)
     case soul
     case cron
+    case threads
 
     static func == (lhs: DetailDestination, rhs: DetailDestination) -> Bool {
         switch (lhs, rhs) {
@@ -13,6 +14,7 @@ enum DetailDestination: Hashable {
         case (.agent(let a), .agent(let b)): return a.id == b.id
         case (.soul, .soul): return true
         case (.cron, .cron): return true
+        case (.threads, .threads): return true
         default: return false
         }
     }
@@ -29,6 +31,8 @@ enum DetailDestination: Hashable {
             hasher.combine(1)
         case .cron:
             hasher.combine(2)
+        case .threads:
+            hasher.combine(4)
         }
     }
 }
@@ -104,6 +108,13 @@ struct HomeView: View {
                 detailPath = NavigationPath()
             }
 
+            // Agent auto-resume banners
+            VStack {
+                AgentActivityBannerView()
+                Spacer()
+            }
+            .zIndex(99)
+
             // Toast overlay
             if let toast = toastData {
                 PushToastView(
@@ -154,6 +165,8 @@ struct HomeView: View {
             SoulPageView()
         case .cron:
             CronPageView()
+        case .threads:
+            ThreadListView()
         case nil:
             VStack(spacing: 20) {
                 Image(systemName: "sparkles")

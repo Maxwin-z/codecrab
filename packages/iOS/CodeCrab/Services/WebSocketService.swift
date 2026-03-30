@@ -144,6 +144,10 @@ class WebSocketService: ObservableObject {
     @Published var sessionUsage: SessionUsage? = nil
     @Published var toastMessage: String? = nil
 
+    // Thread state (global, not per-project)
+    @Published var threads: [String: ThreadInfo] = [:]
+    @Published var autoResumeBanners: [AutoResumeBanner] = []
+
     var sdkLoaded: Bool { !sdkTools.isEmpty }
 
     /// Temp session ID for correlating new session creation on server-v2
@@ -1096,9 +1100,132 @@ class WebSocketService: ObservableObject {
                     usage: taskUsage
                 )
             }
+
+        // MARK: - Thread Messages (Inter-Agent Communication)
+
+        case "thread_created":
+            guard let dataDict = json["data"] as? [String: Any],
+                  let threadId = dataDict["id"] as? String,
+                  let title = dataDict["title"] as? String,
+                  let status = dataDict["status"] as? String,
+                  let createdAt = dataDict["createdAt"] as? Double else { break }
+            let parentThreadId = dataDict["parentThreadId"] as? String
+            let participants = parseParticipants(dataDict["participants"])
+            let thread = ThreadInfo(
+                id: threadId, title: title, status: status,
+                parentThreadId: parentThreadId, participants: participants,
+                createdAt: createdAt, updatedAt: createdAt
+            )
+            self.threads[threadId] = thread
+
+        case "thread_updated":
+            guard let dataDict = json["data"] as? [String: Any],
+                  let threadId = dataDict["id"] as? String else { break }
+            if var existing = self.threads[threadId] {
+                if let title = dataDict["title"] as? String { existing.title = title }
+                if let status = dataDict["status"] as? String { existing.status = status }
+                if let updatedAt = dataDict["updatedAt"] as? Double { existing.updatedAt = updatedAt }
+                existing.participants = parseParticipants(dataDict["participants"])
+                self.threads[threadId] = existing
+            } else {
+                // Thread not yet in local state — create a stub
+                let title = dataDict["title"] as? String ?? "Thread"
+                let status = dataDict["status"] as? String ?? "active"
+                let updatedAt = dataDict["updatedAt"] as? Double ?? Date().timeIntervalSince1970 * 1000
+                let participants = parseParticipants(dataDict["participants"])
+                self.threads[threadId] = ThreadInfo(
+                    id: threadId, title: title, status: status,
+                    parentThreadId: nil, participants: participants,
+                    createdAt: updatedAt, updatedAt: updatedAt
+                )
+            }
+
+        case "thread_completed":
+            guard let dataDict = json["data"] as? [String: Any],
+                  let threadId = dataDict["id"] as? String else { break }
+            self.threads[threadId]?.status = "completed"
+
+        case "thread_stalled":
+            guard let dataDict = json["data"] as? [String: Any],
+                  let threadId = dataDict["id"] as? String else { break }
+            self.threads[threadId]?.status = "stalled"
+            self.threads[threadId]?.stalledReason = dataDict["reason"] as? String
+
+        case "agent_message":
+            guard let dataDict = json["data"] as? [String: Any],
+                  let threadId = dataDict["threadId"] as? String,
+                  let msgDict = dataDict["message"] as? [String: Any],
+                  let msgId = msgDict["id"] as? String,
+                  let from = msgDict["from"] as? String,
+                  let to = msgDict["to"] as? String,
+                  let content = msgDict["content"] as? String,
+                  let timestamp = msgDict["timestamp"] as? Double else { break }
+            var artifacts: [ThreadArtifactRef] = []
+            if let artsArray = msgDict["artifacts"] as? [[String: Any]] {
+                for artDict in artsArray {
+                    if let aId = artDict["id"] as? String,
+                       let aName = artDict["name"] as? String,
+                       let aPath = artDict["path"] as? String {
+                        artifacts.append(ThreadArtifactRef(id: aId, name: aName, path: aPath))
+                    }
+                }
+            }
+            let threadMsg = ThreadMessageInfo(id: msgId, from: from, to: to, content: content, artifacts: artifacts, timestamp: timestamp)
+            if self.threads[threadId] != nil {
+                self.threads[threadId]!.messages.append(threadMsg)
+                self.threads[threadId]!.updatedAt = timestamp
+            }
+
+        case "agent_auto_resume":
+            guard let dataDict = json["data"] as? [String: Any],
+                  let agentId = dataDict["agentId"] as? String,
+                  let agentName = dataDict["agentName"] as? String,
+                  let threadId = dataDict["threadId"] as? String,
+                  let threadTitle = dataDict["threadTitle"] as? String,
+                  let triggeredByDict = dataDict["triggeredBy"] as? [String: Any],
+                  let trigAgentId = triggeredByDict["agentId"] as? String,
+                  let trigAgentName = triggeredByDict["agentName"] as? String else { break }
+            let banner = AutoResumeBanner(
+                id: UUID().uuidString,
+                agentId: agentId, agentName: agentName,
+                threadId: threadId, threadTitle: threadTitle,
+                triggeredBy: ThreadParticipant(agentId: trigAgentId, agentName: trigAgentName),
+                timestamp: Date().timeIntervalSince1970 * 1000
+            )
+            self.autoResumeBanners.append(banner)
+            // Auto-dismiss after 8 seconds
+            let bannerId = banner.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                self?.autoResumeBanners.removeAll { $0.id == bannerId }
+            }
+
         default:
             break
         }
+    }
+
+    // MARK: - Thread Helpers
+
+    private func parseParticipants(_ raw: Any?) -> [ThreadParticipant] {
+        guard let array = raw as? [[String: Any]] else { return [] }
+        return array.compactMap { dict in
+            guard let agentId = dict["agentId"] as? String,
+                  let agentName = dict["agentName"] as? String else { return nil }
+            return ThreadParticipant(agentId: agentId, agentName: agentName)
+        }
+    }
+
+    func dismissAutoResumeBanner(_ id: String) {
+        autoResumeBanners.removeAll { $0.id == id }
+    }
+
+    func upsertThread(_ thread: ThreadInfo) {
+        threads[thread.id] = thread
+    }
+
+    /// Sorted threads for display (most recently updated first)
+    var sortedThreads: [ThreadInfo] {
+        Array(threads.values).sorted { $0.updatedAt > $1.updatedAt }
     }
 
     // MARK: - Message Parsing Helpers

@@ -157,6 +157,27 @@ struct ProjectListView: View {
                     .foregroundColor(.secondary)
                     .textCase(nil)
             }
+
+            // Thread list (below Projects)
+            if !wsService.threads.isEmpty {
+                Section {
+                    ForEach(wsService.sortedThreads) { thread in
+                        ThreadCard(thread: thread, isSelected: {
+                            if case .threads = selection { return false }
+                            return false
+                        }())
+                        .tag(DetailDestination.threads)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                        .listRowSeparator(.automatic)
+                        .listRowBackground(Color.clear)
+                    }
+                } header: {
+                    Text("Threads")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(nil)
+                }
+            }
         }
         .listStyle(.plain)
         .overlay(alignment: .bottom) {
@@ -192,7 +213,8 @@ struct ProjectListView: View {
         async let projectsTask: () = fetchProjects()
         async let agentsTask: () = fetchAgents()
         async let cronTask: () = fetchCronJobs()
-        _ = await (projectsTask, agentsTask, cronTask)
+        async let threadsTask: () = fetchThreads()
+        _ = await (projectsTask, agentsTask, cronTask, threadsTask)
         isLoading = false
     }
 
@@ -264,6 +286,20 @@ struct ProjectListView: View {
             self.cronJobs = fetched
         } catch {
             print("Failed to fetch cron jobs: \(error)")
+        }
+    }
+
+    private func fetchThreads() async {
+        do {
+            let response: ThreadsResponse = try await APIClient.shared.fetch(path: "/api/threads")
+            for thread in response.threads {
+                // Only add if not already in store (store wins for real-time data)
+                if wsService.threads[thread.id] == nil {
+                    wsService.upsertThread(thread)
+                }
+            }
+        } catch {
+            print("Failed to fetch threads: \(error)")
         }
     }
 
@@ -458,6 +494,78 @@ struct AgentCard: View {
             }
 
             Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+    }
+}
+
+// MARK: - Thread Card
+
+struct ThreadCard: View {
+    let thread: ThreadInfo
+    let isSelected: Bool
+    @EnvironmentObject var wsService: WebSocketService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                Text(thread.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(isSelected ? .accentColor : .primary)
+                    .lineLimit(1)
+                Spacer()
+                ThreadStatusBadge(status: thread.status)
+            }
+
+            HStack(spacing: 8) {
+                HStack(spacing: 3) {
+                    Image(systemName: "person.2")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text("\(thread.participants.count)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                if !thread.messages.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "message")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("\(thread.messages.count)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                Text(TimeAgo.format(from: thread.updatedAt))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            if !thread.participants.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(thread.participants.prefix(3)) { p in
+                        Text("@\(p.agentName)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    if thread.participants.count > 3 {
+                        Text("+\(thread.participants.count - 3)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
