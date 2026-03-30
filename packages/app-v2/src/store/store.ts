@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { produce } from 'immer'
-import type { Store, ProjectState, SessionData, StoreState } from './types'
+import type { Store, ProjectState, SessionData, StoreState, ThreadInfo, ThreadMessageInfo } from './types'
 
 export function createEmptyProjectState(projectId: string): ProjectState {
   return {
@@ -54,6 +54,8 @@ export const useStore = create<Store>((set, get) => ({
   projectStatuses: [],
   projects: {},
   sessionIdMap: {},
+  threads: {},
+  autoResumeBanners: [],
 
   // Actions
   setConnected: (connected) => set({ connected }),
@@ -129,6 +131,43 @@ export const useStore = create<Store>((set, get) => ({
       s.projects[projectId].viewingSessionId = null
       s.projects[projectId].promptPending = false
       s.projects[projectId].isAborting = false
+    }))
+  },
+
+  upsertThread: (thread: ThreadInfo) => {
+    set(produce((s: StoreState) => {
+      const existing = s.threads[thread.id]
+      if (existing) {
+        existing.title = thread.title
+        existing.status = thread.status
+        existing.participants = thread.participants
+        existing.updatedAt = thread.updatedAt
+        existing.stalledReason = thread.stalledReason
+      } else {
+        s.threads[thread.id] = thread
+      }
+    }))
+  },
+
+  addThreadMessage: (threadId: string, message: ThreadMessageInfo) => {
+    set(produce((s: StoreState) => {
+      const thread = s.threads[threadId]
+      if (thread) {
+        thread.messages.push(message)
+        thread.updatedAt = message.timestamp
+      }
+    }))
+  },
+
+  addAutoResumeBanner: (banner) => {
+    set(produce((s: StoreState) => {
+      s.autoResumeBanners.push(banner)
+    }))
+  },
+
+  dismissAutoResumeBanner: (id) => {
+    set(produce((s: StoreState) => {
+      s.autoResumeBanners = s.autoResumeBanners.filter(b => b.id !== id)
     }))
   },
 }))

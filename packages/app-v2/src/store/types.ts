@@ -1,5 +1,38 @@
 import type { DebugEvent, ProjectStatus, Question, ImageAttachment } from '@codecrab/shared'
 
+// ============ Thread Types (Inter-Agent Communication) ============
+
+export interface ThreadInfo {
+  id: string
+  title: string
+  status: 'active' | 'completed' | 'stalled'
+  parentThreadId: string | null
+  participants: Array<{ agentId: string; agentName: string }>
+  createdAt: number
+  updatedAt: number
+  stalledReason?: string
+  messages: ThreadMessageInfo[]
+}
+
+export interface ThreadMessageInfo {
+  id: string
+  from: string
+  to: string
+  content: string
+  artifacts: Array<{ id: string; name: string; path: string }>
+  timestamp: number
+}
+
+export interface AutoResumeBanner {
+  id: string
+  agentId: string
+  agentName: string
+  threadId: string
+  threadTitle: string
+  triggeredBy: { agentId: string; agentName: string }
+  timestamp: number
+}
+
 // ============ Session-level Types ============
 
 export interface SessionUsage {
@@ -103,6 +136,8 @@ export interface StoreState {
   projectStatuses: ProjectStatus[]
   projects: Record<string, ProjectState>
   sessionIdMap: Record<string, string> // tempId → realId
+  threads: Record<string, ThreadInfo>
+  autoResumeBanners: AutoResumeBanner[]
 }
 
 export interface StoreActions {
@@ -115,6 +150,10 @@ export interface StoreActions {
   setViewingSession(projectId: string, sessionId: string | null): void
   resolveSessionId(tempId: string, realId: string): void
   resetViewingSession(projectId: string): void
+  upsertThread(thread: ThreadInfo): void
+  addThreadMessage(threadId: string, message: ThreadMessageInfo): void
+  addAutoResumeBanner(banner: AutoResumeBanner): void
+  dismissAutoResumeBanner(id: string): void
 }
 
 export type Store = StoreState & StoreActions

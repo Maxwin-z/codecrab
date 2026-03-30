@@ -5,14 +5,21 @@ import { useStore } from '@/store/store'
 import { selectProjectStatuses } from '@/store/selectors'
 import { authFetch } from '@/lib/auth'
 import { cn } from '@/lib/utils'
-import { Search, Settings, FolderOpen, Plus } from 'lucide-react'
+import { Search, Settings, FolderOpen, Plus, ChevronRight, Pencil } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { CreateAgentDialog } from '@/components/CreateAgentDialog'
 
 interface Project {
   id: string
   name: string
   path: string
   icon: string
+}
+
+interface Agent {
+  id: string
+  name: string
+  emoji: string
 }
 
 export function AppSidebar({
@@ -26,25 +33,41 @@ export function AppSidebar({
   const { switchProject } = useWs()
   const projectStatuses = useStore(selectProjectStatuses)
   const [projects, setProjects] = useState<Project[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [filter, setFilter] = useState('')
+  const [projectsCollapsed, setProjectsCollapsed] = useState(false)
+  const [agentsCollapsed, setAgentsCollapsed] = useState(false)
+  const [showCreateAgent, setShowCreateAgent] = useState(false)
   const currentProjectId = searchParams.get('project')
 
-  const loadProjects = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      const res = await authFetch('/api/projects', {}, onUnauthorized)
-      if (res.ok) {
-        setProjects(await res.json())
+      const [projectsRes, agentsRes] = await Promise.all([
+        authFetch('/api/projects', {}, onUnauthorized),
+        authFetch('/api/agents', {}, onUnauthorized),
+      ])
+      if (projectsRes.ok) {
+        const all: Project[] = await projectsRes.json()
+        // Filter out internal agent projects (prefixed with __)
+        setProjects(all.filter(p => !p.id.startsWith('__')))
+      }
+      if (agentsRes.ok) {
+        setAgents(await agentsRes.json())
       }
     } catch { /* ignore */ }
   }, [onUnauthorized])
 
-  // Reload projects on mount and on route changes (e.g. after creating a project)
+  // Reload on mount and on route changes (e.g. after creating a project/agent)
   useEffect(() => {
-    loadProjects()
-  }, [loadProjects, location.pathname])
+    loadData()
+  }, [loadData, location.pathname])
 
-  const filtered = projects.filter(p =>
-    p.name.toLowerCase().includes(filter.toLowerCase()),
+  const filterLower = filter.toLowerCase()
+  const filteredProjects = projects.filter(p =>
+    p.name.toLowerCase().includes(filterLower),
+  )
+  const filteredAgents = agents.filter(a =>
+    a.name.toLowerCase().includes(filterLower),
   )
 
   const handleSelectProject = (p: Project) => {
@@ -52,8 +75,41 @@ export function AppSidebar({
     navigate(`/chat?project=${p.id}`)
   }
 
+  const handleSelectAgent = async (agent: Agent) => {
+    try {
+      const res = await authFetch(`/api/agents/${agent.id}/use`, { method: 'POST' }, onUnauthorized)
+      if (res.ok) {
+        const project = await res.json()
+        switchProject(project.id)
+        navigate(`/chat?project=${project.id}`)
+      }
+    } catch { /* ignore */ }
+  }
+
+  const handleEditAgent = async (e: React.MouseEvent, agent: Agent) => {
+    e.stopPropagation()
+    try {
+      const res = await authFetch(`/api/agents/${agent.id}/edit`, { method: 'POST' }, onUnauthorized)
+      if (res.ok) {
+        const data = await res.json()
+        switchProject(data.projectId)
+        navigate(`/chat?project=${data.projectId}`)
+      }
+    } catch { /* ignore */ }
+  }
+
   const getProjectStatus = (id: string) =>
     projectStatuses.find(s => s.projectId === id)?.status ?? 'idle'
+
+  // Check if an agent's internal project is currently active
+  const isAgentActive = (agentId: string) =>
+    currentProjectId === `__agent-${agentId}`
+
+  const getAgentStatus = (agentId: string) =>
+    getProjectStatus(`__agent-${agentId}`)
+
+  const totalFiltered = filteredProjects.length + filteredAgents.length
+  const hasData = projects.length > 0 || agents.length > 0
 
   return (
     <aside className="w-56 border-r border-sidebar-border bg-sidebar flex flex-col h-full shrink-0">
@@ -72,7 +128,7 @@ export function AppSidebar({
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Filter projects..."
+            placeholder="Filter..."
             value={filter}
             onChange={e => setFilter(e.target.value)}
             className="pl-8 h-7 text-xs"
@@ -80,48 +136,123 @@ export function AppSidebar({
         </div>
       </div>
 
-      {/* Project list */}
+      {/* Scrollable list */}
       <div className="flex-1 overflow-y-auto px-1">
-        {filtered.map(p => {
-          const status = getProjectStatus(p.id)
-          const isActive = currentProjectId === p.id
-          return (
+        {/* Projects section */}
+        {(filteredProjects.length > 0 || !filter) && (
+          <div>
             <button
-              key={p.id}
-              className={cn(
-                'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors cursor-pointer',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
-              )}
-              onClick={() => handleSelectProject(p)}
+              className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors cursor-pointer"
+              onClick={() => setProjectsCollapsed(!projectsCollapsed)}
             >
-              <span className="text-base shrink-0">{p.icon || '📁'}</span>
-              <span className="truncate flex-1">{p.name}</span>
-              {status === 'processing' && (
-                <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
-              )}
+              <ChevronRight className={cn('h-3 w-3 transition-transform', !projectsCollapsed && 'rotate-90')} />
+              Projects
+              <span className="text-muted-foreground/60 ml-auto">{filteredProjects.length}</span>
             </button>
-          )
-        })}
 
-        {filtered.length === 0 && projects.length > 0 && (
-          <p className="text-xs text-muted-foreground text-center py-4">No matching projects</p>
-        )}
-        {projects.length === 0 && (
-          <div className="text-center py-6 space-y-2">
-            <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground" />
-            <p className="text-xs text-muted-foreground">No projects yet</p>
+            {!projectsCollapsed && (
+              <>
+                {filteredProjects.map(p => {
+                  const status = getProjectStatus(p.id)
+                  const isActive = currentProjectId === p.id
+                  return (
+                    <button
+                      key={p.id}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors cursor-pointer',
+                        isActive
+                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                          : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
+                      )}
+                      onClick={() => handleSelectProject(p)}
+                    >
+                      <span className="text-base shrink-0">{p.icon || '📁'}</span>
+                      <span className="truncate flex-1">{p.name}</span>
+                      {status === 'processing' && (
+                        <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
+                      )}
+                    </button>
+                  )
+                })}
+
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-1.5 mt-0.5 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
+                  onClick={() => navigate('/projects/new')}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New project
+                </button>
+              </>
+            )}
           </div>
         )}
 
-        <button
-          className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
-          onClick={() => navigate('/projects/new')}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          New project
-        </button>
+        {/* Agents section */}
+        {(filteredAgents.length > 0 || !filter) && (
+          <div className="mt-1">
+            <button
+              className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors cursor-pointer"
+              onClick={() => setAgentsCollapsed(!agentsCollapsed)}
+            >
+              <ChevronRight className={cn('h-3 w-3 transition-transform', !agentsCollapsed && 'rotate-90')} />
+              Agents
+              <span className="text-muted-foreground/60 ml-auto">{filteredAgents.length}</span>
+            </button>
+
+            {!agentsCollapsed && (
+              <>
+                {filteredAgents.map(a => {
+                  const active = isAgentActive(a.id)
+                  const status = getAgentStatus(a.id)
+                  return (
+                    <div key={a.id} className="group relative">
+                      <button
+                        className={cn(
+                          'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors cursor-pointer',
+                          active
+                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                            : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
+                        )}
+                        onClick={() => handleSelectAgent(a)}
+                      >
+                        <span className="text-base shrink-0">{a.emoji || '🤖'}</span>
+                        <span className="truncate flex-1">{a.name}</span>
+                        {status === 'processing' && (
+                          <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
+                        )}
+                      </button>
+                      <button
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/80 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        onClick={e => handleEditAgent(e, a)}
+                        title="Edit agent definition"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )
+                })}
+
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-1.5 mt-0.5 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
+                  onClick={() => setShowCreateAgent(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New agent
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {totalFiltered === 0 && hasData && (
+          <p className="text-xs text-muted-foreground text-center py-4">No matches</p>
+        )}
+        {!hasData && (
+          <div className="text-center py-6 space-y-2">
+            <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground" />
+            <p className="text-xs text-muted-foreground">No projects or agents yet</p>
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -134,6 +265,13 @@ export function AppSidebar({
           Settings
         </button>
       </div>
+
+      <CreateAgentDialog
+        open={showCreateAgent}
+        onOpenChange={setShowCreateAgent}
+        onCreated={() => loadData()}
+        onUnauthorized={onUnauthorized}
+      />
     </aside>
   )
 }

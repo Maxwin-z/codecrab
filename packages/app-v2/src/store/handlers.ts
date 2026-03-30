@@ -395,6 +395,90 @@ const handlers: Record<string, HandlerFn> = {
   prompt_received: () => {
     // Sync ack — no action needed
   },
+
+  // ── Thread handlers (Inter-Agent Communication) ──
+
+  thread_created: (msg, store) => {
+    const { id, title, status, parentThreadId, participants, createdAt } = msg.data
+    store.upsertThread({
+      id,
+      title,
+      status,
+      parentThreadId,
+      participants,
+      createdAt,
+      updatedAt: createdAt,
+      messages: [],
+    })
+  },
+
+  thread_updated: (msg, store) => {
+    const { id, title, status, participants, updatedAt } = msg.data
+    store.upsertThread({
+      id,
+      title,
+      status,
+      parentThreadId: null,
+      participants,
+      createdAt: updatedAt,
+      updatedAt,
+      messages: [],
+    })
+  },
+
+  thread_completed: (msg, store) => {
+    const { id, title } = msg.data
+    store.upsertThread({
+      id,
+      title,
+      status: 'completed',
+      parentThreadId: null,
+      participants: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+    })
+  },
+
+  thread_stalled: (msg, store) => {
+    const { id, title, reason } = msg.data
+    store.upsertThread({
+      id,
+      title,
+      status: 'stalled',
+      parentThreadId: null,
+      participants: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      stalledReason: reason,
+      messages: [],
+    })
+  },
+
+  agent_message: (msg, store) => {
+    const { threadId, message } = msg.data
+    store.addThreadMessage(threadId, {
+      id: message.id,
+      from: message.from,
+      to: message.to,
+      content: message.content,
+      artifacts: message.artifacts,
+      timestamp: message.timestamp,
+    })
+  },
+
+  agent_auto_resume: (msg, store) => {
+    const { agentId, agentName, threadId, threadTitle, triggeredBy } = msg.data
+    store.addAutoResumeBanner({
+      id: `resume-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      agentId,
+      agentName,
+      threadId,
+      threadTitle,
+      triggeredBy,
+      timestamp: Date.now(),
+    })
+  },
 }
 
 export function dispatchMessage(msg: ServerMessage, store: Store): void {

@@ -1,8 +1,14 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Send, Square, ImagePlus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ImageAttachment } from '@codecrab/shared'
+
+export interface MentionableAgent {
+  id: string
+  name: string
+  emoji: string
+}
 
 /** Resize and compress an image file to base64 */
 async function processImage(file: File): Promise<ImageAttachment> {
@@ -35,23 +41,74 @@ async function processImage(file: File): Promise<ImageAttachment> {
   })
 }
 
+/** Parse @mention query from text before cursor */
+function getMentionQuery(text: string, cursorPos: number): { query: string; startIndex: number } | null {
+  const before = text.slice(0, cursorPos)
+  // Match @ preceded by start-of-string or whitespace, followed by optional word chars
+  const match = before.match(/(^|[\s])@([\w-]*)$/)
+  if (!match) return null
+  const query = match[2]
+  const startIndex = before.length - query.length - 1 // -1 for @
+  return { query, startIndex }
+}
+
 export function InputBar({
   isRunning,
   isAborting,
   disabled,
+  agents = [],
   onSend,
   onAbort,
 }: {
   isRunning: boolean
   isAborting: boolean
   disabled?: boolean
+  agents?: MentionableAgent[]
   onSend: (prompt: string, images?: ImageAttachment[]) => void
   onAbort: () => void
 }) {
   const [text, setText] = useState('')
   const [images, setImages] = useState<(ImageAttachment & { preview: string })[]>([])
+  const [mentionState, setMentionState] = useState<{ query: string; startIndex: number } | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mentionListRef = useRef<HTMLDivElement>(null)
+
+  // Filter agents based on mention query
+  const filteredAgents = mentionState
+    ? agents.filter(a => a.name.toLowerCase().includes(mentionState.query.toLowerCase()))
+    : []
+
+  // Reset selection index when filtered list changes
+  useEffect(() => {
+    setMentionIndex(0)
+  }, [mentionState?.query])
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (!mentionListRef.current) return
+    const selected = mentionListRef.current.children[mentionIndex] as HTMLElement | undefined
+    selected?.scrollIntoView({ block: 'nearest' })
+  }, [mentionIndex])
+
+  const insertMention = useCallback((agent: MentionableAgent) => {
+    if (!mentionState) return
+    const before = text.slice(0, mentionState.startIndex)
+    const after = text.slice(mentionState.startIndex + 1 + mentionState.query.length) // +1 for @
+    const newText = `${before}@${agent.name} ${after}`
+    setText(newText)
+    setMentionState(null)
+    // Restore focus and cursor position
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) {
+        el.focus()
+        const cursorPos = before.length + 1 + agent.name.length + 1 // @name + space
+        el.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }, [text, mentionState])
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim()
@@ -60,16 +117,50 @@ export function InputBar({
     onSend(trimmed, imgs)
     setText('')
     setImages([])
+    setMentionState(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
   }, [text, images, onSend])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle mention dropdown navigation
+    if (mentionState && filteredAgents.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex(i => (i + 1) % filteredAgents.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex(i => (i - 1 + filteredAgents.length) % filteredAgents.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertMention(filteredAgents[mentionIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionState(null)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (!isRunning) handleSend()
     }
+  }
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    setText(value)
+    // Check for @mention
+    const cursorPos = e.target.selectionStart ?? value.length
+    const mention = agents.length > 0 ? getMentionQuery(value, cursorPos) : null
+    setMentionState(mention)
   }
 
   const handleInput = () => {
@@ -144,23 +235,53 @@ export function InputBar({
           onChange={handleFileSelect}
         />
 
-        {/* Text input */}
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={e => setText(e.target.value)}
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          placeholder="Send a message..."
-          disabled={disabled}
-          rows={1}
-          className={cn(
-            'flex-1 resize-none bg-muted/50 rounded-lg px-3 py-2 text-sm',
-            'placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
-            'max-h-[150px]',
+        {/* Text input with mention dropdown */}
+        <div className="flex-1 relative">
+          {/* @mention autocomplete dropdown */}
+          {mentionState && filteredAgents.length > 0 && (
+            <div
+              ref={mentionListRef}
+              className="absolute bottom-full left-0 mb-1 w-full max-h-48 overflow-y-auto rounded-lg border border-border bg-popover shadow-md z-10"
+            >
+              {filteredAgents.map((agent, i) => (
+                <button
+                  key={agent.id}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors cursor-pointer',
+                    i === mentionIndex
+                      ? 'bg-accent text-accent-foreground'
+                      : 'hover:bg-accent/50',
+                  )}
+                  onMouseDown={e => {
+                    e.preventDefault() // prevent textarea blur
+                    insertMention(agent)
+                  }}
+                  onMouseEnter={() => setMentionIndex(i)}
+                >
+                  <span className="text-base shrink-0">{agent.emoji || '🤖'}</span>
+                  <span className="truncate">@{agent.name}</span>
+                </button>
+              ))}
+            </div>
           )}
-        />
+
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={handleTextChange}
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder="Send a message... (type @ to mention an agent)"
+            disabled={disabled}
+            rows={1}
+            className={cn(
+              'w-full resize-none bg-muted/50 rounded-lg px-3 py-2 text-sm',
+              'placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'max-h-[150px]',
+            )}
+          />
+        </div>
 
         {/* Send / Abort */}
         {isRunning ? (

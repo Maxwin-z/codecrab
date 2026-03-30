@@ -1,4 +1,4 @@
-import type { StoreState, SessionData, ProjectState, QueueItem } from './types'
+import type { StoreState, SessionData, ProjectState, QueueItem, ThreadInfo, AutoResumeBanner } from './types'
 
 // Stable empty references — reused across renders to avoid infinite re-render loops.
 // Zustand uses Object.is to compare selector outputs; returning a new [] or {} each
@@ -6,6 +6,8 @@ import type { StoreState, SessionData, ProjectState, QueueItem } from './types'
 // new [] or {}, ad infinitum.
 const EMPTY_QUEUE: QueueItem[] = []
 const EMPTY_STATUSES: Record<string, 'idle' | 'processing' | 'error'> = {}
+const EMPTY_THREADS: ThreadInfo[] = []
+const EMPTY_BANNERS: AutoResumeBanner[] = []
 
 export const selectConnected = (s: StoreState) => s.connected
 
@@ -59,3 +61,31 @@ export function selectPromptPending(projectId: string | null) {
   return (s: StoreState) =>
     projectId ? s.projects[projectId]?.promptPending ?? false : false
 }
+
+// ── Thread selectors ──
+
+// Memoize by threads record reference — Immer replaces it only on real changes,
+// so we can use Object.is as a cheap cache key to avoid returning a new array
+// every render (which would cause Zustand's Object.is check to infinite-loop).
+let _threadsRef: Record<string, ThreadInfo> = {}
+let _threadsCached: ThreadInfo[] = EMPTY_THREADS
+
+export const selectThreads = (s: StoreState): ThreadInfo[] => {
+  if (s.threads === _threadsRef) return _threadsCached
+  _threadsRef = s.threads
+  const entries = Object.values(s.threads)
+  if (entries.length === 0) {
+    _threadsCached = EMPTY_THREADS
+    return EMPTY_THREADS
+  }
+  _threadsCached = entries.sort((a, b) => b.updatedAt - a.updatedAt)
+  return _threadsCached
+}
+
+export function selectThread(threadId: string | null) {
+  return (s: StoreState): ThreadInfo | undefined =>
+    threadId ? s.threads[threadId] : undefined
+}
+
+export const selectAutoResumeBanners = (s: StoreState): AutoResumeBanner[] =>
+  s.autoResumeBanners.length === 0 ? EMPTY_BANNERS : s.autoResumeBanners

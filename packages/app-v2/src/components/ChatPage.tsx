@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -7,8 +7,10 @@ import { selectConnected, selectViewingSession, selectViewingSessionId, selectPr
 import { authFetch } from '@/lib/auth'
 import { cn, formatDuration, formatCost } from '@/lib/utils'
 import { MessageList } from './MessageList'
-import { InputBar } from './InputBar'
+import { InputBar, type MentionableAgent } from './InputBar'
 import { SessionSidebar } from './SessionSidebar'
+import { ThreadPanel } from './ThreadPanel'
+import { AgentActivityBanner } from './AgentActivityBanner'
 import { PermissionRequestUI } from './PermissionRequestUI'
 import { UserQuestionForm } from './UserQuestionForm'
 import { QueryQueueBar } from './QueryQueueBar'
@@ -28,6 +30,10 @@ import {
   Cpu,
   Zap,
   Shield,
+  GitBranch,
+  Save,
+  Pencil,
+  Check,
 } from 'lucide-react'
 
 interface ProjectInfo {
@@ -45,6 +51,25 @@ interface ProviderOption {
   provider: string
 }
 
+interface EditingAgent {
+  agentId: string
+  agentName: string
+  agentEmoji: string
+  currentClaudeMd: string
+}
+
+const EDITOR_PROJECT_PREFIX = '__agent-editor-'
+
+/** Extract <agent-claude-md>...</agent-claude-md> content from messages */
+function extractAgentClaudeMd(messages: Array<{ role: string; content: string }>): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'assistant') continue
+    const match = messages[i].content.match(/<agent-claude-md>([\s\S]*?)<\/agent-claude-md>/)
+    if (match) return match[1].trim()
+  }
+  return null
+}
+
 export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const isDesktop = useIsDesktop()
@@ -55,8 +80,17 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
 
   const [project, setProject] = useState<ProjectInfo | null>(null)
   const [showSessions, setShowSessions] = useState(false)
+  const [showThreads, setShowThreads] = useState(false)
   const [providers, setProviders] = useState<ProviderOption[]>([])
   const [defaultProviderId, setDefaultProviderId] = useState<string | null>(null)
+  const [agents, setAgents] = useState<MentionableAgent[]>([])
+  const [editingAgent, setEditingAgent] = useState<EditingAgent | null>(null)
+  const [editSaved, setEditSaved] = useState(false)
+  const editPromptSentRef = useRef<string | null>(null) // tracks projectId for which we sent the initial prompt
+
+  // Detect editor project
+  const isEditorProject = projectId?.startsWith(EDITOR_PROJECT_PREFIX) ?? false
+  const editingAgentId = isEditorProject ? projectId!.replace(EDITOR_PROJECT_PREFIX, '') : null
 
   // Store selectors
   const viewingSessionId = useStore(selectViewingSessionId(projectId))
@@ -106,6 +140,65 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       })
       .catch(() => {})
   }, [onUnauthorized])
+
+  // Load agents list for @mention
+  useEffect(() => {
+    authFetch('/api/agents', {}, onUnauthorized)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (Array.isArray(data)) {
+          setAgents(data.map((a: any) => ({ id: a.id, name: a.name, emoji: a.emoji })))
+        }
+      })
+      .catch(() => {})
+  }, [onUnauthorized])
+
+  // Load editing context when on an editor project
+  useEffect(() => {
+    if (!editingAgentId) {
+      setEditingAgent(null)
+      setEditSaved(false)
+      return
+    }
+    authFetch(`/api/agents/${editingAgentId}/edit`, { method: 'POST' }, onUnauthorized)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) {
+          setEditingAgent({
+            agentId: data.agentId,
+            agentName: data.agentName,
+            agentEmoji: data.agentEmoji,
+            currentClaudeMd: data.currentClaudeMd,
+          })
+          setEditSaved(false)
+        }
+      })
+      .catch(() => {})
+  }, [editingAgentId, onUnauthorized])
+
+  // Auto-send initial prompt for new editing sessions
+  useEffect(() => {
+    if (!editingAgent || !connected || !projectId) return
+    if (editPromptSentRef.current === projectId) return // already sent for this project
+
+    // Wait a tick for session state to settle
+    const timer = setTimeout(() => {
+      const state = useStore.getState()
+      const proj = state.projects[projectId]
+      // Only auto-send if no session or empty session
+      if (proj?.viewingSessionId) {
+        const sess = proj.sessions[proj.viewingSessionId]
+        if (sess?.messages && sess.messages.length > 0) return
+      }
+
+      editPromptSentRef.current = projectId
+      const prompt = editingAgent.currentClaudeMd
+        ? `I want to edit the agent "${editingAgent.agentName}". Here's the current CLAUDE.md:\n\n\`\`\`markdown\n${editingAgent.currentClaudeMd}\n\`\`\``
+        : `I want to define a new agent called "${editingAgent.agentName}". Please help me create its CLAUDE.md.`
+      ws.sendPrompt(projectId, prompt, { providerId: defaultProviderId || undefined })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [editingAgent, connected, projectId])
 
   // Handle session param — only resume if we're not already on that session
   useEffect(() => {
@@ -158,12 +251,30 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       .catch(() => {})
   }, [projectId, viewingSessionId, onUnauthorized])
 
+  // Detect <agent-claude-md> in messages (must be before early return to preserve hook order)
+  const sessionMessages = session?.messages ?? []
+  const extractedClaudeMd = useMemo(() => extractAgentClaudeMd(sessionMessages), [sessionMessages])
+
   if (!projectId || !project) {
     return (
       <div className="h-full flex items-center justify-center">
         <p className="text-muted-foreground">Select a project from the sidebar</p>
       </div>
     )
+  }
+
+  const handleSaveClaudeMd = async () => {
+    if (!extractedClaudeMd || !editingAgentId) return
+    try {
+      const res = await authFetch(`/api/agents/${editingAgentId}/edit/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: extractedClaudeMd }),
+      }, onUnauthorized)
+      if (res.ok) {
+        setEditSaved(true)
+      }
+    } catch { /* ignore */ }
   }
 
   // Derive display values from session data
@@ -226,6 +337,11 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
         />
       )}
 
+      {/* Thread panel (toggleable) */}
+      {isDesktop && showThreads && (
+        <ThreadPanel onClose={() => setShowThreads(false)} onUnauthorized={onUnauthorized} />
+      )}
+
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
@@ -241,8 +357,28 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
             </Button>
           )}
 
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowThreads(!showThreads)}
+            title="Toggle thread panel"
+          >
+            <GitBranch className={cn('h-4 w-4', showThreads && 'text-foreground')} />
+          </Button>
+
           <span className="text-base mr-1">{project.icon || '📁'}</span>
           <span className="font-medium text-sm truncate">{project.name}</span>
+
+          {/* Editing indicator */}
+          {editingAgent && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <Pencil className="h-3 w-3 text-blue-500" />
+              <span className="text-xs text-blue-500 font-medium">
+                Editing {editingAgent.agentEmoji} {editingAgent.agentName}
+              </span>
+            </div>
+          )}
 
           {/* Provider selector */}
           {providers.length > 1 && (
@@ -326,6 +462,9 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           </Button>
         </header>
 
+        {/* Agent activity banners */}
+        <AgentActivityBanner />
+
         {/* Messages */}
         <MessageList
           messages={messages}
@@ -375,10 +514,35 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
           onExecuteNow={ws.executeNow}
         />
 
+        {/* Agent CLAUDE.md save banner */}
+        {editingAgent && extractedClaudeMd && !isRunning && (
+          <div className="px-4 py-2 border-t border-border bg-muted/30 flex items-center gap-2">
+            {editSaved ? (
+              <>
+                <Check className="h-4 w-4 text-green-500 shrink-0" />
+                <span className="text-sm text-green-600">
+                  CLAUDE.md saved for {editingAgent.agentEmoji} {editingAgent.agentName}
+                </span>
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 text-blue-500 shrink-0" />
+                <span className="text-sm text-muted-foreground flex-1">
+                  Agent definition ready to save
+                </span>
+                <Button size="sm" className="h-7 text-xs" onClick={handleSaveClaudeMd}>
+                  Save to {editingAgent.agentEmoji} {editingAgent.agentName}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
         <div>
           <InputBar
             isRunning={isRunning}
             isAborting={isAborting}
+            agents={agents}
             onSend={handleSend}
             onAbort={() => ws.abort(projectId)}
           />
