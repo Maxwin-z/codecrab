@@ -68,7 +68,7 @@ struct ThreadInfo: Decodable, Identifiable, Equatable, Hashable {
     }
 }
 
-struct ThreadMessageInfo: Decodable, Identifiable, Equatable, Hashable {
+struct ThreadMessageInfo: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let from: String      // agent name (flattened from AgentRef)
     let to: String         // agent name or "broadcast"
@@ -121,6 +121,16 @@ struct ThreadMessageInfo: Decodable, Identifiable, Equatable, Hashable {
         self.content = content
         self.artifacts = artifacts
         self.timestamp = timestamp
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(from, forKey: .from)
+        try container.encode(to, forKey: .to)
+        try container.encode(content, forKey: .content)
+        try container.encode(artifacts, forKey: .artifacts)
+        try container.encode(timestamp, forKey: .timestamp)
     }
 }
 
