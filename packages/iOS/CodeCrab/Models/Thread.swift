@@ -68,22 +68,50 @@ struct ThreadInfo: Decodable, Identifiable, Equatable, Hashable {
     }
 }
 
-struct ThreadMessageInfo: Codable, Identifiable, Equatable, Hashable {
+struct ThreadMessageInfo: Decodable, Identifiable, Equatable, Hashable {
     let id: String
-    let from: String
-    let to: String
+    let from: String      // agent name (flattened from AgentRef)
+    let to: String         // agent name or "broadcast"
     let content: String
     let artifacts: [ThreadArtifactRef]
     let timestamp: Double
 
+    enum CodingKeys: String, CodingKey {
+        case id, from, to, content, artifacts
+        case createdAt  // REST uses "createdAt"
+        case timestamp  // WS uses "timestamp"
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        from = try container.decode(String.self, forKey: .from)
-        to = try container.decode(String.self, forKey: .to)
         content = try container.decode(String.self, forKey: .content)
         artifacts = (try? container.decode([ThreadArtifactRef].self, forKey: .artifacts)) ?? []
-        timestamp = try container.decode(Double.self, forKey: .timestamp)
+
+        // REST: createdAt, WS: timestamp
+        if let ts = try? container.decode(Double.self, forKey: .timestamp) {
+            timestamp = ts
+        } else {
+            timestamp = (try? container.decode(Double.self, forKey: .createdAt)) ?? Date().timeIntervalSince1970 * 1000
+        }
+
+        // "from" can be a string (WS) or AgentRef object (REST)
+        if let str = try? container.decode(String.self, forKey: .from) {
+            from = str
+        } else if let ref = try? container.decode(AgentRefPayload.self, forKey: .from) {
+            from = ref.agentName
+        } else {
+            from = "unknown"
+        }
+
+        // "to" can be a string (WS: agentName or "broadcast") or AgentRef object (REST)
+        if let str = try? container.decode(String.self, forKey: .to) {
+            to = str
+        } else if let ref = try? container.decode(AgentRefPayload.self, forKey: .to) {
+            to = ref.agentName
+        } else {
+            to = "broadcast"
+        }
     }
 
     init(id: String, from: String, to: String, content: String, artifacts: [ThreadArtifactRef], timestamp: Double) {
@@ -94,6 +122,12 @@ struct ThreadMessageInfo: Codable, Identifiable, Equatable, Hashable {
         self.artifacts = artifacts
         self.timestamp = timestamp
     }
+}
+
+/// Internal helper for decoding AgentRef objects from REST API
+private struct AgentRefPayload: Decodable {
+    let agentId: String
+    let agentName: String
 }
 
 struct ThreadArtifactRef: Codable, Equatable, Hashable {
