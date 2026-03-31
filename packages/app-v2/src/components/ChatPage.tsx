@@ -56,6 +56,7 @@ interface EditingAgent {
   agentName: string
   agentEmoji: string
   currentClaudeMd: string
+  initialPrompt: string
 }
 
 const EDITOR_PROJECT_PREFIX = '__agent-editor-'
@@ -169,6 +170,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
             agentName: data.agentName,
             agentEmoji: data.agentEmoji,
             currentClaudeMd: data.currentClaudeMd,
+            initialPrompt: data.initialPrompt,
           })
           setEditSaved(false)
         }
@@ -192,10 +194,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
       }
 
       editPromptSentRef.current = projectId
-      const prompt = editingAgent.currentClaudeMd
-        ? `I want to edit the agent "${editingAgent.agentName}". Here's the current CLAUDE.md:\n\n\`\`\`markdown\n${editingAgent.currentClaudeMd}\n\`\`\``
-        : `I want to define a new agent called "${editingAgent.agentName}". Please help me create its CLAUDE.md.`
-      ws.sendPrompt(projectId, prompt, { providerId: defaultProviderId || undefined })
+      ws.sendPrompt(projectId, editingAgent.initialPrompt, { providerId: defaultProviderId || undefined })
     }, 300)
     return () => clearTimeout(timer)
   }, [editingAgent, connected, projectId])

@@ -388,6 +388,14 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
       }
       const currentClaudeMd = await core.agents.getClaudeMd(agentId)
       const editorProject = await core.agents.ensureAgentEditorProject(agentId)
+
+      let initialPrompt: string
+      if (!currentClaudeMd) {
+        initialPrompt = `I want to create a new agent called "${agent.name}". This agent doesn't have any instructions yet.`
+      } else {
+        initialPrompt = `I want to edit the agent "${agent.name}". Here is its current CLAUDE.md:\n\n\`\`\`\n${currentClaudeMd}\n\`\`\``
+      }
+
       res.json({
         projectId: editorProject.id,
         projectPath: editorProject.path,
@@ -395,6 +403,7 @@ export function createRouter(core: CoreEngine, opts?: { cronScheduler?: CronSche
         agentName: agent.name,
         agentEmoji: agent.emoji,
         currentClaudeMd,
+        initialPrompt,
       })
     } catch (err) {
       res.status(500).json({ error: 'Internal server error' })

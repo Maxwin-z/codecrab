@@ -663,30 +663,13 @@ struct ChatView: View {
             // Wait for project switch to settle
             try? await Task.sleep(nanoseconds: 1_000_000_000)
 
-            // Fetch current CLAUDE.md
             do {
-                struct ClaudeMdResponse: Codable { let content: String }
-                let resp: ClaudeMdResponse = try await APIClient.shared.fetch(
-                    path: "/api/agents/\(agentId)/claude-md"
+                struct EditResponse: Codable { let initialPrompt: String }
+                let resp: EditResponse = try await APIClient.shared.fetch(
+                    path: "/api/agents/\(agentId)/edit",
+                    method: "POST"
                 )
-                let prompt: String
-                if resp.content.isEmpty {
-                    prompt = """
-                    I want to create a new agent called "\(project.name)". This agent doesn't have any instructions yet. \
-                    Please help me define what this agent should do. Ask me about its purpose, target tasks, and any specific requirements.
-                    """
-                } else {
-                    prompt = """
-                    I want to edit the agent "\(project.name)". Here is its current CLAUDE.md:
-
-                    ```
-                    \(resp.content)
-                    ```
-
-                    Please help me refine or update these instructions. What would you like to change?
-                    """
-                }
-                wsService.sendPrompt(prompt)
+                wsService.sendPrompt(resp.initialPrompt)
             } catch {
                 agentEditorError = "Failed to load agent instructions"
             }
