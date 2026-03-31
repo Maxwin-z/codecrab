@@ -13,24 +13,66 @@ import {
 } from 'lucide-react'
 import type { ChatMsg } from '@/store/types'
 
+function getToolSummary(tc: NonNullable<ChatMsg['toolCalls']>[0]): string {
+  const input = tc.input as Record<string, unknown> | undefined
+  if (!input || typeof input !== 'object') return ''
+
+  switch (tc.name) {
+    case 'Agent':
+      return String(input.description ?? '')
+    case 'Bash': {
+      const cmd = String(input.command ?? '')
+      return cmd.length > 60 ? '…' + cmd.slice(-60) : cmd
+    }
+    case 'ToolSearch':
+      return String(input.query ?? '')
+    case 'Read': {
+      const fp = String(input.file_path ?? '')
+      return fp.length > 60 ? '…' + fp.slice(-60) : fp
+    }
+    case 'WebSearch':
+      return String(input.query ?? '')
+    case 'WebFetch':
+      return String(input.url ?? '')
+    case 'Grep':
+      return String(input.pattern ?? '')
+    case 'Glob':
+      return String(input.pattern ?? '')
+    case 'Edit': {
+      const fp = String(input.file_path ?? '')
+      return fp.length > 60 ? '…' + fp.slice(-60) : fp
+    }
+    case 'Write': {
+      const fp = String(input.file_path ?? '')
+      return fp.length > 60 ? '…' + fp.slice(-60) : fp
+    }
+    default:
+      return ''
+  }
+}
+
 function ToolCallBlock({ tc }: { tc: NonNullable<ChatMsg['toolCalls']>[0] }) {
   const [expanded, setExpanded] = useState(false)
   const inputStr = typeof tc.input === 'string'
     ? tc.input
     : JSON.stringify(tc.input, null, 2)
+  const summary = getToolSummary(tc)
 
   return (
     <div className="my-1 border border-border/50 rounded-md overflow-hidden">
       <button
-        className="w-full flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-accent/30 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-accent/30 transition-colors cursor-pointer min-w-0"
         onClick={() => setExpanded(!expanded)}
       >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <Wrench className="h-3 w-3 text-muted-foreground" />
-        <code className="font-medium">{tc.name}</code>
-        {tc.isError && <AlertCircle className="h-3 w-3 text-destructive ml-auto" />}
+        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <Wrench className="h-3 w-3 text-muted-foreground shrink-0" />
+        <code className="font-medium shrink-0">{tc.name}</code>
+        {summary && (
+          <span className="text-muted-foreground truncate min-w-0">{summary}</span>
+        )}
+        {tc.isError && <AlertCircle className="h-3 w-3 text-destructive ml-auto shrink-0" />}
         {tc.result !== undefined && !tc.isError && (
-          <span className="text-green-500 ml-auto text-[10px]">done</span>
+          <span className="text-green-500 ml-auto text-[10px] shrink-0">done</span>
         )}
       </button>
 
@@ -67,12 +109,15 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
   return (
     <div className="my-1">
       <button
-        className="flex items-center gap-1.5 text-xs text-amber-500/80 hover:text-amber-500 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-1.5 text-xs text-amber-500/80 hover:text-amber-500 transition-colors cursor-pointer min-w-0"
         onClick={() => setExpanded(!expanded)}
       >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <Brain className="h-3 w-3" />
-        <span>Thinking</span>
+        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <Brain className="h-3 w-3 shrink-0" />
+        <span className="shrink-0">Thinking</span>
+        {!expanded && thinking && (
+          <span className="text-muted-foreground truncate min-w-0">{thinking.slice(0, 100)}</span>
+        )}
       </button>
       {expanded && (
         <div className="mt-1 ml-5 text-xs text-muted-foreground bg-amber-500/5 border border-amber-500/10 rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap">
