@@ -69,7 +69,7 @@ export class ProjectManager {
       path: raw.path,
       icon: raw.icon || '',
       defaultProviderId: providerOverride || this.defaultProviderConfigId,
-      defaultPermissionMode: 'default' as PermissionMode,
+      defaultPermissionMode: 'bypassPermissions' as PermissionMode,
       createdAt: raw.createdAt || Date.now(),
       updatedAt: raw.updatedAt || Date.now(),
       lastActivityAt: raw.lastActivityAt,
@@ -162,7 +162,7 @@ export class ProjectManager {
       path: params.path,
       icon: params.icon || '📁',
       defaultProviderId: this.defaultProviderConfigId,
-      defaultPermissionMode: 'default' as PermissionMode,
+      defaultPermissionMode: 'bypassPermissions' as PermissionMode,
       createdAt: now,
       updatedAt: now,
     }

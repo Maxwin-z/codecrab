@@ -74,6 +74,7 @@ export function InputBar({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mentionListRef = useRef<HTMLDivElement>(null)
+  const isComposingRef = useRef(false)
 
   // Filter agents based on mention query
   const filteredAgents = mentionState
@@ -148,7 +149,7 @@ export function InputBar({
       }
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
       e.preventDefault()
       if (!isRunning) handleSend()
     }
@@ -271,6 +272,8 @@ export function InputBar({
             onChange={handleTextChange}
             onInput={handleInput}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => { isComposingRef.current = true }}
+            onCompositionEnd={() => { isComposingRef.current = false }}
             placeholder="Send a message... (type @ to mention an agent)"
             disabled={disabled}
             rows={1}

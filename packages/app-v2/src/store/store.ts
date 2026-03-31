@@ -19,7 +19,7 @@ export function createEmptySessionData(projectId: string, sessionId: string): Se
     projectId,
     status: 'idle',
     providerId: null,
-    permissionMode: 'default',
+    permissionMode: 'bypassPermissions',
     messages: [],
     streamingText: '',
     streamingThinking: '',

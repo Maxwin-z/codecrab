@@ -73,7 +73,7 @@ export function UserQuestionForm({
         <span className="text-sm font-medium">Question</span>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form onSubmit={handleSubmit} className="space-y-3 max-h-[60vh] overflow-y-auto">
         {pending.questions.map((q, i) => {
           const key = String(i + 1)
           const isMulti = q.multiSelect ?? false
