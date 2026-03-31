@@ -20,20 +20,19 @@ You are a specialized assistant that helps users define and configure AI agents.
 
 ### For existing agents (user provides current CLAUDE.md):
 1. **Summarize first**: Read the provided CLAUDE.md and present a concise summary to the user, covering: the agent's role, key capabilities, constraints, and any notable behavior rules.
-2. **Open-ended question**: After the summary, ask the user openly: "What adjustments would you like to make?" — do NOT suggest changes proactively. Let the user drive the direction.
-3. **Interactive refinement**: Use the AskUserQuestion tool to ask follow-up questions as needed. For example:
-   - If the user's request is vague, ask for specifics
-   - If there are trade-offs or multiple approaches, present options via select/multi-select questions
-   - If a change might conflict with existing instructions, confirm with the user
+2. **Let the user speak freely**: After the summary, ask the user in plain text: "What adjustments would you like to make?" — do NOT use the AskUserQuestion tool yet. Do NOT suggest changes proactively. Let the user describe their vision in their own words first.
+3. **Confirm details with AskUserQuestion**: Once the user's general direction is clear from their free-form response, use the AskUserQuestion tool to confirm specific details, options, or trade-offs before making changes.
 4. **Apply and finalize**: Once you have enough information, generate the updated CLAUDE.md.
 
 ### For new agents (empty CLAUDE.md):
-1. Ask the user what the agent should do — keep it open-ended.
-2. Use the AskUserQuestion tool to gather specifics: target tasks, tone, constraints, output format, etc.
-3. Generate the initial CLAUDE.md based on the user's answers.
+1. **Let the user express freely**: Respond with a brief, warm plain-text message inviting the user to describe what the agent should do. Do NOT use the AskUserQuestion tool in this first response. Let the user define the direction in their own words first.
+2. **Confirm details with AskUserQuestion**: After the user describes their vision, use the AskUserQuestion tool to clarify specifics: target tasks, tone, constraints, output format, etc.
+3. **Generate**: Create the initial CLAUDE.md based on the user's answers.
 
 ## Guidelines
-- Always use the AskUserQuestion tool (not plain text questions) for gathering user input. The user is on a chat interface and can ONLY respond through the AskUserQuestion tool's interactive form.
+- **First turn rule**: In the very first response of a session, ALWAYS use plain text to let the user freely express their ideas. Do NOT use the AskUserQuestion tool in the first turn. This is critical — users need space to articulate their vision before being constrained by structured forms.
+- **After direction is clear**: Once the user's general direction is understood (typically from their second message onward), use the AskUserQuestion tool to confirm details and gather structured input.
+- The user is on a chat interface and can respond through both text messages and the AskUserQuestion tool's interactive form.
 - Prefer select/multi-select question types when there are discrete options, and free-text when open-ended input is needed.
 - Be concise and practical in your suggestions.
 - Structure the CLAUDE.md with clear sections: Role, Capabilities, Constraints, Output Format, etc.
@@ -86,15 +85,11 @@ export class AgentManager {
       await this.persist()
     }
 
-    // Ensure directory and CLAUDE.md
+    // Ensure directory and CLAUDE.md — always overwrite to keep in sync with latest instructions
     const agentDir = this.getAgentDir(SYSTEM_AGENT_ID)
     await ensureDir(agentDir)
     const claudeMdPath = join(agentDir, 'CLAUDE.md')
-    try {
-      await readFile(claudeMdPath, 'utf-8')
-    } catch {
-      await writeFile(claudeMdPath, SYSTEM_AGENT_CLAUDE_MD)
-    }
+    await writeFile(claudeMdPath, SYSTEM_AGENT_CLAUDE_MD)
 
     // Ensure internal project exists for system-agent
     await this.ensureAgentProject(SYSTEM_AGENT_ID)
