@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Plus, Star, Trash2, Loader2, CircleCheck, CircleX, Wifi, WifiOff, Radar, Server, ArrowLeft } from 'lucide-react'
+import { Plus, Star, Trash2, Loader2, CircleCheck, CircleX, Wifi, WifiOff, Radar, Server, ArrowLeft, Sun, Moon, Monitor } from 'lucide-react'
+import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,6 +34,7 @@ export function SettingsPage({
   onUnauthorized?: () => void
 }) {
   const navigate = useNavigate()
+  const { theme, setTheme } = useTheme()
 
   // Provider list
   const [providers, setProviders] = useState<MaskedProvider[]>([])
@@ -337,6 +339,37 @@ export function SettingsPage({
           </Button>
           <h1 className="text-lg font-semibold">Settings</h1>
         </div>
+
+        {/* Appearance */}
+        <section className="flex flex-col gap-3">
+          <div>
+            <h2 className="text-sm font-medium">Appearance</h2>
+            <p className="text-xs text-muted-foreground">Choose your preferred color theme</p>
+          </div>
+          <div className="flex gap-2">
+            {([
+              { value: 'light' as const, icon: Sun, label: 'Light' },
+              { value: 'dark' as const, icon: Moon, label: 'Dark' },
+            ]).map(({ value, icon: Icon, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTheme(value)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors cursor-pointer',
+                  theme === value
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:bg-accent/50',
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <hr className="border-border" />
 
         {/* Server Connection */}
         <section className="flex flex-col gap-3">

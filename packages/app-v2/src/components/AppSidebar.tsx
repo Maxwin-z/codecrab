@@ -7,7 +7,8 @@ import { authFetch } from '@/lib/auth'
 import { fetchThreads } from '@/lib/threads'
 import { cn } from '@/lib/utils'
 import type { ThreadInfo } from '@/store/types'
-import { Search, Settings, FolderOpen, Plus, ChevronRight, Pencil, MessageCircle } from 'lucide-react'
+import { Search, Settings, FolderOpen, Plus, ChevronRight, Pencil, MessageCircle, Sun, Moon } from 'lucide-react'
+import { useTheme } from '@/hooks/useTheme'
 import { Input } from '@/components/ui/input'
 import { CreateAgentDialog } from '@/components/CreateAgentDialog'
 
@@ -43,6 +44,7 @@ export function AppSidebar({
   const [agentsCollapsed, setAgentsCollapsed] = useState(false)
   const [threadsCollapsed, setThreadsCollapsed] = useState(false)
   const [showCreateAgent, setShowCreateAgent] = useState(false)
+  const { theme, toggleTheme } = useTheme()
   const currentProjectId = searchParams.get('project')
   const currentThreadId = searchParams.get('id')
 
@@ -326,13 +328,20 @@ export function AppSidebar({
       </div>
 
       {/* Footer */}
-      <div className="p-2 border-t border-sidebar-border">
+      <div className="p-2 border-t border-sidebar-border flex items-center">
         <button
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
+          className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
           onClick={() => navigate('/settings')}
         >
           <Settings className="h-3.5 w-3.5" />
           Settings
+        </button>
+        <button
+          className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
         </button>
       </div>
 
