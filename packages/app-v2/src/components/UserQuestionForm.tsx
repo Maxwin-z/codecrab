@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { MessageCircleQuestion, Send, X } from 'lucide-react'
+import { MessageCircleQuestion, Send, X, Circle, CircleDot, Square, CheckSquare } from 'lucide-react'
 import type { PendingQuestion } from '@/store/types'
 
 export function UserQuestionForm({
@@ -13,11 +13,57 @@ export function UserQuestionForm({
   onSubmit: (answers: Record<string, string | string[]>) => void
   onDismiss: () => void
 }) {
-  const [answers, setAnswers] = useState<Record<string, string | string[]>>({})
+  // selections[key] = array of selected option labels
+  const [selections, setSelections] = useState<Record<string, string[]>>({})
+  // customTexts[key] = free-text input value
+  const [customTexts, setCustomTexts] = useState<Record<string, string>>({})
+
+  const isSelected = (key: string, label: string) =>
+    (selections[key] ?? []).includes(label)
+
+  const toggleOption = (key: string, label: string, isMulti: boolean) => {
+    setSelections(prev => {
+      const current = prev[key] ?? []
+      if (isMulti) {
+        return { ...prev, [key]: current.includes(label) ? current.filter(l => l !== label) : [...current, label] }
+      }
+      // single-select: pick this option, clear custom text
+      setCustomTexts(p => ({ ...p, [key]: '' }))
+      return { ...prev, [key]: [label] }
+    })
+  }
+
+  const selectOther = (key: string) => {
+    // deselect all options so "Other" is active
+    setSelections(prev => ({ ...prev, [key]: [] }))
+  }
+
+  const isAnswered = (index: number) => {
+    const key = String(index + 1)
+    return (selections[key] ?? []).length > 0 || (customTexts[key] ?? '').trim().length > 0
+  }
+
+  const allAnswered = pending.questions.every((_, i) => isAnswered(i))
+
+  const buildAnswers = (): Record<string, string | string[]> => {
+    const result: Record<string, string | string[]> = {}
+    pending.questions.forEach((q, i) => {
+      const key = String(i + 1)
+      const custom = (customTexts[key] ?? '').trim()
+      if (q.multiSelect) {
+        const arr = [...(selections[key] ?? [])]
+        if (custom) arr.push(custom)
+        result[key] = arr
+      } else {
+        result[key] = (selections[key] ?? [])[0] ?? custom
+      }
+    })
+    return result
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit(answers)
+    onSubmit(buildAnswers())
   }
 
   return (
@@ -28,46 +74,89 @@ export function UserQuestionForm({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        {pending.questions.map((q, i) => (
-          <div key={i} className="space-y-1.5">
-            {q.header && (
-              <p className="text-xs font-medium text-muted-foreground">{q.header}</p>
-            )}
-            <p className="text-sm">{q.question}</p>
+        {pending.questions.map((q, i) => {
+          const key = String(i + 1)
+          const isMulti = q.multiSelect ?? false
+          const hasOptions = q.options && q.options.length > 0
+          const otherActive = hasOptions && !isMulti && (selections[key] ?? []).length === 0
 
-            {q.options && q.options.length > 0 ? (
-              <div className="space-y-1">
-                {q.options.map((opt, j) => (
-                  <button
-                    key={j}
-                    type="button"
-                    className={`w-full text-left px-3 py-1.5 rounded border text-sm transition-colors cursor-pointer ${
-                      answers[q.question] === opt.label
-                        ? 'border-blue-500 bg-blue-500/10'
-                        : 'border-border hover:bg-accent/50'
-                    }`}
-                    onClick={() => setAnswers(prev => ({ ...prev, [q.question]: opt.label }))}
-                  >
-                    <span>{opt.label}</span>
-                    {opt.description && (
-                      <span className="text-xs text-muted-foreground ml-2">{opt.description}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <Input
-                placeholder="Type your answer..."
-                value={(answers[q.question] as string) || ''}
-                onChange={e => setAnswers(prev => ({ ...prev, [q.question]: e.target.value }))}
-                className="h-8 text-sm"
-              />
-            )}
-          </div>
-        ))}
+          return (
+            <div key={i} className="space-y-1.5">
+              {q.header && (
+                <p className="text-xs font-medium text-muted-foreground">{q.header}</p>
+              )}
+              <p className="text-sm">{q.question}</p>
 
-        <div className="flex gap-2">
-          <Button type="submit" size="sm" className="gap-1">
+              {hasOptions ? (
+                <div className="space-y-1">
+                  {q.options.map((opt, j) => {
+                    const selected = isSelected(key, opt.label)
+                    const Icon = isMulti
+                      ? (selected ? CheckSquare : Square)
+                      : (selected ? CircleDot : Circle)
+
+                    return (
+                      <button
+                        key={j}
+                        type="button"
+                        className={`w-full flex items-center gap-2 text-left px-3 py-1.5 rounded border text-sm transition-colors cursor-pointer ${
+                          selected
+                            ? 'border-blue-500 bg-blue-500/10'
+                            : 'border-border hover:bg-accent/50'
+                        }`}
+                        onClick={() => toggleOption(key, opt.label, isMulti)}
+                      >
+                        <Icon className={`h-4 w-4 shrink-0 ${selected ? 'text-blue-500' : 'text-muted-foreground'}`} />
+                        <span>{opt.label}</span>
+                        {opt.description && (
+                          <span className="text-xs text-muted-foreground ml-1">{opt.description}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+
+                  {/* "Other" option for single-select */}
+                  {!isMulti && (
+                    <button
+                      type="button"
+                      className={`w-full flex items-center gap-2 text-left px-3 py-1.5 rounded border text-sm transition-colors cursor-pointer ${
+                        otherActive
+                          ? 'border-blue-500 bg-blue-500/10'
+                          : 'border-border hover:bg-accent/50'
+                      }`}
+                      onClick={() => selectOther(key)}
+                    >
+                      {otherActive
+                        ? <CircleDot className="h-4 w-4 shrink-0 text-blue-500" />
+                        : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      }
+                      <span>Other (type below)</span>
+                    </button>
+                  )}
+
+                  {/* Custom text input */}
+                  <Input
+                    placeholder={isMulti ? 'Or enter custom option...' : 'Type an answer...'}
+                    value={customTexts[key] ?? ''}
+                    onChange={e => setCustomTexts(prev => ({ ...prev, [key]: e.target.value }))}
+                    disabled={!isMulti && !otherActive}
+                    className="h-8 text-sm mt-1"
+                  />
+                </div>
+              ) : (
+                <Input
+                  placeholder="Type your answer..."
+                  value={customTexts[key] ?? ''}
+                  onChange={e => setCustomTexts(prev => ({ ...prev, [key]: e.target.value }))}
+                  className="h-8 text-sm"
+                />
+              )}
+            </div>
+          )
+        })}
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm" className="gap-1" disabled={!allAnswered}>
             <Send className="h-3.5 w-3.5" />
             Submit
           </Button>
@@ -75,6 +164,11 @@ export function UserQuestionForm({
             <X className="h-3.5 w-3.5" />
             Dismiss
           </Button>
+          {!allAnswered && (
+            <span className="text-xs text-muted-foreground">
+              {pending.questions.filter((_, i) => !isAnswered(i)).length} left
+            </span>
+          )}
         </div>
       </form>
     </div>
