@@ -163,10 +163,10 @@ struct ProjectListView: View {
                 Section {
                     ForEach(wsService.sortedThreads) { thread in
                         ThreadCard(thread: thread, isSelected: {
-                            if case .threads = selection { return false }
+                            if case .thread(let id) = selection { return id == thread.id }
                             return false
                         }())
-                        .tag(DetailDestination.threads)
+                        .tag(DetailDestination.thread(thread.id))
                         .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
                         .listRowSeparator(.automatic)
                         .listRowBackground(Color.clear)

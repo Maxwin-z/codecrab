@@ -6,7 +6,7 @@ enum DetailDestination: Hashable {
     case agent(Agent)
     case soul
     case cron
-    case threads
+    case thread(String)  // thread ID
 
     static func == (lhs: DetailDestination, rhs: DetailDestination) -> Bool {
         switch (lhs, rhs) {
@@ -14,7 +14,7 @@ enum DetailDestination: Hashable {
         case (.agent(let a), .agent(let b)): return a.id == b.id
         case (.soul, .soul): return true
         case (.cron, .cron): return true
-        case (.threads, .threads): return true
+        case (.thread(let a), .thread(let b)): return a == b
         default: return false
         }
     }
@@ -31,8 +31,9 @@ enum DetailDestination: Hashable {
             hasher.combine(1)
         case .cron:
             hasher.combine(2)
-        case .threads:
+        case .thread(let id):
             hasher.combine(4)
+            hasher.combine(id)
         }
     }
 }
@@ -88,6 +89,7 @@ struct HomeView: View {
                             )
                         }
                 }
+                .id(detailDestination)
             }
             .sheet(isPresented: $showCreate) {
                 NavigationStack {
@@ -165,8 +167,8 @@ struct HomeView: View {
             SoulPageView()
         case .cron:
             CronPageView()
-        case .threads:
-            ThreadListView()
+        case .thread(let threadId):
+            ThreadDetailView(threadId: threadId)
         case nil:
             VStack(spacing: 20) {
                 Image(systemName: "sparkles")
