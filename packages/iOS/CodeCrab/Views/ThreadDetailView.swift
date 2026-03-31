@@ -1,5 +1,6 @@
 import SwiftUI
 import QuickLook
+import Textual
 
 struct ThreadDetailView: View {
     let threadId: String
@@ -8,6 +9,7 @@ struct ThreadDetailView: View {
     @State private var artifacts: [ThreadArtifactInfo] = []
     @State private var agents: [Agent] = []
     @State private var isLoading = true
+    @State private var renderMarkdown = true
 
     private var thread: ThreadInfo? {
         wsService.threads[threadId]
@@ -60,15 +62,24 @@ struct ThreadDetailView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                if !artifacts.isEmpty {
-                    NavigationLink {
-                        ThreadArtifactsListView(artifacts: artifacts, threadId: threadId)
+                HStack(spacing: 12) {
+                    Button {
+                        renderMarkdown.toggle()
                     } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "paperclip")
-                                .font(.subheadline)
-                            Text("\(artifacts.count)")
-                                .font(.caption.weight(.medium))
+                        Image(systemName: renderMarkdown ? "doc.richtext" : "doc.plaintext")
+                            .font(.subheadline)
+                    }
+
+                    if !artifacts.isEmpty {
+                        NavigationLink {
+                            ThreadArtifactsListView(artifacts: artifacts, threadId: threadId)
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "paperclip")
+                                    .font(.subheadline)
+                                Text("\(artifacts.count)")
+                                    .font(.caption.weight(.medium))
+                            }
                         }
                     }
                 }
@@ -103,7 +114,8 @@ struct ThreadDetailView: View {
                             ChatBubbleRow(
                                 message: msg,
                                 emoji: agentEmojiMap[msg.from.lowercased()] ?? "🤖",
-                                showAvatar: showAvatar
+                                showAvatar: showAvatar,
+                                renderMarkdown: renderMarkdown
                             )
                             .id(msg.id)
                         }
@@ -337,6 +349,7 @@ private struct ChatBubbleRow: View {
     let message: ThreadMessageInfo
     let emoji: String
     let showAvatar: Bool
+    var renderMarkdown: Bool = true
 
     /// Stable color derived from agent name
     private var avatarBackground: Color {
@@ -408,10 +421,17 @@ private struct ChatBubbleRow: View {
 
                 // Chat bubble
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(message.content)
-                        .font(.subheadline)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if renderMarkdown {
+                        StructuredText(markdown: message.content)
+                            .textual.structuredTextStyle(.gitHub)
+                            .textual.textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(message.content)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     // Inline artifacts
                     if !message.artifacts.isEmpty {
