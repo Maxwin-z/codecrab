@@ -65,10 +65,10 @@ async function main(): Promise<void> {
     const qrContent = `codecrab://login?server=${encodeURIComponent(serverURL)}&token=${token}`
 
     console.log(`[CodeCrab v2] Server listening on ${serverURL}`)
-    console.log(`[CodeCrab v2] Access token: ${token}`)
     console.log('')
     console.log('[CodeCrab v2] Scan QR code to connect:')
     qrcode.generate(qrContent, { small: true })
+    console.log(`[CodeCrab v2] Access token: ${token}`)
     console.log('')
   })
 
