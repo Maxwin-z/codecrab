@@ -16,6 +16,9 @@ if [ -f "$PID_DIR/server-v2.pid" ]; then
   fi
 fi
 
+echo "[v2] Building shared..."
+cd "$ROOT_DIR/packages/shared" && pnpm build
+
 echo "[v2] Building server-v2..."
 cd "$ROOT_DIR/packages/server-v2" && pnpm build
 
