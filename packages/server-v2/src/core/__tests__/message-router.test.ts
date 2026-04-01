@@ -304,6 +304,127 @@ describe('MessageRouter', () => {
     })
   })
 
+  describe('wait_for_reply', () => {
+    it('should return immediately when wait_for_reply is omitted', async () => {
+      const project = makeProject({ id: '__agent-agent-a' })
+      const meta = sessions.create(project.id, project)
+      sessions.register('session-a', meta)
+
+      // submitTurn never sets target to idle — confirms we don't wait
+      core.submitTurn = vi.fn().mockReturnValue('query-1')
+
+      const start = Date.now()
+      const result = await router.handleSendMessage('agent-a', 'session-a', {
+        to: '@reviewer',
+        content: 'Hello',
+      })
+      const elapsed = Date.now() - start
+
+      expect(result.status).toBe('delivered')
+      expect(elapsed).toBeLessThan(200)
+    })
+
+    it('should block until target session becomes idle when wait_for_reply=true', async () => {
+      const project = makeProject({ id: '__agent-agent-a' })
+      const meta = sessions.create(project.id, project)
+      sessions.register('session-a', meta)
+
+      // Simulate: target agent runs for 60ms then finishes
+      core.submitTurn = vi.fn().mockImplementation((params: any) => {
+        setTimeout(() => {
+          sessions.setStatus(params.sessionId, 'idle')
+        }, 60)
+        return 'query-1'
+      })
+
+      const start = Date.now()
+      const result = await router.handleSendMessage('agent-a', 'session-a', {
+        to: '@reviewer',
+        content: 'Please do some work',
+        wait_for_reply: true,
+      })
+      const elapsed = Date.now() - start
+
+      expect(result.status).toBe('delivered')
+      // Should have actually waited (not returned instantly)
+      expect(elapsed).toBeGreaterThanOrEqual(50)
+    })
+
+    it('should resolve via session ID remap (pending-xxx → real SDK ID)', async () => {
+      // This mirrors the real flow: TurnManager.execute() triggers session_init
+      // which calls sessions.register(realSdkId, meta), then sets idle on realSdkId.
+      const project = makeProject({ id: '__agent-agent-a' })
+      const meta = sessions.create(project.id, project)
+      sessions.register('session-a', meta)
+
+      core.submitTurn = vi.fn().mockImplementation((params: any) => {
+        const pendingId = params.sessionId
+        setTimeout(() => {
+          // Simulate session_init remap
+          const targetMeta = sessions.getMeta(pendingId)
+          if (targetMeta) {
+            const realSdkId = `real-sdk-${Date.now()}`
+            sessions.register(realSdkId, targetMeta)
+            sessions.setStatus(realSdkId, 'idle')
+          }
+        }, 40)
+        return 'query-1'
+      })
+
+      const result = await router.handleSendMessage('agent-a', 'session-a', {
+        to: '@reviewer',
+        content: 'Task with ID remap',
+        wait_for_reply: true,
+      })
+
+      expect(result.status).toBe('delivered')
+    })
+
+    it('coordinator pattern: sequential tasks via wait_for_reply', async () => {
+      // Simulates a coordinator waiting for two workers one after another
+      const project = makeProject({ id: '__agent-agent-a' })
+      const meta = sessions.create(project.id, project)
+      sessions.register('session-a', meta)
+
+      const order: string[] = []
+
+      core.submitTurn = vi.fn().mockImplementation((params: any) => {
+        const sessionId = params.sessionId
+        const prompt = params.prompt as string
+        const delay = prompt.includes('first') ? 30 : 60
+        setTimeout(() => {
+          order.push(prompt.includes('first') ? 'first-done' : 'second-done')
+          sessions.setStatus(sessionId, 'idle')
+        }, delay)
+        return 'query-1'
+      })
+
+      // Send first task and wait
+      await router.handleSendMessage('agent-a', 'session-a', {
+        to: '@reviewer',
+        content: 'first task',
+        wait_for_reply: true,
+      })
+      order.push('after-first-send')
+
+      // Because wait_for_reply is true, 'first-done' must appear before 'after-first-send' is pushed
+      // (we only push after-first-send after the await resolves)
+      expect(order[0]).toBe('first-done')
+      expect(order[1]).toBe('after-first-send')
+
+      // Send second task and wait
+      await router.handleSendMessage('agent-a', 'session-a', {
+        to: '@reviewer',
+        content: 'second task',
+        wait_for_reply: true,
+      })
+      order.push('after-second-send')
+
+      expect(order[2]).toBe('second-done')
+      expect(order[3]).toBe('after-second-send')
+    })
+  })
+
   describe('handleCompleteThread', () => {
     it('should complete the thread', async () => {
       const project = makeProject({ id: '__agent-agent-a' })

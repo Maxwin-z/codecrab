@@ -15,6 +15,8 @@ export interface SendMessageParams {
   artifacts?: string[]    // artifact IDs
   new_thread?: boolean
   thread_title?: string
+  /** Block until the target agent finishes processing and returns to idle (default: false) */
+  wait_for_reply?: boolean
 }
 
 export interface SendMessageResult {
@@ -157,7 +159,7 @@ export class MessageRouter {
 
     // 7. Deliver to each target
     for (const target of targets) {
-      await this.deliverMessage(message, thread, target)
+      await this.deliverMessage(message, thread, target, params.wait_for_reply)
     }
 
     // Update sender's activity
@@ -174,6 +176,7 @@ export class MessageRouter {
     message: ThreadMessage,
     thread: Thread,
     target: AgentRef,
+    waitForReply = false,
   ): Promise<void> {
     const tag = `${C.magenta}[thread]${C.reset}`
 
@@ -231,6 +234,20 @@ export class MessageRouter {
         systemPromptAppend,
       },
     })
+
+    // If requested, block until the target agent finishes its turn.
+    // This lets coordinator agents await worker results without polling,
+    // mirroring the idle-callback pattern from Claude Code's swarm system.
+    //
+    // We pre-mark the session as 'processing' so that waitForIdle correctly
+    // registers a callback and doesn't short-circuit — the newly created
+    // session starts as 'idle' by default, but the turn hasn't executed yet.
+    if (waitForReply) {
+      this.sessions.setStatus(targetSessionId, 'processing')
+      tsLog(`${tag} ${C.dim}waiting for @${target.agentName} to become idle…${C.reset}`)
+      await this.sessions.waitForIdle(targetSessionId)
+      tsLog(`${tag} ${C.dim}@${target.agentName} is idle${C.reset}`)
+    }
 
     // Update message status
     message.status = 'delivered'

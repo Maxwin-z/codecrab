@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -146,6 +146,148 @@ describe('SessionManager', () => {
 
       manager.setStatus('s1', 'idle')
       expect(meta.status).toBe('idle')
+    })
+  })
+
+  describe('waitForIdle', () => {
+    it('should resolve immediately when session does not exist', async () => {
+      await expect(manager.waitForIdle('non-existent')).resolves.toBeUndefined()
+    })
+
+    it('should resolve immediately when session is already idle', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      // Default status is 'idle'
+      await expect(manager.waitForIdle('s1')).resolves.toBeUndefined()
+    })
+
+    it('should resolve immediately when session is in error state', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      manager.setStatus('s1', 'error')
+      await expect(manager.waitForIdle('s1')).resolves.toBeUndefined()
+    })
+
+    it('should block while processing and resolve when idle', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      manager.setStatus('s1', 'processing')
+
+      let resolved = false
+      const promise = manager.waitForIdle('s1').then(() => { resolved = true })
+
+      // Flush microtasks — should still be pending
+      await Promise.resolve()
+      expect(resolved).toBe(false)
+
+      manager.setStatus('s1', 'idle')
+      await promise
+      expect(resolved).toBe(true)
+    })
+
+    it('should fire all registered callbacks when idle', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      manager.setStatus('s1', 'processing')
+
+      const fired: number[] = []
+      const p1 = manager.waitForIdle('s1').then(() => fired.push(1))
+      const p2 = manager.waitForIdle('s1').then(() => fired.push(2))
+      const p3 = manager.waitForIdle('s1').then(() => fired.push(3))
+
+      manager.setStatus('s1', 'idle')
+      await Promise.all([p1, p2, p3])
+
+      expect(fired).toHaveLength(3)
+      expect(fired).toContain(1)
+      expect(fired).toContain(2)
+      expect(fired).toContain(3)
+    })
+
+    it('should clear callbacks after firing so they do not re-fire', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      manager.setStatus('s1', 'processing')
+
+      let callCount = 0
+      const p1 = manager.waitForIdle('s1').then(() => callCount++)
+
+      manager.setStatus('s1', 'idle')
+      await p1
+      expect(callCount).toBe(1)
+
+      // Cycle through processing → idle again
+      manager.setStatus('s1', 'processing')
+      manager.setStatus('s1', 'idle')
+      await Promise.resolve()
+      // Original callback must not fire again
+      expect(callCount).toBe(1)
+    })
+
+    it('should support new waitForIdle registrations after callbacks are cleared', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      manager.setStatus('s1', 'processing')
+
+      // First wait
+      manager.setStatus('s1', 'idle')
+      await manager.waitForIdle('s1')
+
+      // Second wait on the same session
+      manager.setStatus('s1', 'processing')
+      let resolved = false
+      const p2 = manager.waitForIdle('s1').then(() => { resolved = true })
+
+      await Promise.resolve()
+      expect(resolved).toBe(false)
+
+      manager.setStatus('s1', 'idle')
+      await p2
+      expect(resolved).toBe(true)
+    })
+
+    it('should resolve via remapped session ID (pending-xxx → real SDK ID)', async () => {
+      // This simulates the session_init remap in TurnManager:
+      // sessions.register(realSdkId, meta) is called mid-turn, then
+      // setStatus(realSdkId, 'idle') is called in finally — not the pending ID.
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('pending-thread-xxx', meta)
+      manager.setStatus('pending-thread-xxx', 'processing')
+
+      let resolved = false
+      const promise = manager.waitForIdle('pending-thread-xxx').then(() => { resolved = true })
+
+      await Promise.resolve()
+      expect(resolved).toBe(false)
+
+      // Simulate session_init: remap to real SDK ID (same meta object)
+      manager.register('real-sdk-abc', meta)
+
+      // TurnManager sets idle using the REAL SDK ID in its finally block
+      manager.setStatus('real-sdk-abc', 'idle')
+      await promise
+      expect(resolved).toBe(true)
+    })
+
+    it('should not serialize callbacks into persisted JSON', async () => {
+      const meta = manager.create('proj-1', makeProject())
+      manager.register('s1', meta)
+      manager.setStatus('s1', 'processing')
+
+      // Register a callback (don't await — we just need it registered)
+      const promise = manager.waitForIdle('s1')
+
+      await manager.persist('s1')
+      const fileContent = await readFile(join(tempDir, 's1.json'), 'utf-8')
+      const parsed = JSON.parse(fileContent)
+
+      expect(parsed.onIdleCallbacks).toBeUndefined()
+      // Parsed JSON should only have the expected SessionMeta fields
+      expect(Object.keys(parsed)).not.toContain('onIdleCallbacks')
+
+      // Clean up pending promise
+      manager.setStatus('s1', 'idle')
+      await promise
     })
   })
 

@@ -12,6 +12,9 @@ export class SessionManager {
   // In-memory cache: sdkSessionId -> SessionMeta
   private metas = new Map<string, SessionMeta>()
 
+  // Idle callbacks keyed by meta object — survives session ID remapping (pending → real SDK ID)
+  private idleCallbacks = new Map<SessionMeta, Array<() => void>>()
+
   /** Allow overriding the meta directory for testing */
   private metaDir: string
 
@@ -248,9 +251,40 @@ export class SessionManager {
     Object.assign(meta, partial)
   }
 
-  /** Set session status */
+  /** Set session status — fires idle callbacks when transitioning to 'idle' */
   setStatus(sessionId: string, status: 'idle' | 'processing' | 'error'): void {
     this.update(sessionId, { status })
+    if (status === 'idle') {
+      const meta = this.metas.get(sessionId)
+      if (meta) {
+        const callbacks = this.idleCallbacks.get(meta)
+        if (callbacks?.length) {
+          this.idleCallbacks.delete(meta)
+          callbacks.forEach((cb) => cb())
+        }
+      }
+    }
+  }
+
+  /**
+   * Wait until the session transitions to idle. Returns immediately if already idle.
+   *
+   * Keyed by the meta object so it survives the pending-id → real-SDK-id remap
+   * that happens during session_init (both IDs point to the same SessionMeta).
+   */
+  waitForIdle(sessionId: string): Promise<void> {
+    const meta = this.metas.get(sessionId)
+    if (!meta || meta.status === 'idle' || meta.status === 'error') {
+      return Promise.resolve()
+    }
+    return new Promise((resolve) => {
+      const existing = this.idleCallbacks.get(meta)
+      if (existing) {
+        existing.push(resolve)
+      } else {
+        this.idleCallbacks.set(meta, [resolve])
+      }
+    })
   }
 
   /** Set pending question */

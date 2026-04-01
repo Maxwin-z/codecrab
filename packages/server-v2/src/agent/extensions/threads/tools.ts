@@ -49,6 +49,7 @@ export const tools = [
       artifacts: z.array(z.string()).optional().describe('Artifact IDs to attach (from thread_save_artifact)'),
       new_thread: z.boolean().optional().describe('Create a new sub-thread (default: false)'),
       thread_title: z.string().optional().describe('Title for new thread (required when new_thread=true)'),
+      wait_for_reply: z.boolean().optional().describe('Block until the target agent finishes processing and goes idle. Use this when you need the result before continuing (default: false).'),
     },
     async (input) => {
       console.log(`[threads] thread_send_message called: to=${input.to} router=${!!router} agentId=${queryContext.agentId} sessionId=${queryContext.sessionId?.slice(0, 20)}`)
@@ -63,6 +64,7 @@ export const tools = [
           artifacts: input.artifacts,
           new_thread: input.new_thread,
           thread_title: input.thread_title,
+          wait_for_reply: input.wait_for_reply,
         })
         console.log(`[threads] thread_send_message success: messageId=${result.messageId} threadId=${result.threadId} status=${result.status}`)
         return {
