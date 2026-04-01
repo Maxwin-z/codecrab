@@ -6,7 +6,7 @@ import { useStore } from '@/store/store'
 import { selectConnected, selectViewingSession, selectViewingSessionId, selectProjectState, selectPromptPending, selectIsAborting, selectQueryQueue } from '@/store/selectors'
 import { authFetch } from '@/lib/auth'
 import { cn, formatDuration, formatCost } from '@/lib/utils'
-import { MessageList } from './MessageList'
+import { MessageList, groupAssistantMessages } from './MessageList'
 import { InputBar, type MentionableAgent } from './InputBar'
 import { SessionSidebar } from './SessionSidebar'
 import { ThreadPanel } from './ThreadPanel'
@@ -34,6 +34,7 @@ import {
   Save,
   Pencil,
   Check,
+  FolderOpen,
 } from 'lucide-react'
 
 interface ProjectInfo {
@@ -235,15 +236,16 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
         if (currentState.projects[projectId]?.viewingSessionId !== viewingSessionId) return
         currentState.updateSession(projectId, viewingSessionId, s => {
           if (s.messages.length === 0) {
-            s.messages = data.messages.map((m: any) => ({
+            const raw = data.messages.map((m: any) => ({
               id: m.id,
-              role: m.role,
+              role: m.role as 'user' | 'assistant' | 'system',
               content: m.content,
               thinking: m.thinking,
               toolCalls: m.toolCalls,
               images: m.images,
               timestamp: m.timestamp,
             }))
+            s.messages = groupAssistantMessages(raw)
           }
         })
       })
@@ -341,7 +343,7 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
         <ThreadPanel onClose={() => setShowThreads(false)} onUnauthorized={onUnauthorized} />
       )}
 
-      {/* Main chat area */}
+{/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <header className="h-12 border-b border-border flex items-center px-3 gap-2 shrink-0">
@@ -366,7 +368,20 @@ export function ChatPage({ onUnauthorized }: { onUnauthorized?: () => void }) {
             <GitBranch className={cn('h-4 w-4', showThreads && 'text-foreground')} />
           </Button>
 
-          <span className="text-base mr-1">{project.icon || '📁'}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => {
+              const base = import.meta.env.BASE_URL.replace(/\/$/, '') || ''
+              window.open(`${base}/files?path=${encodeURIComponent(project.path)}`, '_blank')
+            }}
+            title="Browse project files"
+          >
+            <FolderOpen className="h-4 w-4" />
+          </Button>
+
+<span className="text-base mr-1">{project.icon || '📁'}</span>
           <span className="font-medium text-sm truncate">{project.name}</span>
 
           {/* Editing indicator */}

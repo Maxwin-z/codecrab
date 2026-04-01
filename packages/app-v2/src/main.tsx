@@ -8,6 +8,8 @@ import { ChatPage } from '@/components/ChatPage'
 import { ThreadViewPage } from '@/components/ThreadViewPage'
 import { SettingsPage } from '@/components/SettingsPage'
 import { CreateProjectPage } from '@/components/CreateProjectPage'
+import { FilePreviewPage } from '@/components/FilePreviewPage'
+import { FileBrowserPage } from '@/components/FileBrowserPage'
 import { AppSidebar } from '@/components/AppSidebar'
 import { WebSocketProvider } from '@/hooks/WebSocketContext'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -97,17 +99,23 @@ function AppRoutes() {
   }
 
   return (
-    <AppLayout onUnauthorized={handleUnauthorized}>
-      <Routes>
-        <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route path="/chat" element={<ChatPage onUnauthorized={handleUnauthorized} />} />
-        <Route path="/thread" element={<ThreadViewPage onUnauthorized={handleUnauthorized} />} />
-        <Route path="/settings" element={<SettingsPage onUnauthorized={handleUnauthorized} />} />
-        <Route path="/projects/new" element={<CreateProjectPage onUnauthorized={handleUnauthorized} />} />
-        <Route path="/" element={<HomePage onUnauthorized={handleUnauthorized} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AppLayout>
+    <Routes>
+      <Route path="/file-preview" element={<FilePreviewPage />} />
+      <Route path="/files" element={<FileBrowserPage />} />
+      <Route path="*" element={
+        <AppLayout onUnauthorized={handleUnauthorized}>
+          <Routes>
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/chat" element={<ChatPage onUnauthorized={handleUnauthorized} />} />
+            <Route path="/thread" element={<ThreadViewPage onUnauthorized={handleUnauthorized} />} />
+            <Route path="/settings" element={<SettingsPage onUnauthorized={handleUnauthorized} />} />
+            <Route path="/projects/new" element={<CreateProjectPage onUnauthorized={handleUnauthorized} />} />
+            <Route path="/" element={<HomePage onUnauthorized={handleUnauthorized} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AppLayout>
+      } />
+    </Routes>
   )
 }
 
