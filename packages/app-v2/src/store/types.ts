@@ -86,12 +86,19 @@ export interface BackgroundTask {
   usage?: { totalTokens?: number; toolUses?: number; durationMs?: number }
 }
 
+export type ContentBlock =
+  | { type: 'thinking'; thinking: string }
+  | { type: 'text'; content: string }
+  | { type: 'tool'; name: string; id: string; input: unknown; result?: string; isError?: boolean }
+
 export interface ChatMsg {
   id: string
+  queryId?: string
   role: 'user' | 'assistant' | 'system'
   content: string
   thinking?: string
   toolCalls?: { name: string; id: string; input: unknown; result?: string; isError?: boolean }[]
+  blocks?: ContentBlock[]
   images?: ImageAttachment[]
   timestamp: number
 }
@@ -115,6 +122,7 @@ export interface SessionData {
   usage: SessionUsage | null
   activityHeartbeat: ActivityHeartbeat | null
   backgroundTasks: Record<string, BackgroundTask>
+  currentQueryId: string | null
   sdkEvents: DebugEvent[]
 }
 

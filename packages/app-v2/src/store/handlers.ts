@@ -1,11 +1,32 @@
 import type { ServerMessage } from '@codecrab/shared'
-import type { Store } from './types'
+import type { Store, SessionData, ChatMsg } from './types'
 import { stripMetaTags } from '@/lib/utils'
 
 type HandlerFn = (msg: any, store: Store) => void
 
 function genId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** Find (or create) the single assistant message for the current query. */
+function getOrCreateQueryMsg(s: SessionData): ChatMsg {
+  if (s.currentQueryId) {
+    for (let i = s.messages.length - 1; i >= 0; i--) {
+      const m = s.messages[i]
+      if (m.role === 'assistant' && m.queryId === s.currentQueryId) return m
+    }
+  }
+  // Fallback: create a new one (shouldn't normally happen if query_start fires first)
+  const msg: ChatMsg = {
+    id: genId(),
+    queryId: s.currentQueryId ?? undefined,
+    role: 'assistant',
+    content: '',
+    blocks: [],
+    timestamp: Date.now(),
+  }
+  s.messages.push(msg)
+  return msg
 }
 
 const handlers: Record<string, HandlerFn> = {
@@ -20,6 +41,17 @@ const handlers: Record<string, HandlerFn> = {
         s.streamingThinking = ''
         s.pendingPermission = null
         s.pendingQuestion = null
+        const qid = msg.queryId || `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+        s.currentQueryId = qid
+        // Pre-create the assistant message for this query
+        s.messages.push({
+          id: genId(),
+          queryId: qid,
+          role: 'assistant',
+          content: '',
+          blocks: [],
+          timestamp: Date.now(),
+        })
       })
     }
     store.updateProject(projectId, p => {
@@ -45,20 +77,18 @@ const handlers: Record<string, HandlerFn> = {
     if (!projectId || !sessionId) return
     const cleanText = stripMetaTags(msg.text)
     if (!cleanText) return
+    if (msg.parentToolUseId) return // subagent text — skip
     store.updateSession(projectId, sessionId, s => {
-      const lastMsg = s.messages[s.messages.length - 1]
-      if (!lastMsg || lastMsg.role !== 'assistant' || lastMsg.content !== cleanText) {
-        if (lastMsg?.role === 'assistant' && !lastMsg.content && s.isStreaming) {
-          lastMsg.content = cleanText
-        } else if (!msg.parentToolUseId) {
-          s.messages.push({
-            id: genId(),
-            role: 'assistant',
-            content: cleanText,
-            timestamp: Date.now(),
-          })
-        }
+      const assistantMsg = getOrCreateQueryMsg(s)
+      if (!assistantMsg.blocks) assistantMsg.blocks = []
+      // Avoid duplicate if last block is identical text
+      const lastBlock = assistantMsg.blocks[assistantMsg.blocks.length - 1]
+      if (lastBlock?.type === 'text' && lastBlock.content === cleanText) {
+        s.streamingText = ''
+        return
       }
+      assistantMsg.blocks.push({ type: 'text', content: cleanText })
+      assistantMsg.content = cleanText // keep last text for backward compat
       s.streamingText = ''
     })
   },
@@ -68,18 +98,9 @@ const handlers: Record<string, HandlerFn> = {
     if (!projectId || !sessionId) return
     store.updateSession(projectId, sessionId, s => {
       s.streamingThinking = ''
-      const lastMsg = s.messages[s.messages.length - 1]
-      if (!lastMsg || lastMsg.role !== 'assistant') {
-        s.messages.push({
-          id: genId(),
-          role: 'assistant',
-          content: '',
-          thinking: msg.thinking,
-          timestamp: Date.now(),
-        })
-      } else {
-        lastMsg.thinking = msg.thinking
-      }
+      const assistantMsg = getOrCreateQueryMsg(s)
+      if (!assistantMsg.blocks) assistantMsg.blocks = []
+      assistantMsg.blocks.push({ type: 'thinking', thinking: msg.thinking })
     })
   },
 
@@ -87,19 +108,10 @@ const handlers: Record<string, HandlerFn> = {
     const { projectId, sessionId } = msg
     if (!projectId || !sessionId) return
     store.updateSession(projectId, sessionId, s => {
-      let lastMsg = s.messages[s.messages.length - 1]
-      if (!lastMsg || lastMsg.role !== 'assistant') {
-        lastMsg = {
-          id: genId(),
-          role: 'assistant',
-          content: '',
-          toolCalls: [],
-          timestamp: Date.now(),
-        }
-        s.messages.push(lastMsg)
-      }
-      if (!lastMsg.toolCalls) lastMsg.toolCalls = []
-      lastMsg.toolCalls.push({
+      const assistantMsg = getOrCreateQueryMsg(s)
+      if (!assistantMsg.blocks) assistantMsg.blocks = []
+      assistantMsg.blocks.push({
+        type: 'tool',
         name: msg.toolName,
         id: msg.toolId,
         input: msg.input,
@@ -111,14 +123,26 @@ const handlers: Record<string, HandlerFn> = {
     const { projectId, sessionId } = msg
     if (!projectId || !sessionId) return
     store.updateSession(projectId, sessionId, s => {
+      // Search backwards for the tool block
       for (let i = s.messages.length - 1; i >= 0; i--) {
         const m = s.messages[i]
+        if (m.blocks) {
+          const block = m.blocks.find(
+            b => b.type === 'tool' && b.id === msg.toolId,
+          )
+          if (block && block.type === 'tool') {
+            block.result = msg.content
+            block.isError = msg.isError
+            return
+          }
+        }
+        // Legacy fallback
         if (m.toolCalls) {
           const tc = m.toolCalls.find(t => t.id === msg.toolId)
           if (tc) {
             tc.result = msg.content
             tc.isError = msg.isError
-            break
+            return
           }
         }
       }
@@ -133,6 +157,7 @@ const handlers: Record<string, HandlerFn> = {
         s.isStreaming = false
         s.streamingText = ''
         s.streamingThinking = ''
+        s.currentQueryId = null
       })
     }
   },
@@ -143,6 +168,7 @@ const handlers: Record<string, HandlerFn> = {
     if (sessionId) {
       store.updateSession(projectId, sessionId, s => {
         s.activityHeartbeat = null
+        s.currentQueryId = null
         if (msg.hasBackgroundTasks && msg.backgroundTaskIds) {
           for (const taskId of msg.backgroundTaskIds) {
             if (!s.backgroundTasks[taskId]) {

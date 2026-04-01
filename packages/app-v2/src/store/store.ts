@@ -31,6 +31,7 @@ export function createEmptySessionData(projectId: string, sessionId: string): Se
     usage: null,
     activityHeartbeat: null,
     backgroundTasks: {},
+    currentQueryId: null,
     sdkEvents: [],
   }
 }

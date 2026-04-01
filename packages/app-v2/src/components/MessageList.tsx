@@ -11,9 +11,70 @@ import {
   AlertCircle,
   Bot,
 } from 'lucide-react'
-import type { ChatMsg } from '@/store/types'
+import type { ChatMsg, ContentBlock } from '@/store/types'
 
-function getToolSummary(tc: NonNullable<ChatMsg['toolCalls']>[0]): string {
+/**
+ * Group consecutive assistant messages into one message with ordered blocks.
+ * In a single query, the Claude SDK makes multiple API rounds (tool loop).
+ * Each round produces a separate assistant message in history.
+ * This function merges them so one query = one card.
+ */
+export function groupAssistantMessages(messages: ChatMsg[]): ChatMsg[] {
+  const result: ChatMsg[] = []
+  let group: ChatMsg | null = null
+
+  function flushGroup() {
+    if (group) {
+      result.push(group)
+      group = null
+    }
+  }
+
+  for (const msg of messages) {
+    if (msg.role === 'assistant') {
+      if (!group) {
+        group = {
+          ...msg,
+          blocks: [],
+        }
+      }
+      // Convert this message's fields into ordered blocks:
+      // SDK order within one API response: thinking → text → tool_uses
+      if (msg.thinking) {
+        group.blocks!.push({ type: 'thinking', thinking: msg.thinking })
+      }
+      if (msg.content) {
+        group.blocks!.push({ type: 'text', content: msg.content })
+      }
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          group.blocks!.push({ type: 'tool', name: tc.name, id: tc.id, input: tc.input, result: tc.result, isError: tc.isError })
+        }
+      }
+      // Also merge blocks if the source message already has them
+      if (msg.blocks) {
+        for (const b of msg.blocks) {
+          group.blocks!.push(b)
+        }
+      }
+    } else {
+      flushGroup()
+      result.push(msg)
+    }
+  }
+  flushGroup()
+  return result
+}
+
+interface ToolLike {
+  name: string
+  id: string
+  input: unknown
+  result?: string
+  isError?: boolean
+}
+
+function getToolSummary(tc: ToolLike): string {
   const input = tc.input as Record<string, unknown> | undefined
   if (!input || typeof input !== 'object') return ''
 
@@ -51,7 +112,7 @@ function getToolSummary(tc: NonNullable<ChatMsg['toolCalls']>[0]): string {
   }
 }
 
-function ToolCallBlock({ tc }: { tc: NonNullable<ChatMsg['toolCalls']>[0] }) {
+function ToolCallBlock({ tc }: { tc: ToolLike }) {
   const [expanded, setExpanded] = useState(false)
   const inputStr = typeof tc.input === 'string'
     ? tc.input
@@ -128,6 +189,29 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
   )
 }
 
+function TextBlock({ content }: { content: string }) {
+  return (
+    <div className="text-sm prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {stripMetaTags(content)}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+function renderBlock(block: ContentBlock, index: number) {
+  switch (block.type) {
+    case 'thinking':
+      return <ThinkingBlock key={`t-${index}`} thinking={block.thinking} />
+    case 'text':
+      return <TextBlock key={`x-${index}`} content={block.content} />
+    case 'tool':
+      return <ToolCallBlock key={block.id} tc={block} />
+    default:
+      return null
+  }
+}
+
 function MessageBubble({ msg }: { msg: ChatMsg }) {
   if (msg.role === 'system') {
     return (
@@ -140,6 +224,12 @@ function MessageBubble({ msg }: { msg: ChatMsg }) {
   }
 
   const isUser = msg.role === 'user'
+  const hasBlocks = msg.blocks && msg.blocks.length > 0
+
+  // Skip empty assistant messages (e.g. just created by query_start, no blocks yet)
+  if (msg.role === 'assistant' && !hasBlocks && !msg.content && !msg.thinking && (!msg.toolCalls || msg.toolCalls.length === 0)) {
+    return null
+  }
 
   return (
     <div className={cn('flex gap-2 my-3', isUser ? 'justify-end' : 'justify-start')}>
@@ -169,32 +259,37 @@ function MessageBubble({ msg }: { msg: ChatMsg }) {
           </div>
         )}
 
-        {/* Thinking */}
-        {msg.thinking && <ThinkingBlock thinking={msg.thinking} />}
+        {hasBlocks ? (
+          /* Render ordered blocks (new path) */
+          msg.blocks!.map((block, i) => renderBlock(block, i))
+        ) : (
+          /* Legacy fallback: thinking → content → toolCalls */
+          <>
+            {msg.thinking && <ThinkingBlock thinking={msg.thinking} />}
 
-        {/* Content */}
-        {msg.content && (
-          <div className={cn(
-            'text-sm',
-            !isUser && 'prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground',
-          )}>
-            {isUser ? (
-              <p className="whitespace-pre-wrap">{msg.content}</p>
-            ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {stripMetaTags(msg.content)}
-              </ReactMarkdown>
+            {msg.content && (
+              <div className={cn(
+                'text-sm',
+                !isUser && 'prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground',
+              )}>
+                {isUser ? (
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {stripMetaTags(msg.content)}
+                  </ReactMarkdown>
+                )}
+              </div>
             )}
-          </div>
-        )}
 
-        {/* Tool calls */}
-        {msg.toolCalls && msg.toolCalls.length > 0 && (
-          <div className="mt-1">
-            {msg.toolCalls.map(tc => (
-              <ToolCallBlock key={tc.id} tc={tc} />
-            ))}
-          </div>
+            {msg.toolCalls && msg.toolCalls.length > 0 && (
+              <div className="mt-1">
+                {msg.toolCalls.map(tc => (
+                  <ToolCallBlock key={tc.id} tc={tc} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -271,7 +366,7 @@ export function MessageList({
   // Auto-scroll on new messages or streaming
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, streamingText, streamingThinking, isStreaming])
+  }, [messages, streamingText, streamingThinking, isStreaming])
 
   if (messages.length === 0 && !isStreaming && !promptPending) {
     return (
