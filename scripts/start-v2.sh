@@ -50,6 +50,9 @@ for i in $(seq 1 20); do
   sleep 0.5
 done
 
+# Get LAN IP address
+LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
+
 echo ""
 echo "════════════════════════════════════════"
 # Print everything from server log up to and including the QR code block
@@ -57,7 +60,13 @@ awk '/Scan QR code/,0' "$SERVER_LOG" | head -30
 echo "════════════════════════════════════════"
 echo ""
 echo "  Web UI  → http://localhost:5740"
+if [ -n "$LAN_IP" ]; then
+  echo "           http://$LAN_IP:5740"
+fi
 echo "  API     → http://localhost:4200"
+if [ -n "$LAN_IP" ]; then
+  echo "           http://$LAN_IP:4200"
+fi
 echo ""
 echo "  Logs: .logs/server-v2.log  |  .logs/app-v2.log"
 echo "  Run 'pnpm stop:v2' to stop"
