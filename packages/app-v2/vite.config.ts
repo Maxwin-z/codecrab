@@ -22,4 +22,15 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    host: '0.0.0.0',
+    port: 5740,
+    proxy: {
+      '/api': 'http://localhost:4200',
+      '/ws': {
+        target: 'ws://localhost:4200',
+        ws: true,
+      },
+    },
+  },
 })

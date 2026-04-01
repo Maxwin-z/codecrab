@@ -6,10 +6,16 @@
   "packageManager": "pnpm@10.6.5",
   "scripts": {
     "dev": "concurrently -n server,app,web -c blue,green,magenta \"pnpm dev:server\" \"pnpm dev:app\" \"pnpm dev:web\"",
+    "dev:v2": "concurrently -n server-v2,app-v2 -c blue,green \"pnpm dev:server-v2\" \"pnpm dev:app-v2\"",
     "dev:server": "pnpm --filter @codecrab/server dev",
+    "dev:server-v2": "pnpm --filter @codecrab/server-v2 dev",
     "dev:app": "pnpm --filter @codecrab/app dev",
+    "dev:app-v2": "pnpm --filter @codecrab/app-v2 dev",
     "dev:web": "pnpm --filter @codecrab/web dev",
     "dev:relay": "pnpm --filter @codecrab/relay dev",
+    "start:v2": "bash scripts/start-v2.sh",
+    "stop:v2": "bash scripts/stop-v2.sh",
+    "status:v2": "bash scripts/status-v2.sh",
     "build": "pnpm -r build",
     "start": "pnpm --filter @codecrab/server start",
     "cli": "npx tsx packages/cli/src/index.ts"
