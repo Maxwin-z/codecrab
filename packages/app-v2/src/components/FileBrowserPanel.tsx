@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { authFetch } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -217,18 +217,62 @@ export function FileBrowserPanel({
 }
 
 function FileRow({ item, onClick }: { item: FileEntry; onClick: () => void }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    document.addEventListener('click', close)
+    document.addEventListener('contextmenu', close)
+    return () => {
+      document.removeEventListener('click', close)
+      document.removeEventListener('contextmenu', close)
+    }
+  }, [menu])
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  const copyPath = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard.writeText(item.path)
+    setMenu(null)
+  }
+
   return (
-    <button
-      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left"
-      onClick={onClick}
-    >
-      {getFileIcon(item.name, item.isDirectory)}
-      <span className="flex-1 text-xs truncate">{item.name}</span>
-      {item.isDirectory ? (
-        <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-      ) : item.size !== undefined ? (
-        <span className="text-[10px] text-muted-foreground/60 shrink-0">{formatSize(item.size)}</span>
-      ) : null}
-    </button>
+    <>
+      <button
+        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left"
+        onClick={onClick}
+        onContextMenu={handleContextMenu}
+      >
+        {getFileIcon(item.name, item.isDirectory)}
+        <span className="flex-1 text-xs truncate">{item.name}</span>
+        {item.isDirectory ? (
+          <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+        ) : item.size !== undefined ? (
+          <span className="text-[10px] text-muted-foreground/60 shrink-0">{formatSize(item.size)}</span>
+        ) : null}
+      </button>
+      {menu && (
+        <div
+          ref={menuRef}
+          className="fixed z-50 min-w-[140px] rounded-md border border-border bg-popover shadow-md py-1"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/60 transition-colors"
+            onClick={copyPath}
+          >
+            Copy path
+          </button>
+        </div>
+      )}
+    </>
   )
 }
