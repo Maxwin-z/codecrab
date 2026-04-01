@@ -36,7 +36,17 @@ cd codecrab
 pnpm install
 ```
 
-**Development servers:**
+**v2 (active):**
+
+```bash
+pnpm start:v2              # Build and start server-v2 + app-v2 as daemons
+pnpm stop:v2               # Stop daemon processes
+pnpm dev:v2                # Run server-v2 + app-v2 in watch mode
+```
+
+`pnpm start:v2` builds all packages, starts the server (port 4200) and web UI (port 5740) in the background, then prints a QR code and access token. Both services listen on `0.0.0.0` so they are accessible from any device on the LAN.
+
+**Development servers (legacy v1):**
 
 ```bash
 pnpm dev                   # Run server + app + web concurrently
@@ -60,7 +70,7 @@ pnpm cli token refresh     # Regenerate access token
 
 ```bash
 pnpm build                 # TypeScript build all packages
-pnpm start                 # Start server in production mode
+pnpm start                 # Start server (v1) in production mode
 ```
 
 **Testing:**
