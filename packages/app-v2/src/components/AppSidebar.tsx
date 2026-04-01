@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router'
 import { useWs } from '@/hooks/WebSocketContext'
 import { useStore } from '@/store/store'
@@ -44,6 +44,8 @@ export function AppSidebar({
   const [agentsCollapsed, setAgentsCollapsed] = useState(false)
   const [threadsCollapsed, setThreadsCollapsed] = useState(false)
   const [showCreateAgent, setShowCreateAgent] = useState(false)
+  const [showAddMenu, setShowAddMenu] = useState(false)
+  const addMenuRef = useRef<HTMLDivElement>(null)
   const { theme, toggleTheme } = useTheme()
   const currentProjectId = searchParams.get('project')
   const currentThreadId = searchParams.get('id')
@@ -140,13 +142,46 @@ export function AppSidebar({
   return (
     <aside className="w-56 border-r border-sidebar-border bg-sidebar flex flex-col h-full shrink-0">
       {/* Header */}
-      <div className="p-3 border-b border-sidebar-border">
+      <div className="px-3 py-2.5 border-b border-sidebar-border flex items-center justify-between">
         <h2
           className="font-semibold text-sm text-sidebar-foreground cursor-pointer"
           onClick={() => navigate('/')}
         >
           CodeCrab v2
         </h2>
+        <div
+          ref={addMenuRef}
+          className="relative"
+          onMouseEnter={() => setShowAddMenu(true)}
+          onMouseLeave={() => setShowAddMenu(false)}
+        >
+          <button
+            className="flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors cursor-pointer"
+            title="New..."
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          {showAddMenu && (
+            <div className="absolute right-0 top-full z-50 w-36 pt-1">
+            <div className="rounded-md border border-sidebar-border bg-sidebar shadow-md py-1">
+              <button
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors cursor-pointer"
+                onClick={() => { setShowAddMenu(false); setShowCreateAgent(true) }}
+              >
+                <span>🤖</span>
+                New Agent
+              </button>
+              <button
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors cursor-pointer"
+                onClick={() => { setShowAddMenu(false); navigate('/projects/new') }}
+              >
+                <span>📁</span>
+                New Project
+              </button>
+            </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Search */}
@@ -164,58 +199,9 @@ export function AppSidebar({
 
       {/* Scrollable list */}
       <div className="flex-1 overflow-y-auto px-1">
-        {/* Projects section */}
-        {(filteredProjects.length > 0 || !filter) && (
-          <div>
-            <button
-              className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors cursor-pointer"
-              onClick={() => setProjectsCollapsed(!projectsCollapsed)}
-            >
-              <ChevronRight className={cn('h-3 w-3 transition-transform', !projectsCollapsed && 'rotate-90')} />
-              Projects
-              <span className="text-muted-foreground/60 ml-auto">{filteredProjects.length}</span>
-            </button>
-
-            {!projectsCollapsed && (
-              <>
-                {filteredProjects.map(p => {
-                  const status = getProjectStatus(p.id)
-                  const isActive = currentProjectId === p.id
-                  return (
-                    <button
-                      key={p.id}
-                      className={cn(
-                        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors cursor-pointer',
-                        isActive
-                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                          : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
-                      )}
-                      onClick={() => handleSelectProject(p)}
-                    >
-                      <span className="text-base shrink-0">{p.icon || '📁'}</span>
-                      <span className="truncate flex-1">{p.name}</span>
-                      {status === 'processing' && (
-                        <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
-                      )}
-                    </button>
-                  )
-                })}
-
-                <button
-                  className="w-full flex items-center gap-2 px-2 py-1.5 mt-0.5 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
-                  onClick={() => navigate('/projects/new')}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  New project
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
         {/* Agents section */}
         {(filteredAgents.length > 0 || !filter) && (
-          <div className="mt-1">
+          <div>
             <button
               className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors cursor-pointer"
               onClick={() => setAgentsCollapsed(!agentsCollapsed)}
@@ -257,14 +243,47 @@ export function AppSidebar({
                     </div>
                   )
                 })}
+              </>
+            )}
+          </div>
+        )}
 
-                <button
-                  className="w-full flex items-center gap-2 px-2 py-1.5 mt-0.5 rounded-md text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
-                  onClick={() => setShowCreateAgent(true)}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  New agent
-                </button>
+        {/* Projects section */}
+        {(filteredProjects.length > 0 || !filter) && (
+          <div className="mt-1">
+            <button
+              className="w-full flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors cursor-pointer"
+              onClick={() => setProjectsCollapsed(!projectsCollapsed)}
+            >
+              <ChevronRight className={cn('h-3 w-3 transition-transform', !projectsCollapsed && 'rotate-90')} />
+              Projects
+              <span className="text-muted-foreground/60 ml-auto">{filteredProjects.length}</span>
+            </button>
+
+            {!projectsCollapsed && (
+              <>
+                {filteredProjects.map(p => {
+                  const status = getProjectStatus(p.id)
+                  const isActive = currentProjectId === p.id
+                  return (
+                    <button
+                      key={p.id}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors cursor-pointer',
+                        isActive
+                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                          : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
+                      )}
+                      onClick={() => handleSelectProject(p)}
+                    >
+                      <span className="text-base shrink-0">{p.icon || '📁'}</span>
+                      <span className="truncate flex-1">{p.name}</span>
+                      {status === 'processing' && (
+                        <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
+                      )}
+                    </button>
+                  )
+                })}
               </>
             )}
           </div>
